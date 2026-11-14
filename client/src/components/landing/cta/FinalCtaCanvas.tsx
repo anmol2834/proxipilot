@@ -3,6 +3,7 @@
 import React from "react";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
+import { ProxiPilotLogo } from "@/components/ui/ProxiPilotLogo";
 
 export function FinalCtaCanvas() {
   return (
@@ -174,27 +175,8 @@ export function FinalCtaCanvas() {
             position: "relative",
           }}
         >
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1.25, mb: 0.5 }}>
-            <Box
-              sx={{
-                width: 28,
-                height: 28,
-                borderRadius: "8px",
-                backgroundColor: "#2563EB",
-                color: "#FFFFFF",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                boxShadow: "0 0 12px rgba(37, 99, 235, 0.6)",
-              }}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
-              </svg>
-            </Box>
-            <Typography sx={{ fontSize: "1.15rem", fontWeight: 800, color: "#FFFFFF", letterSpacing: "-0.01em" }}>
-              ProxiPilot
-            </Typography>
+          <Box sx={{ mb: 0.5 }}>
+            <ProxiPilotLogo size={28} textColor="#FFFFFF" textSize="1.15rem" />
           </Box>
           <Typography sx={{ fontSize: "0.78rem", color: "#CBD5E1", letterSpacing: "0.01em" }}>
             Understands. Acts. Keeps you in control.

@@ -5,6 +5,7 @@ import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import { Container } from "./layout";
 import { landingConfig } from "@/config/landing";
+import { ProxiPilotLogo } from "@/components/ui/ProxiPilotLogo";
 
 const SOCIAL_LINKS = [
   {
@@ -70,46 +71,8 @@ export function LandingFooter() {
           {/* Left Brand Column */}
           <Box sx={{ pr: { md: 3 } }}>
             {/* Logo */}
-            <Box
-              component="a"
-              href="#hero"
-              sx={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 1.25,
-                textDecoration: "none",
-                color: "#0F172A",
-                mb: 2,
-              }}
-            >
-              <Box
-                sx={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: "10px",
-                  backgroundColor: "#2563EB",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "#FFFFFF",
-                }}
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
-                </svg>
-              </Box>
-              <Typography
-                variant="h6"
-                component="span"
-                sx={{
-                  fontWeight: 800,
-                  fontSize: "1.375rem",
-                  letterSpacing: "-0.025em",
-                  color: "#0F172A",
-                }}
-              >
-                {navigation.brandName}
-              </Typography>
+            <Box sx={{ mb: 2 }}>
+              <ProxiPilotLogo size={32} href="#hero" textSize="1.375rem" />
             </Box>
 
             {/* Tagline */}

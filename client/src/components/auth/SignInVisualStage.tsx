@@ -4,6 +4,7 @@ import React from "react";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import Link from "next/link";
+import { ProxiPilotLogo } from "@/components/ui/ProxiPilotLogo";
 
 export function SignInVisualStage() {
   return (
@@ -52,46 +53,8 @@ export function SignInVisualStage() {
       {/* Top Section: Brand + Headlines */}
       <Box sx={{ position: "relative", zIndex: 2 }}>
         {/* Brand Logo */}
-        <Box
-          component={Link}
-          href="/"
-          sx={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 1.25,
-            textDecoration: "none",
-            color: "#0F172A",
-            mb: { xs: 1.75, md: 2.25 },
-          }}
-        >
-          <Box
-            sx={{
-              width: 28,
-              height: 28,
-              borderRadius: "8px",
-              backgroundColor: "#2563EB",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "#FFFFFF",
-              boxShadow: "0 3px 10px rgba(37, 99, 235, 0.3)",
-            }}
-          >
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
-            </svg>
-          </Box>
-          <Typography
-            variant="h6"
-            sx={{
-              fontWeight: 800,
-              fontSize: "1.25rem",
-              letterSpacing: "-0.025em",
-              color: "#0F172A",
-            }}
-          >
-            ProxiPilot
-          </Typography>
+        <Box sx={{ mb: { xs: 1.75, md: 2.25 } }}>
+          <ProxiPilotLogo size={28} href="/" textSize="1.25rem" />
         </Box>
 
         {/* Eyebrow */}
@@ -168,10 +131,15 @@ export function SignInVisualStage() {
             zIndex: 4,
           }}
         >
-          <Box sx={{ color: "#2563EB", display: "flex", alignItems: "center" }}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-              <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
-            </svg>
+          <Box sx={{ width: 14, height: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/Proxipilot logo.svg"
+              alt="AI"
+              width={14}
+              height={14}
+              style={{ objectFit: "contain", display: "block" }}
+            />
           </Box>
           <Typography sx={{ fontSize: "0.78rem", fontWeight: 700, color: "#1E293B" }}>
             AI sorting...
@@ -251,9 +219,14 @@ export function SignInVisualStage() {
 
             {/* AI Replies */}
             <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, px: 1, py: 0.4, color: "#64748B" }}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
-              </svg>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/Proxipilot logo.svg"
+                alt="AI Replies"
+                width={12}
+                height={12}
+                style={{ objectFit: "contain", display: "block" }}
+              />
               <Typography sx={{ fontSize: "0.72rem", fontWeight: 500 }}>AI Replies</Typography>
             </Box>
 

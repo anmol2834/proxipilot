@@ -323,9 +323,14 @@ export function RegistrationBrandPanel({ step }: RegistrationBrandPanelProps) {
               }}
             >
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#3562f5" strokeWidth="2.2">
-                  <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
-                </svg>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/Proxipilot logo.svg"
+                  alt="ProxiPilot"
+                  width={18}
+                  height={18}
+                  style={{ objectFit: "contain", display: "block" }}
+                />
                 <span style={{ fontWeight: 700, fontSize: "0.88rem", color: "#0f172a" }}>
                   Live AI Tone Preview
                 </span>

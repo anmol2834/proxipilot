@@ -17,6 +17,7 @@ import { useEffect } from "react";
 import { authApi } from "@/lib/api";
 
 import { env } from "@/config/env";
+import { ProxiPilotLogo } from "@/components/ui/ProxiPilotLogo";
 
 export function SignInForm() {
   const router = useRouter();
@@ -101,45 +102,7 @@ export function SignInForm() {
           mb: { xs: 2, sm: 2.5 },
         }}
       >
-        <Box
-          component={Link}
-          href="/"
-          sx={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 1,
-            textDecoration: "none",
-            color: "#0F172A",
-          }}
-        >
-          <Box
-            sx={{
-              width: 28,
-              height: 28,
-              borderRadius: "8px",
-              backgroundColor: "#2563EB",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "#FFFFFF",
-              boxShadow: "0 2px 8px rgba(37, 99, 235, 0.3)",
-            }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
-            </svg>
-          </Box>
-          <Typography
-            sx={{
-              fontWeight: 800,
-              fontSize: "1.15rem",
-              letterSpacing: "-0.025em",
-              color: "#0F172A",
-            }}
-          >
-            ProxiPilot
-          </Typography>
-        </Box>
+        <ProxiPilotLogo size={28} href="/" textSize="1.15rem" />
 
         <Typography sx={{ fontSize: "0.82rem", color: "#64748B" }}>
           <Link

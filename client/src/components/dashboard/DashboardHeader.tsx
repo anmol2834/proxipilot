@@ -133,10 +133,15 @@ export function DashboardHeader({ userName }: DashboardHeaderProps = {}) {
           >
             <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <Box sx={{ width: 10, height: 10, borderRadius: "50%", backgroundColor: "#CBD5E1" }} />
-              <Box sx={{ color: "#2563EB" }}>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
-                </svg>
+              <Box sx={{ width: 16, height: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/Proxipilot logo.svg"
+                  alt="ProxiPilot"
+                  width={16}
+                  height={16}
+                  style={{ objectFit: "contain", display: "block" }}
+                />
               </Box>
             </Box>
             <Box sx={{ width: "70%", height: 6, borderRadius: "4px", backgroundColor: "#E2E8F0" }} />
@@ -161,10 +166,15 @@ export function DashboardHeader({ userName }: DashboardHeaderProps = {}) {
               zIndex: 3,
             }}
           >
-            <Box sx={{ color: "#2563EB", display: "flex" }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-                <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
-              </svg>
+            <Box sx={{ width: 14, height: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/Proxipilot logo.svg"
+                alt="ProxiPilot"
+                width={14}
+                height={14}
+                style={{ objectFit: "contain", display: "block" }}
+              />
             </Box>
             <Box>
               <Typography sx={{ fontSize: "0.68rem", fontWeight: 700, color: "#1E293B", lineHeight: 1.1 }}>

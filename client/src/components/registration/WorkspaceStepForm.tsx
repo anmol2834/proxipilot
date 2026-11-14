@@ -288,9 +288,14 @@ export function WorkspaceStepForm() {
           options={AI_STYLES}
           helperText="Sets the default tone for AI-drafted replies. Can be adjusted anytime."
           startIcon={
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
-            </svg>
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src="/Proxipilot logo.svg"
+              alt="AI"
+              width={16}
+              height={16}
+              style={{ objectFit: "contain", display: "block" }}
+            />
           }
         />
       </div>

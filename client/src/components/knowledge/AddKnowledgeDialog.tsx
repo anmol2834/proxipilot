@@ -679,17 +679,19 @@ function AddKnowledgeModalContent({
                           sx={{
                             width: 22,
                             height: 22,
-                            borderRadius: "6px",
-                            backgroundColor: "#2563EB",
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "center",
-                            boxShadow: "0 2px 6px rgba(37, 99, 235, 0.3)",
                           }}
                         >
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="#FFFFFF">
-                            <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z" />
-                          </svg>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src="/Proxipilot logo.svg"
+                            alt="ProxiPilot"
+                            width={20}
+                            height={20}
+                            style={{ objectFit: "contain", display: "block" }}
+                          />
                         </Box>
                       </Box>
                       <Box sx={{ display: "flex", flexDirection: "column", gap: 0.65 }}>

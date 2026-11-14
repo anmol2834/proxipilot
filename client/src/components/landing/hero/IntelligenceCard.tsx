@@ -214,17 +214,20 @@ export function IntelligenceCard({
             sx={{
               width: 26,
               height: 26,
-              borderRadius: "7px",
-              backgroundColor: "rgba(99, 91, 255, 0.12)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
+              flexShrink: 0,
             }}
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-              <circle cx="9" cy="12" r="5" fill="#3B82F6" />
-              <circle cx="15" cy="12" r="5" fill="#635BFF" fillOpacity="0.8" />
-            </svg>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/Proxipilot logo.svg"
+              alt="ProxiPilot Intelligence"
+              width={22}
+              height={22}
+              style={{ objectFit: "contain", display: "block" }}
+            />
           </Box>
           <Typography
             variant="h6"
