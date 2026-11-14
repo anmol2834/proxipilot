@@ -11,7 +11,6 @@ export default function BillingPage() {
   return (
     <SubroutePlaceholder
       title="Billing & Subscription"
-      badge="Account"
       description="Manage your enterprise subscription, seat allocation, AI token consumption, and download invoices."
     />
   );

@@ -11,7 +11,6 @@ export default function SettingsPage() {
   return (
     <SubroutePlaceholder
       title="Workspace Settings"
-      badge="Configuration"
       description="Configure workspace domain, notification webhooks, AI confidence thresholds, and security controls."
     />
   );

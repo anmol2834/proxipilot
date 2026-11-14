@@ -34,7 +34,15 @@ export function useIntegrations() {
 
   // Connect mutation: fetches Google OAuth URL and opens in browser
   const connectMutation = useMutation({
-    mutationFn: async ({ emailHint, displayName }: { emailHint?: string; displayName?: string }) => {
+    mutationFn: async ({
+      emailHint,
+      displayName,
+    }: {
+      emailHint?: string;
+      displayName?: string;
+      /** Return true to skip the redirect (the user cancelled while the URL was being fetched). */
+      isCancelled?: () => boolean;
+    }) => {
       const res = await integrationsApi.getConnectUrl(
         emailHint,
         displayName,
@@ -43,8 +51,8 @@ export function useIntegrations() {
       );
       return res;
     },
-    onSuccess: (data) => {
-      if (data?.auth_url) {
+    onSuccess: (data, variables) => {
+      if (data?.auth_url && !variables?.isCancelled?.()) {
         window.location.href = data.auth_url;
       }
     },

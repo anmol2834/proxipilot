@@ -19,7 +19,7 @@ Architectural rules:
 from enum import Enum
 from typing import List, Optional, TYPE_CHECKING
 import uuid
-from sqlalchemy import Boolean, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base, TimestampMixin
 
@@ -310,6 +310,9 @@ class User(Base, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
     is_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     last_login_at: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, default=None)
+    # Completed sign-ins (email/password or OAuth) AFTER registration. 0 = the user is still in the
+    # session that created the account, so the UI greets "Welcome"; >0 greets "Welcome back".
+    login_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
     # Relationships
     memberships: Mapped[List["OrganizationMember"]] = relationship(

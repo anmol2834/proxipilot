@@ -130,3 +130,14 @@ a {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
 }
+
+// Form fields must always allow selecting, copying, cutting and pasting, even when a decorative
+// ancestor disables text selection. (A page-wide `user-select: none` on the signup / onboarding
+// roots broke copy-paste in every registration input.)
+input,
+textarea,
+select,
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+}

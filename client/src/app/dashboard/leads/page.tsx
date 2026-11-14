@@ -11,7 +11,6 @@ export default function LeadsPage() {
   return (
     <SubroutePlaceholder
       title="Lead Intelligence"
-      badge="CRM & Ingestion"
       description="Track inbound prospect requests, qualification scores, and CRM sync status."
     />
   );

@@ -227,8 +227,8 @@ function IntegrationsContent() {
 
   const accounts = serverAccounts;
 
-  const handleAuthorize = async (email: string, displayName?: string) => {
-    await connectGmail({ emailHint: email, displayName });
+  const handleAuthorize = async (email: string, displayName?: string, isCancelled?: () => boolean) => {
+    await connectGmail({ emailHint: email, displayName, isCancelled });
   };
 
   const handleConfirmDisconnect = async () => {

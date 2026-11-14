@@ -451,7 +451,7 @@ export const landingConfig: LandingConfig = {
         },
         {
           q: "Is my data secure?",
-          a: "Yes. Your emails, attachments, and company data are encrypted in transit (TLS 1.3) and at rest (AES-256). We maintain strict tenant isolation and never train public models on your private data.",
+          a: "Yes. Your emails, attachments, and company data are encrypted in transit (TLS 1.3) and at rest (AES-256). We maintain strict tenant isolation.",
         },
         {
           q: "Can I use ProxiPilot for internal emails?",

@@ -49,6 +49,7 @@ from app.models.commitment import (
 )
 from app.services.contact_memory import normalize_email
 from app.services.feedback_memory import strip_quoted
+from app.core.llm_params import completion_params
 
 # ---------------------------------------------------------------------------
 # Tunables
@@ -343,10 +344,7 @@ class _OpenAICaller:
             "model": model, "messages": messages, "max_completion_tokens": 2000,
             "response_format": {"type": "json_schema", "json_schema": _SCHEMA},
         }
-        if model.lower().startswith(("gpt-5", "o1", "o3", "o4")):
-            kwargs["reasoning_effort"] = "low"
-        else:
-            kwargs["temperature"] = 0.0
+        kwargs.update(completion_params(model, "low"))
         last: Optional[Exception] = None
         for attempt in range(LLM_ATTEMPTS):
             try:

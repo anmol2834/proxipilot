@@ -6,6 +6,9 @@ import IconButton from "@mui/material/IconButton";
 import ButtonBase from "@mui/material/ButtonBase";
 import Typography from "@mui/material/Typography";
 import Badge from "@mui/material/Badge";
+import Tooltip from "@mui/material/Tooltip";
+import { useRouter } from "next/navigation";
+import { useDashboardOverview } from "@/hooks/use-dashboard-overview";
 import MenuIcon from "@mui/icons-material/Menu";
 import { OrganizationSwitcher } from "./OrganizationSwitcher";
 import { UserProfileMenu } from "./UserProfileMenu";
@@ -17,6 +20,14 @@ interface AppTopbarProps {
 
 export function AppTopbar({ onToggleMobileMenu }: AppTopbarProps) {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const router = useRouter();
+  // Real signal: AI drafts waiting for human review (same cached query as the overview).
+  const { data: overview } = useDashboardOverview(7);
+  const pendingReview = overview?.needs_attention.pending_review ?? 0;
+  const bellLabel =
+    pendingReview > 0
+      ? `${pendingReview} AI ${pendingReview === 1 ? "draft" : "drafts"} waiting for review`
+      : "No drafts waiting for review";
 
   return (
     <>
@@ -124,9 +135,12 @@ export function AppTopbar({ onToggleMobileMenu }: AppTopbarProps) {
             </svg>
           </IconButton>
 
-          {/* Notifications Button */}
+          {/* Notifications: drafts awaiting review (dot only when there are any) */}
+          <Tooltip title={bellLabel}>
           <IconButton
             size="small"
+            aria-label={bellLabel}
+            onClick={() => router.push("/dashboard/inbox")}
             sx={{
               color: "#64748B",
               border: "1px solid #E2E8F0",
@@ -138,6 +152,7 @@ export function AppTopbar({ onToggleMobileMenu }: AppTopbarProps) {
           >
             <Badge
               variant="dot"
+              invisible={pendingReview === 0}
               sx={{
                 "& .MuiBadge-dot": {
                   backgroundColor: "#2563EB",
@@ -152,6 +167,7 @@ export function AppTopbar({ onToggleMobileMenu }: AppTopbarProps) {
               </svg>
             </Badge>
           </IconButton>
+          </Tooltip>
 
           {/* Organization Switcher */}
           <OrganizationSwitcher />

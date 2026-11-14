@@ -41,6 +41,7 @@ from app.core.config import LlmSettings, get_settings
 from app.core.logging import logger
 from app.services.context_resolver import ContextEnvelope
 from app.services.requirement_planner.preprocessor import PreprocessedEmail
+from app.core.llm_params import completion_params
 
 
 # =============================================================================
@@ -462,12 +463,9 @@ class OpenAIStructuredPlanner:
                                 "json_schema": OPENAI_PLANNER_JSON_SCHEMA,
                             }),
                         }
-                        if not self._settings.openai_model.lower().startswith(("gpt-5", "o1", "o3", "o4")):
-                            call_kwargs["temperature"] = 0.0
-                        else:
-                            # Intent/entity extraction is a classification task: minimal reasoning
-                            # is accurate here and several times faster than "low".
-                            call_kwargs["reasoning_effort"] = "minimal"
+                        # Intent/entity extraction is a classification task: the fastest supported
+                        # effort is accurate here and several times faster than "low".
+                        call_kwargs.update(completion_params(self._settings.openai_model, "minimal"))
                         call_kwargs["max_completion_tokens"] = 1000
 
                         resp = await client.chat.completions.create(**call_kwargs)

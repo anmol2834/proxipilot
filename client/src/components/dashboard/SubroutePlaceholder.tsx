@@ -18,7 +18,7 @@ interface SubroutePlaceholderProps {
 
 export function SubroutePlaceholder({
   title,
-  badge = "Feature Pipeline",
+  badge = "Coming soon",
   description,
   actionText = "Back to Overview",
   actionHref = "/dashboard",
@@ -119,11 +119,11 @@ export function SubroutePlaceholder({
         </Box>
 
         <Typography sx={{ fontWeight: 800, fontSize: "1.15rem", color: "#0F172A", mb: 1 }}>
-          {title} Module Architecture Ready
+          {title} is coming soon
         </Typography>
 
         <Typography sx={{ color: "#64748B", fontSize: "0.88rem", maxWidth: 500, mb: 3 }}>
-          This sub-route inherits the persistent AppShell seamlessly without reloading the navigation state, organization switcher, or topbar.
+          We are building this section. Your inbox, AI drafts, knowledge base and integrations already work as usual.
         </Typography>
 
         <Button

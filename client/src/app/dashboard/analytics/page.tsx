@@ -11,7 +11,6 @@ export default function AnalyticsPage() {
   return (
     <SubroutePlaceholder
       title="Intelligence Analytics"
-      badge="Reporting"
       description="Deep dive into resolution accuracy, SLA compliance, and agent productivity."
     />
   );

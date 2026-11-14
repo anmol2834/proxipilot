@@ -282,6 +282,7 @@ async def list_threads(
         next_cursor = _encode_thread_cursor(last.latest_message_at, last.id)
 
     items = [_thread_to_dto(t) for t in rows]
+    await _overlay_memory_summaries(db, org_id, items)
 
     logger.info(
         "Inbox thread list",
@@ -296,6 +297,30 @@ async def list_threads(
         has_more=has_more,
         total_returned=len(items),
     )
+
+
+async def _overlay_memory_summaries(db: AsyncSession, org_id: str, items: List[ThreadDTO]) -> None:
+    """Replace the rule-based thread summary with the real AI conversation memory (model-written
+    rolling summary + key facts) wherever one exists. One batched query for the whole page."""
+    if not items:
+        return
+    rows = (await db.execute(text(
+        "SELECT thread_id, summary, key_facts FROM thread_memories "
+        "WHERE tenant_id = :t AND thread_id = ANY(:ids) AND coalesce(summary, '') <> ''"),
+        {"t": org_id, "ids": [i.id for i in items]})).mappings().all()
+    by_thread = {r["thread_id"]: r for r in rows}
+    for item in items:
+        mem = by_thread.get(item.id)
+        if not mem:
+            continue
+        try:
+            facts = json.loads(mem["key_facts"]) if mem["key_facts"] else []
+        except (ValueError, TypeError):
+            facts = []
+        item.ai_summary = AISummaryDTO(
+            intent=mem["summary"].strip(),
+            bullet_points=[str(f) for f in (facts or []) if str(f).strip()][:6],
+        )
 
 
 # =============================================================================
@@ -326,7 +351,9 @@ async def get_thread(
             detail="Thread not found",
         )
 
-    return _thread_to_dto(thread)
+    dto = _thread_to_dto(thread)
+    await _overlay_memory_summaries(db, org_id, [dto])
+    return dto
 
 
 # =============================================================================

@@ -11,8 +11,7 @@ export default function HelpPage() {
   return (
     <SubroutePlaceholder
       title="Help & Documentation"
-      badge="Support"
-      description="Access developer documentation, setup guides, video walkthroughs, or contact 24/7 dedicated engineering support."
+      description="Setup guides and answers to common questions, and a way to contact our support team."
     />
   );
 }

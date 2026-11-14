@@ -11,7 +11,6 @@ export default function TeamPage() {
   return (
     <SubroutePlaceholder
       title="Team Members"
-      badge="Collaboration"
       description="Invite colleagues, assign role-based access control (Admin, Operator, Viewer), and review audit logs."
     />
   );

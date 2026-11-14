@@ -11,7 +11,6 @@ export default function TemplatesPage() {
   return (
     <SubroutePlaceholder
       title="Response Templates"
-      badge="Library"
       description="Create dynamic parameterized response templates for instant human-in-the-loop dispatch."
     />
   );

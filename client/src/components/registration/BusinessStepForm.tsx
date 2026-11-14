@@ -167,12 +167,14 @@ export function BusinessStepForm() {
             rows={3}
             placeholder="E.g. We provide home appliance repair and maintenance services including AC, refrigerator, and microwave repairs."
             value={description}
+            maxLength={300}
             onChange={(e) => {
-              if (e.target.value.length <= 300) {
-                setDescription(e.target.value);
-                updateBusinessDraft({ businessDescription: e.target.value });
-                if (errors.description) setErrors((prev) => ({ ...prev, description: "" }));
-              }
+              // Keep the first 300 characters instead of rejecting the change: a pasted
+              // paragraph longer than the limit used to be silently discarded.
+              const next = e.target.value.slice(0, 300);
+              setDescription(next);
+              updateBusinessDraft({ businessDescription: next });
+              if (errors.description) setErrors((prev) => ({ ...prev, description: "" }));
             }}
             className={errors.description ? "has-error" : ""}
           />

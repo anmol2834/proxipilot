@@ -74,7 +74,12 @@ export interface UserMeResponse {
     slug: string;
     role: string;
     status: string;
+    /** Active members of this organization (real count from the server). */
+    member_count?: number;
   }>;
+  first_name?: string;
+  /** Sign-ins completed after registration: 0 = first session ("Welcome"), >0 = returning ("Welcome back"). */
+  login_count?: number;
 }
 
 export interface OnboardingStateData {

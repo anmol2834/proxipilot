@@ -44,6 +44,7 @@ from app.contracts.reply_planner import (
 )
 from app.core.config import LlmSettings, get_settings
 from app.core.logging import logger
+from app.core.llm_params import completion_params
 
 
 # =============================================================================
@@ -281,14 +282,10 @@ class ReplyDrafter:
                                 "json_schema": OPENAI_REPLY_DRAFT_JSON_SCHEMA,
                             }),
                         }
-                        if not self._settings.openai_model.lower().startswith(("gpt-5", "o1", "o3", "o4")):
-                            call_kwargs["temperature"] = 0.0
-                            call_kwargs["max_completion_tokens"] = 2500
-                        else:
-                            # "minimal": the evidence package + rules carry the reasoning; this cut
-                            # drafting latency ~2x with the same grounded output (validated by tests).
-                            call_kwargs["reasoning_effort"] = "minimal"
-                            call_kwargs["max_completion_tokens"] = 2500
+                        # Fastest supported effort ("minimal" / "none"): the evidence package + rules
+                        # carry the reasoning; this cut drafting latency ~2x with the same grounded output.
+                        call_kwargs.update(completion_params(self._settings.openai_model, "minimal"))
+                        call_kwargs["max_completion_tokens"] = 2500
 
                         t_api_start = time.perf_counter()
                         resp = await client.chat.completions.create(**call_kwargs)

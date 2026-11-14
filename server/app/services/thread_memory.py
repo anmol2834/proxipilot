@@ -36,6 +36,7 @@ from app.core.database import db_manager
 from app.core.logging import logger
 from app.services.commitment_memory import resolve_timezone, statement_key
 from app.services.feedback_memory import strip_quoted
+from app.core.llm_params import completion_params
 
 # ---------------------------------------------------------------------------
 # Tunables
@@ -307,10 +308,7 @@ class _OpenAICaller:
         model = self._settings.openai_model
         kwargs: Dict[str, Any] = {"model": model, "messages": messages, "max_completion_tokens": 3000,
                                   "response_format": {"type": "json_schema", "json_schema": _SCHEMA}}
-        if model.lower().startswith(("gpt-5", "o1", "o3", "o4")):
-            kwargs["reasoning_effort"] = "low"
-        else:
-            kwargs["temperature"] = 0.0
+        kwargs.update(completion_params(model, "low"))
         resp = await self._client.chat.completions.create(**kwargs)
         choice = resp.choices[0]
         if not choice.message.content or choice.finish_reason == "length":

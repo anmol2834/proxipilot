@@ -33,6 +33,7 @@ from app.api.v1.routes.context import router as context_router
 from app.api.v1.routes.knowledge_sources import router as knowledge_sources_router
 from app.api.v1.routes.knowledge_imports import router as knowledge_imports_router
 from app.api.v1.routes.webhooks import router as webhooks_router
+from app.api.v1.routes.dashboard import router as dashboard_router
 from app.core.config import get_api_settings
 from app.core.database import db_manager
 from app.core.http_client import http_client_manager
@@ -383,6 +384,7 @@ def create_app() -> FastAPI:
     # Register Contacts Routes (Memory 4: Contact & Relationship Memory)
     app.include_router(contacts_router, prefix="/api/v1")
     app.include_router(feedback_router, prefix="/api/v1")
+    app.include_router(dashboard_router, prefix="/api/v1")
     app.include_router(commitments_router, prefix="/api/v1")
     app.include_router(style_router, prefix="/api/v1")
     app.include_router(practices_router, prefix="/api/v1")

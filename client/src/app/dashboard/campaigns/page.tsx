@@ -11,7 +11,6 @@ export default function CampaignsPage() {
   return (
     <SubroutePlaceholder
       title="Outreach Campaigns"
-      badge="Outbound"
       description="Orchestrate hyper-personalized follow-up sequences with real-time intent analysis."
     />
   );

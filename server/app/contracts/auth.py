@@ -92,6 +92,7 @@ class UserOrgSummary(BaseModel):
     slug: str
     role: str
     status: str
+    member_count: int = 0
 
 
 class UserMeResponse(BaseModel):
@@ -107,3 +108,5 @@ class UserMeResponse(BaseModel):
     status: str
     primary_organization_id: Optional[str] = None
     organizations: List[UserOrgSummary] = []
+    # Sign-ins completed after registration (0 = still in the first session).
+    login_count: int = 0

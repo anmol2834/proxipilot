@@ -11,7 +11,6 @@ export default function AutomationsPage() {
   return (
     <SubroutePlaceholder
       title="Automations"
-      badge="Workflow Engine"
       description="Design triggers, conditional logic, and AI action steps for high-frequency messages."
     />
   );

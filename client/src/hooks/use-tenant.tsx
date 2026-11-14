@@ -12,6 +12,7 @@ export interface TenantOrganization {
   slug: string;
   role: string;
   status: string;
+  member_count?: number;
 }
 
 interface TenantContextValue {

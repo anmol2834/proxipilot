@@ -1,6 +1,11 @@
 "use client";
 
-import React, { useState } from "react";
+/**
+ * Dashboard overview. Every number and list on this screen comes from the server
+ * (GET /dashboard/overview, /auth/me, setup status) and is computed from the organization's own
+ * data. When there is no data yet, the UI says so ("—" or an empty state) instead of inventing it.
+ */
+import React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
@@ -12,1193 +17,470 @@ import {
   IconArrowRight,
   IconClock,
   IconDatabase,
-  IconShieldCheck,
   IconBolt,
   IconUsers,
-  IconRefresh,
   IconBrandGmail,
   IconBrandOffice,
   IconFileText,
   IconBrain,
   IconChartBar,
+  IconInbox,
 } from "@tabler/icons-react";
-import { useRegistrationStore } from "@/stores/registration.store";
-import { useDashboardStore } from "@/stores/dashboard.store";
+import { useAuth } from "@/hooks/use-auth";
+import { useTenant } from "@/hooks/use-tenant";
 import { useSetupStatus } from "@/hooks/use-setup-status";
+import { useDashboardOverview } from "@/hooks/use-dashboard-overview";
+import type { ActivityStatus, DashboardOverview } from "@/services/dashboard.service";
 
+// ---------------------------------------------------------------------------
+// Formatting helpers (no data -> "—")
+// ---------------------------------------------------------------------------
+const DASH = "—";
+const fmtInt = (n: number | null | undefined) => (typeof n === "number" ? n.toLocaleString("en-IN") : DASH);
+const fmtPct = (ratio: number | null | undefined) =>
+  typeof ratio === "number" ? `${Math.round(ratio * 1000) / 10}%` : DASH;
+const fmtPctValue = (pct: number | null | undefined) => (typeof pct === "number" ? `${pct}%` : DASH);
+
+function fmtMinutes(min: number | null | undefined): string {
+  if (typeof min !== "number") return DASH;
+  if (min < 1) return `${Math.max(1, Math.round(min * 60))} sec`;
+  if (min < 60) return `${Math.round(min * 10) / 10} min`;
+  return `${Math.round((min / 60) * 10) / 10} h`;
+}
+
+function timeAgo(iso: string | null): string {
+  if (!iso) return "";
+  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+}
+
+const STATUS_BADGE: Record<ActivityStatus, { label: string; bg: string; color: string }> = {
+  replied: { label: "Replied", bg: "#ecfdf5", color: "#16a34a" },
+  draft_ready: { label: "Draft ready for review", bg: "#eff6ff", color: "#2563eb" },
+  sending: { label: "Sending", bg: "#f5f3ff", color: "#7c3aed" },
+  needs_reply: { label: "Needs a reply", bg: "#fff7ed", color: "#ea580c" },
+  awaiting_ai: { label: "AI drafting", bg: "#f8fafc", color: "#64748b" },
+};
+
+// ---------------------------------------------------------------------------
+// Small presentational pieces
+// ---------------------------------------------------------------------------
+const card = { whileHover: { y: -2 }, transition: { duration: 0.2 } } as const;
+
+function CardTitle({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px" }}>
+      {icon}
+      <h3 style={{ fontSize: "0.95rem", fontWeight: 800, color: "#0f172a", margin: 0 }}>{children}</h3>
+    </div>
+  );
+}
+
+function MetricCard({
+  label, value, sub, icon, accent = "#0f172a", subColor = "#64748b", glow,
+}: {
+  label: string; value: string; sub: string; icon: React.ReactNode; accent?: string; subColor?: string; glow?: string;
+}) {
+  return (
+    <motion.div {...card} className={`bento-card bento-col-span-1${glow ? ` ${glow}` : ""}`}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <span style={{ fontSize: "0.74rem", fontWeight: 700, color: accent === "#0f172a" ? "#64748b" : accent, textTransform: "uppercase" }}>
+          {label}
+        </span>
+        {icon}
+      </div>
+      <div style={{ fontSize: "1.9rem", fontWeight: 800, color: accent, margin: "6px 0 2px 0" }}>{value}</div>
+      <div style={{ fontSize: "0.75rem", color: subColor, fontWeight: 600 }}>{sub}</div>
+    </motion.div>
+  );
+}
+
+function Skeleton({ h = 18, w = "100%" }: { h?: number; w?: number | string }) {
+  return <div style={{ height: h, width: w, borderRadius: 6, background: "linear-gradient(90deg,#f1f5f9,#e2e8f0,#f1f5f9)" }} />;
+}
+
+function RecentActivity({ data, loading }: { data?: DashboardOverview; loading: boolean }) {
+  if (loading) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+        {[0, 1, 2].map((i) => <Skeleton key={i} h={46} />)}
+      </div>
+    );
+  }
+  const items = data?.recent_activity ?? [];
+  if (items.length === 0) {
+    return (
+      <div style={{ padding: "22px 12px", textAlign: "center", color: "#64748b", fontSize: "0.82rem" }}>
+        <IconInbox size={22} color="#94a3b8" style={{ marginBottom: 6 }} />
+        <div style={{ fontWeight: 700, color: "#0f172a" }}>No customer conversations yet</div>
+        <div style={{ marginTop: 4 }}>New customer emails and their AI drafts will appear here as they arrive.</div>
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+      {items.map((item) => {
+        const badge = STATUS_BADGE[item.status] ?? STATUS_BADGE.awaiting_ai;
+        return (
+          <Link
+            key={item.thread_id}
+            href="/dashboard/inbox"
+            style={{
+              padding: "12px 14px", borderRadius: "12px", border: "1px solid #f1f5f9", backgroundColor: "#fafafa",
+              display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
+              textDecoration: "none", color: "inherit",
+            }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: "0.85rem", fontWeight: 700, color: "#0f172a", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {item.subject}
+              </div>
+              <div style={{ fontSize: "0.72rem", color: "#64748b", marginTop: "2px" }}>
+                {item.contact || "Unknown sender"}
+                {item.at ? ` • ${timeAgo(item.at)}` : ""}
+              </div>
+            </div>
+            <span style={{ padding: "3px 8px", borderRadius: "6px", backgroundColor: badge.bg, color: badge.color, fontSize: "0.72rem", fontWeight: 700, whiteSpace: "nowrap" }}>
+              {badge.label}
+            </span>
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Overview
+// ---------------------------------------------------------------------------
 export function BentoDashboardOverview() {
   const router = useRouter();
-  const { accountDraft, organizationDraft } = useRegistrationStore();
-  // resetSetup is kept for dev/testing convenience only
-  const { resetSetup } = useDashboardStore();
+  const { user } = useAuth();
+  const { currentOrganization } = useTenant();
+  const { accountCreated, emailConnected, knowledgeAdded, isSetupComplete } = useSetupStatus();
+  const { data, isLoading } = useDashboardOverview(7);
 
-  // Real server-derived setup status — never phantom local flags
-  const {
-    accountCreated,
-    emailConnected,
-    knowledgeAdded,
-    isSetupComplete,
-  } = useSetupStatus();
+  // Identity from the authenticated session, never from a local draft or a hardcoded default.
+  const firstName = (user?.first_name || user?.full_name?.split(" ")[0] || "").trim();
+  const isReturning = (user?.login_count ?? 0) > 0;
+  const greeting = `${isReturning ? "Welcome back" : "Welcome"}${firstName ? `, ${firstName}` : ""}`;
+  const orgName = currentOrganization?.name || "";
 
-  const userGreeting = accountDraft.firstName || "Anmol";
-  const orgName = organizationDraft.organizationName || "Your Organization";
-
-  // Checklist calculation
   const totalSteps = 3;
-  let completedCount = 0;
-  if (accountCreated) completedCount++;
-  if (emailConnected) completedCount++;
-  if (knowledgeAdded) completedCount++;
+  const completedCount = [accountCreated, emailConnected, knowledgeAdded].filter(Boolean).length;
   const progressPercent = Math.round((completedCount / totalSteps) * 100);
 
-  // Simulated AI response style selection for live test-drive
-  const [selectedTone, setSelectedTone] = useState<"Professional" | "Friendly" | "Concise">("Professional");
+  const pending = data?.needs_attention.pending_review ?? 0;
+  const change = data?.inbound.change_pct;
+  const windowLabel = `last ${data?.window_days ?? 7} days`;
 
   return (
     <div className="bento-dashboard-container">
-      {/* ==================================================================== */}
-      {/* 1. TOP BENTO ROW: Executive Welcome & AI Health Station              */}
-      {/* ==================================================================== */}
+      {/* 1. HEADER ROW ------------------------------------------------------ */}
       <div className="bento-grid">
-        {/* HERO WELCOME BENTO CARD (Span 3 cols on desktop) */}
-        <motion.div
-          whileHover={{ y: -2 }}
-          transition={{ duration: 0.2 }}
-          className="bento-card bento-col-span-3 glow-blue"
-          style={{
-            background: "linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)",
-            minHeight: "160px",
-          }}
-        >
+        <motion.div {...card} className="bento-card bento-col-span-3 glow-blue"
+          style={{ background: "linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)", minHeight: "160px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "12px" }}>
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "6px",
-                    padding: "3px 9px",
-                    borderRadius: "9999px",
-                    backgroundColor: isSetupComplete ? "#ecfdf5" : "#eff6ff",
-                    color: isSetupComplete ? "#059669" : "#2563EB",
-                    fontSize: "0.74rem",
-                    fontWeight: 700,
-                  }}
-                >
-                  <span
-                    className="bento-pulse-dot"
-                    style={{ backgroundColor: isSetupComplete ? "#10b981" : "#3562f5" }}
-                  />
-                  {isSetupComplete ? "AUTONOMOUS PIPELINE LIVE" : "ONBOARDING IN PROGRESS"}
+                <span style={{
+                  display: "inline-flex", alignItems: "center", gap: "6px", padding: "3px 9px", borderRadius: "9999px",
+                  backgroundColor: isSetupComplete ? "#ecfdf5" : "#eff6ff", color: isSetupComplete ? "#059669" : "#2563EB",
+                  fontSize: "0.74rem", fontWeight: 700,
+                }}>
+                  <span className="bento-pulse-dot" style={{ backgroundColor: isSetupComplete ? "#10b981" : "#3562f5" }} />
+                  {isSetupComplete ? "AI REPLIES ACTIVE" : "SETUP IN PROGRESS"}
                 </span>
-
-                <span
-                  style={{
-                    fontSize: "0.74rem",
-                    color: "#64748b",
-                    padding: "3px 8px",
-                    borderRadius: "6px",
-                    backgroundColor: "#f1f5f9",
-                    fontWeight: 600,
-                  }}
-                >
-                  {orgName}
-                </span>
+                {orgName && (
+                  <span style={{ fontSize: "0.74rem", color: "#64748b", padding: "3px 8px", borderRadius: "6px", backgroundColor: "#f1f5f9", fontWeight: 600 }}>
+                    {orgName}
+                  </span>
+                )}
               </div>
-
-              <h1
-                style={{
-                  fontSize: "1.75rem",
-                  fontWeight: 800,
-                  color: "#0f172a",
-                  letterSpacing: "-0.025em",
-                  lineHeight: 1.2,
-                  margin: 0,
-                }}
-              >
-                Welcome back, {userGreeting} 👋
+              <h1 style={{ fontSize: "1.75rem", fontWeight: 800, color: "#0f172a", letterSpacing: "-0.025em", lineHeight: 1.2, margin: 0 }}>
+                {greeting} 👋
               </h1>
               <p style={{ fontSize: "0.88rem", color: "#64748b", marginTop: "6px", marginBottom: 0 }}>
                 {isSetupComplete
-                  ? "ProxiPilot is actively triaging your incoming customer inquiries with zero hallucinations."
-                  : "Complete your setup checklist below to connect your inbox and activate autonomous email AI."}
+                  ? "ProxiPilot is reading new customer emails and drafting replies from your company knowledge."
+                  : "Complete the setup checklist below to connect your inbox and start AI-drafted replies."}
               </p>
             </div>
-
-            {/* Quick Actions in Header */}
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <button
-                type="button"
-                onClick={() => router.push("/dashboard/inbox")}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  padding: "8px 14px",
-                  borderRadius: "10px",
-                  backgroundColor: "#3562f5",
-                  color: "#ffffff",
-                  fontSize: "0.82rem",
-                  fontWeight: 600,
-                  border: "none",
-                  cursor: "pointer",
-                  boxShadow: "0 2px 8px rgba(53, 98, 245, 0.25)",
-                  transition: "all 0.15s ease",
-                }}
-              >
-                <IconMail size={16} />
-                <span>Go to Inbox</span>
-              </button>
-
-              {isSetupComplete && (
-                <button
-                  type="button"
-                  onClick={resetSetup}
-                  title="Reopen setup checklist for testing"
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "6px",
-                    padding: "8px 12px",
-                    borderRadius: "10px",
-                    backgroundColor: "#f8fafc",
-                    color: "#475569",
-                    fontSize: "0.82rem",
-                    fontWeight: 600,
-                    border: "1px solid #e2e8f0",
-                    cursor: "pointer",
-                  }}
-                >
-                  <IconRefresh size={15} />
-                  <span>Reset Setup</span>
-                </button>
-              )}
-            </div>
+            <button type="button" onClick={() => router.push("/dashboard/inbox")} style={{
+              display: "inline-flex", alignItems: "center", gap: "6px", padding: "8px 14px", borderRadius: "10px",
+              backgroundColor: "#3562f5", color: "#ffffff", fontSize: "0.82rem", fontWeight: 600, border: "none",
+              cursor: "pointer", boxShadow: "0 2px 8px rgba(53, 98, 245, 0.25)",
+            }}>
+              <IconMail size={16} />
+              <span>Go to Inbox</span>
+            </button>
           </div>
 
-          {/* Bottom Metric Tags */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "16px",
-              marginTop: "18px",
-              paddingTop: "12px",
-              borderTop: "1px solid #f1f5f9",
-              fontSize: "0.78rem",
-              color: "#64748b",
-            }}
-          >
+          {/* Live workspace status (real values) */}
+          <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "16px", marginTop: "18px", paddingTop: "12px", borderTop: "1px solid #f1f5f9", fontSize: "0.78rem", color: "#64748b" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              <IconShieldCheck size={16} color="#059669" />
-              <span>Multi-Tenant AES-256 Isolation</span>
+              <IconBrandGmail size={16} color="#ea4335" />
+              <span>{data ? `${data.workspace.mailboxes} ${data.workspace.mailboxes === 1 ? "mailbox" : "mailboxes"} connected` : "Mailboxes: …"}</span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
               <IconDatabase size={16} color="#2563EB" />
-              <span>Qdrant Vector DB Synced</span>
+              <span>{data ? `${fmtInt(data.workspace.knowledge_items)} knowledge items indexed` : "Knowledge: …"}</span>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              <IconBolt size={16} color="#7c3aed" />
-              <span>Hybrid LLM Router: Active</span>
-            </div>
+            {data?.ai.model && (
+              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                <IconBolt size={16} color="#7c3aed" />
+                <span>AI model: {data.ai.model}</span>
+              </div>
+            )}
           </div>
         </motion.div>
 
-        {/* AI ACCURACY & ENGINE GAUGE CARD (Span 1 col) */}
-        <motion.div
-          whileHover={{ y: -2 }}
-          transition={{ duration: 0.2 }}
-          className="bento-card bento-col-span-1 glow-green"
-          style={{
-            background: "linear-gradient(145deg, #ffffff 0%, #f0fdf4 100%)",
-            minHeight: "160px",
-            justifyContent: "space-between",
-          }}
-        >
+        {/* Draft approval (real: reviewed drafts approved without edits) */}
+        <motion.div {...card} className="bento-card bento-col-span-1 glow-green"
+          style={{ background: "linear-gradient(145deg, #ffffff 0%, #f0fdf4 100%)", minHeight: "160px", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <span style={{ fontSize: "0.75rem", fontWeight: 700, color: "#166534", textTransform: "uppercase" }}>
-              Accuracy Score
-            </span>
-            <div
-              style={{
-                width: "28px",
-                height: "28px",
-                borderRadius: "8px",
-                backgroundColor: "#dcfce7",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "#15803d",
-              }}
-            >
+            <span style={{ fontSize: "0.75rem", fontWeight: 700, color: "#166534", textTransform: "uppercase" }}>Draft approval</span>
+            <div style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: "#dcfce7", display: "flex", alignItems: "center", justifyContent: "center", color: "#15803d" }}>
               <IconBrain size={18} />
             </div>
           </div>
-
           <div>
             <div style={{ fontSize: "2.1rem", fontWeight: 800, color: "#0f172a", letterSpacing: "-0.03em" }}>
-              99.4%
+              {isLoading ? <Skeleton h={34} w={90} /> : fmtPct(data?.ai.approval_rate)}
             </div>
             <div style={{ fontSize: "0.78rem", color: "#15803d", fontWeight: 600, display: "flex", alignItems: "center", gap: "4px" }}>
               <IconCheck size={14} stroke={3} />
-              <span>Zero Hallucination Retrieval</span>
+              <span>{data && data.ai.drafts_reviewed > 0 ? "Sent without edits" : "No drafts reviewed yet"}</span>
             </div>
           </div>
-
-          <div
-            style={{
-              fontSize: "0.72rem",
-              color: "#64748b",
-              paddingTop: "8px",
-              borderTop: "1px solid rgba(22, 101, 52, 0.1)",
-            }}
-          >
-            Vector ground truth verified across all company docs.
+          <div style={{ fontSize: "0.72rem", color: "#64748b", paddingTop: "8px", borderTop: "1px solid rgba(22, 101, 52, 0.1)" }}>
+            {data ? `${fmtInt(data.ai.drafts_reviewed)} AI drafts reviewed in the ${windowLabel}.` : "Calculated from your team's reviews."}
           </div>
         </motion.div>
       </div>
 
-      {/* ==================================================================== */}
-      {/* 2. MAIN BENTO GRID: Setup Mode vs Operational Mode                   */}
-      {/* ==================================================================== */}
+      {/* 2. MAIN GRID -------------------------------------------------------- */}
       {!isSetupComplete ? (
-        /* SETUP MODE BENTO GRID */
         <div className="bento-grid">
-          {/* INTERACTIVE CHECKLIST BENTO CARD (Span 2 cols on desktop, Row Span 2) */}
-          <motion.div
-            whileHover={{ y: -2 }}
-            transition={{ duration: 0.2 }}
-            className="bento-card bento-col-span-2 bento-row-span-2 glow-blue"
-            style={{ minHeight: "340px" }}
-          >
+          {/* Setup checklist (real server-derived status) */}
+          <motion.div {...card} className="bento-card bento-col-span-2 bento-row-span-2 glow-blue" style={{ minHeight: "340px" }}>
             <div>
-              {/* Header */}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
                 <div>
-                  <span style={{ fontSize: "0.72rem", fontWeight: 800, color: "#3562f5", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                    GET STARTED
-                  </span>
-                  <h2 style={{ fontSize: "1.25rem", fontWeight: 800, color: "#0f172a", margin: "4px 0 0 0" }}>
-                    Complete setup to activate ProxiPilot
-                  </h2>
+                  <span style={{ fontSize: "0.72rem", fontWeight: 800, color: "#3562f5", textTransform: "uppercase", letterSpacing: "0.08em" }}>GET STARTED</span>
+                  <h2 style={{ fontSize: "1.25rem", fontWeight: 800, color: "#0f172a", margin: "4px 0 0 0" }}>Complete setup to activate ProxiPilot</h2>
                 </div>
-
-                {/* Progress Pill */}
                 <div style={{ textAlign: "right" }}>
-                  <span style={{ fontSize: "0.82rem", fontWeight: 800, color: "#0f172a" }}>
-                    {completedCount} of {totalSteps} done
-                  </span>
-                  <div
-                    style={{
-                      width: "120px",
-                      height: "6px",
-                      backgroundColor: "#e2e8f0",
-                      borderRadius: "9999px",
-                      overflow: "hidden",
-                      marginTop: "6px",
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: `${progressPercent}%`,
-                        height: "100%",
-                        backgroundColor: "#3562f5",
-                        borderRadius: "9999px",
-                        transition: "width 0.4s ease",
-                      }}
-                    />
+                  <span style={{ fontSize: "0.82rem", fontWeight: 800, color: "#0f172a" }}>{completedCount} of {totalSteps} done</span>
+                  <div style={{ width: "120px", height: "6px", backgroundColor: "#e2e8f0", borderRadius: "9999px", overflow: "hidden", marginTop: "6px" }}>
+                    <div style={{ width: `${progressPercent}%`, height: "100%", backgroundColor: "#3562f5", borderRadius: "9999px", transition: "width 0.4s ease" }} />
                   </div>
                 </div>
               </div>
 
-              {/* 3 Step Interactive Rows */}
               <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                {/* Step 1: Account */}
-                <div
-                  style={{
-                    padding: "14px 16px",
-                    borderRadius: "14px",
-                    backgroundColor: accountCreated ? "#f8fafc" : "#ffffff",
-                    border: "1px solid #e2e8f0",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                    <div
-                      style={{
-                        width: "28px",
-                        height: "28px",
-                        borderRadius: "50%",
-                        backgroundColor: accountCreated ? "#22c55e" : "#f1f5f9",
-                        color: "#ffffff",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <IconCheck size={16} stroke={3} />
-                    </div>
-                    <div>
-                      <div style={{ fontSize: "0.88rem", fontWeight: 700, color: "#0f172a" }}>
-                        1. Create your account
+                {[
+                  { done: accountCreated, n: 1, title: "Create your account", sub: "Verified email & workspace initialized", doneLabel: "Completed" },
+                  { done: emailConnected, n: 2, title: "Connect business email", sub: "Sync Gmail or Microsoft Outlook", doneLabel: "Connected", href: "/dashboard/integrations", cta: "Connect now" },
+                  { done: knowledgeAdded, n: 3, title: "Add company knowledge", sub: "Upload your product or service catalogue", doneLabel: "Indexed", href: "/dashboard/knowledge", cta: "Add knowledge" },
+                ].map((s) => (
+                  <div key={s.n} style={{
+                    padding: "14px 16px", borderRadius: "14px", backgroundColor: s.done ? "#f8fafc" : "#ffffff",
+                    border: s.done ? "1px solid #e2e8f0" : "1px solid #bfdbfe", display: "flex", alignItems: "center",
+                    justifyContent: "space-between", boxShadow: s.done ? "none" : "0 4px 12px rgba(37, 99, 235, 0.06)",
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                      <div style={{
+                        width: 28, height: 28, borderRadius: "50%", backgroundColor: s.done ? "#22c55e" : "#eff6ff",
+                        color: s.done ? "#ffffff" : "#2563eb", display: "flex", alignItems: "center", justifyContent: "center",
+                        fontWeight: 700, fontSize: "0.8rem",
+                      }}>
+                        {s.done ? <IconCheck size={16} stroke={3} /> : s.n}
                       </div>
-                      <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
-                        Verified email & workspace initialized
+                      <div>
+                        <div style={{ fontSize: "0.88rem", fontWeight: 700, color: "#0f172a" }}>{s.n}. {s.title}</div>
+                        <div style={{ fontSize: "0.75rem", color: "#64748b" }}>{s.sub}</div>
                       </div>
                     </div>
+                    {s.done || !s.href ? (
+                      <span style={{ fontSize: "0.75rem", fontWeight: 700, color: s.done ? "#16a34a" : "#64748b" }}>{s.done ? s.doneLabel : ""}</span>
+                    ) : (
+                      <button type="button" onClick={() => router.push(s.href!)} style={{
+                        padding: "6px 14px", borderRadius: "8px", backgroundColor: "#3562f5", color: "#ffffff",
+                        border: "none", fontSize: "0.78rem", fontWeight: 700, cursor: "pointer",
+                      }}>
+                        {s.cta}
+                      </button>
+                    )}
                   </div>
-                  <span style={{ fontSize: "0.75rem", fontWeight: 700, color: "#16a34a" }}>
-                    Completed
-                  </span>
-                </div>
-
-                {/* Step 2: Email Connection */}
-                <div
-                  style={{
-                    padding: "14px 16px",
-                    borderRadius: "14px",
-                    backgroundColor: emailConnected ? "#f8fafc" : "#ffffff",
-                    border: emailConnected ? "1px solid #e2e8f0" : "1px solid #bfdbfe",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    boxShadow: emailConnected ? "none" : "0 4px 12px rgba(37, 99, 235, 0.06)",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                    <div
-                      style={{
-                        width: "28px",
-                        height: "28px",
-                        borderRadius: "50%",
-                        backgroundColor: emailConnected ? "#22c55e" : "#eff6ff",
-                        color: emailConnected ? "#ffffff" : "#2563eb",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontWeight: 700,
-                        fontSize: "0.8rem",
-                      }}
-                    >
-                      {emailConnected ? <IconCheck size={16} stroke={3} /> : "2"}
-                    </div>
-                    <div>
-                      <div style={{ fontSize: "0.88rem", fontWeight: 700, color: "#0f172a" }}>
-                        2. Connect business email
-                      </div>
-                      <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
-                        Sync Gmail or Microsoft Outlook in 30 seconds
-                      </div>
-                    </div>
-                  </div>
-
-                  {emailConnected ? (
-                    <span style={{ fontSize: "0.75rem", fontWeight: 700, color: "#16a34a" }}>
-                      Connected
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => router.push("/dashboard/integrations")}
-                      style={{
-                        padding: "6px 14px",
-                        borderRadius: "8px",
-                        backgroundColor: "#3562f5",
-                        color: "#ffffff",
-                        border: "none",
-                        fontSize: "0.78rem",
-                        fontWeight: 700,
-                        cursor: "pointer",
-                      }}
-                    >
-                      Connect now
-                    </button>
-                  )}
-                </div>
-
-                {/* Step 3: Knowledge Base */}
-                <div
-                  style={{
-                    padding: "14px 16px",
-                    borderRadius: "14px",
-                    backgroundColor: knowledgeAdded ? "#f8fafc" : "#ffffff",
-                    border: knowledgeAdded ? "1px solid #e2e8f0" : "1px solid #bfdbfe",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    boxShadow: knowledgeAdded ? "none" : "0 4px 12px rgba(37, 99, 235, 0.06)",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                    <div
-                      style={{
-                        width: "28px",
-                        height: "28px",
-                        borderRadius: "50%",
-                        backgroundColor: knowledgeAdded ? "#22c55e" : "#eff6ff",
-                        color: knowledgeAdded ? "#ffffff" : "#2563eb",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontWeight: 700,
-                        fontSize: "0.8rem",
-                      }}
-                    >
-                      {knowledgeAdded ? <IconCheck size={16} stroke={3} /> : "3"}
-                    </div>
-                    <div>
-                      <div style={{ fontSize: "0.88rem", fontWeight: 700, color: "#0f172a" }}>
-                        3. Add company knowledge
-                      </div>
-                      <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
-                        Upload docs, FAQ, pricing, or web URL
-                      </div>
-                    </div>
-                  </div>
-
-                  {knowledgeAdded ? (
-                    <span style={{ fontSize: "0.75rem", fontWeight: 700, color: "#16a34a" }}>
-                      Indexed
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => router.push("/dashboard/knowledge")}
-                      style={{
-                        padding: "6px 14px",
-                        borderRadius: "8px",
-                        backgroundColor: "#3562f5",
-                        color: "#ffffff",
-                        border: "none",
-                        fontSize: "0.78rem",
-                        fontWeight: 700,
-                        cursor: "pointer",
-                      }}
-                    >
-                      Add knowledge
-                    </button>
-                  )}
-                </div>
+                ))}
               </div>
             </div>
-
-            {/* Bottom Tip */}
             <div style={{ marginTop: "14px", fontSize: "0.74rem", color: "#64748b", display: "flex", alignItems: "center", gap: "6px" }}>
               <IconSparkles size={15} color="#3562f5" />
-              <span>Tip: Once both steps are completed, your operational dashboard unlocks automatically.</span>
+              <span>Once all steps are complete, your live operations dashboard unlocks automatically.</span>
             </div>
           </motion.div>
 
-          {/* QUICK ACTIONS BENTO CARD (Span 1 col) */}
-          <motion.div
-            whileHover={{ y: -2 }}
-            transition={{ duration: 0.2 }}
-            className="bento-card bento-col-span-1"
-          >
+          {/* Quick launch (navigation only) */}
+          <motion.div {...card} className="bento-card bento-col-span-1">
             <div>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "14px" }}>
-                <IconBolt size={18} color="#3562f5" />
-                <h3 style={{ fontSize: "0.95rem", fontWeight: 800, color: "#0f172a", margin: 0 }}>
-                  Quick Launch
-                </h3>
-              </div>
-
+              <CardTitle icon={<IconBolt size={18} color="#3562f5" />}>Quick Launch</CardTitle>
               <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                <Link
-                  href="/dashboard/integrations"
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "10px 12px",
-                    borderRadius: "10px",
-                    border: "1px solid #e2e8f0",
-                    textDecoration: "none",
-                    color: "#0f172a",
-                    transition: "all 0.15s ease",
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f8fafc")}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <IconBrandGmail size={18} color="#ea4335" />
-                    <span style={{ fontSize: "0.82rem", fontWeight: 600 }}>Connect Gmail</span>
-                  </div>
-                  <IconArrowRight size={14} color="#94a3b8" />
-                </Link>
-
-                <Link
-                  href="/dashboard/integrations"
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "10px 12px",
-                    borderRadius: "10px",
-                    border: "1px solid #e2e8f0",
-                    textDecoration: "none",
-                    color: "#0f172a",
-                    transition: "all 0.15s ease",
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f8fafc")}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <IconBrandOffice size={18} color="#00a4ef" />
-                    <span style={{ fontSize: "0.82rem", fontWeight: 600 }}>Connect Outlook</span>
-                  </div>
-                  <IconArrowRight size={14} color="#94a3b8" />
-                </Link>
-
-                <Link
-                  href="/dashboard/knowledge"
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "10px 12px",
-                    borderRadius: "10px",
-                    border: "1px solid #e2e8f0",
-                    textDecoration: "none",
-                    color: "#0f172a",
-                    transition: "all 0.15s ease",
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f8fafc")}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <IconFileText size={18} color="#3562f5" />
-                    <span style={{ fontSize: "0.82rem", fontWeight: 600 }}>Add Knowledge</span>
-                  </div>
-                  <IconArrowRight size={14} color="#94a3b8" />
-                </Link>
-
-                <Link
-                  href="/dashboard/team"
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "10px 12px",
-                    borderRadius: "10px",
-                    border: "1px solid #e2e8f0",
-                    textDecoration: "none",
-                    color: "#0f172a",
-                    transition: "all 0.15s ease",
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f8fafc")}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <IconUsers size={18} color="#7c3aed" />
-                    <span style={{ fontSize: "0.82rem", fontWeight: 600 }}>Invite Teammates</span>
-                  </div>
-                  <IconArrowRight size={14} color="#94a3b8" />
-                </Link>
-              </div>
-            </div>
-
-            <div style={{ fontSize: "0.72rem", color: "#94a3b8", marginTop: "12px", textAlign: "center" }}>
-              Fast 1-click workspace actions
-            </div>
-          </motion.div>
-
-          {/* INSIGHTS PREVIEW BENTO CARD (Span 1 col) */}
-          <motion.div
-            whileHover={{ y: -2 }}
-            transition={{ duration: 0.2 }}
-            className="bento-card bento-col-span-1"
-          >
-            <div>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px" }}>
-                <IconChartBar size={18} color="#3562f5" />
-                <h3 style={{ fontSize: "0.95rem", fontWeight: 800, color: "#0f172a", margin: 0 }}>
-                  Realtime Metrics
-                </h3>
-              </div>
-
-              {/* Animated Mini Bars Visual */}
-              <div
-                style={{
-                  height: "80px",
-                  borderRadius: "12px",
-                  backgroundColor: "#f8fafc",
-                  display: "flex",
-                  alignItems: "flex-end",
-                  justifyContent: "center",
-                  gap: "8px",
-                  padding: "12px",
-                  marginBottom: "12px",
-                }}
-              >
-                {[40, 65, 95, 75, 50, 85].map((h, i) => (
-                  <motion.div
-                    key={i}
-                    initial={{ height: 0 }}
-                    animate={{ height: `${h}%` }}
-                    transition={{ duration: 0.8, delay: i * 0.1 }}
-                    style={{
-                      width: "12px",
-                      borderRadius: "4px",
-                      backgroundColor: i === 2 ? "#3562f5" : "#bfdbfe",
-                    }}
-                  />
-                ))}
-              </div>
-
-              <div style={{ fontSize: "0.84rem", fontWeight: 700, color: "#0f172a" }}>
-                Realtime analytics unlock here
-              </div>
-              <div style={{ fontSize: "0.74rem", color: "#64748b", marginTop: "4px" }}>
-                Resolution times, customer satisfaction, and auto-dispatched inquiries.
-              </div>
-            </div>
-
-            <div style={{ paddingTop: "10px", borderTop: "1px solid #f1f5f9", fontSize: "0.72rem", color: "#3562f5", fontWeight: 600 }}>
-              Live pipeline streaming
-            </div>
-          </motion.div>
-
-          {/* AI LIVE SIMULATOR / TEST DRIVE BENTO CARD (Span 3 cols) */}
-          <motion.div
-            whileHover={{ y: -2 }}
-            transition={{ duration: 0.2 }}
-            className="bento-card bento-col-span-3 glow-blue"
-          >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "14px", flexWrap: "wrap", gap: "8px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <IconSparkles size={18} color="#3562f5" />
-                <h3 style={{ fontSize: "0.98rem", fontWeight: 800, color: "#0f172a", margin: 0 }}>
-                  Live Autonomous Response Simulator
-                </h3>
-              </div>
-
-              {/* Tone Switcher */}
-              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                <span style={{ fontSize: "0.74rem", color: "#64748b", fontWeight: 600 }}>Test Tone:</span>
-                {(["Professional", "Friendly", "Concise"] as const).map((tone) => (
-                  <button
-                    key={tone}
-                    type="button"
-                    onClick={() => setSelectedTone(tone)}
-                    style={{
-                      padding: "4px 9px",
-                      borderRadius: "6px",
-                      border: "1px solid",
-                      borderColor: selectedTone === tone ? "#3562f5" : "#e2e8f0",
-                      backgroundColor: selectedTone === tone ? "#eff6ff" : "#ffffff",
-                      color: selectedTone === tone ? "#3562f5" : "#64748b",
-                      fontSize: "0.72rem",
-                      fontWeight: 700,
-                      cursor: "pointer",
-                      transition: "all 0.15s ease",
-                    }}
-                  >
-                    {tone}
-                  </button>
+                {[
+                  { href: "/dashboard/integrations", label: "Connect Gmail", icon: <IconBrandGmail size={18} color="#ea4335" /> },
+                  { href: "/dashboard/integrations", label: "Connect Outlook", icon: <IconBrandOffice size={18} color="#00a4ef" /> },
+                  { href: "/dashboard/knowledge", label: "Add Knowledge", icon: <IconFileText size={18} color="#3562f5" /> },
+                  { href: "/dashboard/team", label: "Invite Teammates", icon: <IconUsers size={18} color="#7c3aed" /> },
+                ].map((l) => (
+                  <Link key={l.label} href={l.href} style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px",
+                    borderRadius: "10px", border: "1px solid #e2e8f0", textDecoration: "none", color: "#0f172a",
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      {l.icon}
+                      <span style={{ fontSize: "0.82rem", fontWeight: 600 }}>{l.label}</span>
+                    </div>
+                    <IconArrowRight size={14} color="#94a3b8" />
+                  </Link>
                 ))}
               </div>
             </div>
+          </motion.div>
 
-            {/* Split Inbound & AI Outbound bubbles */}
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: "12px",
-                marginBottom: "12px",
-              }}
-            >
-              {/* Inbound Customer Query */}
-              <div
-                style={{
-                  padding: "12px 14px",
-                  borderRadius: "12px",
-                  backgroundColor: "#f8fafc",
-                  border: "1px solid #f1f5f9",
-                }}
-              >
-                <div style={{ fontSize: "0.7rem", color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>
-                  INCOMING EMAIL (Michael Vance)
-                </div>
-                <div style={{ fontSize: "0.82rem", color: "#0f172a", marginTop: "4px", lineHeight: 1.45 }}>
-                  &ldquo;Hi team, we need to expedite our annual renewal contract and add 15 more seats before Thursday. Can you send the pricing sheet?&rdquo;
-                </div>
-              </div>
-
-              {/* Live AI Drafted Answer */}
-              <div
-                style={{
-                  padding: "12px 14px",
-                  borderRadius: "12px",
-                  backgroundColor: "#eff6ff",
-                  border: "1px solid #dbeafe",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px" }}>
-                  <span style={{ fontSize: "0.7rem", color: "#1e40af", fontWeight: 700, textTransform: "uppercase" }}>
-                    PROXIPILOT AUTO-DRAFT ({selectedTone.toUpperCase()})
-                  </span>
-                  <span style={{ fontSize: "0.68rem", color: "#2563eb", fontWeight: 700 }}>
-                    Confidence: 98%
-                  </span>
-                </div>
-                <div style={{ fontSize: "0.82rem", color: "#1e3a8a", lineHeight: 1.45 }}>
-                  {selectedTone === "Friendly"
-                    ? "Hi Michael! Absolutely, happy to help you upgrade. I've attached your custom enterprise tier breakdown with the 15 additional seats for Thursday."
-                    : selectedTone === "Concise"
-                    ? "Hello Michael. Contract updated with 15 seats. Attached pricing sheet reflects enterprise annual discount for Thursday."
-                    : "Dear Michael, thank you for reaching out. We have expedited your contract update for 15 additional seats. Attached is your revised enterprise pricing."}
-                </div>
+          {/* This week (real numbers, zero until mail arrives) */}
+          <motion.div {...card} className="bento-card bento-col-span-1">
+            <div>
+              <CardTitle icon={<IconChartBar size={18} color="#3562f5" />}>This week</CardTitle>
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px", fontSize: "0.82rem" }}>
+                {[
+                  ["Customer emails", fmtInt(data?.inbound.count)],
+                  ["AI drafts created", fmtInt(data?.ai.drafts_generated)],
+                  ["AI replies sent", fmtInt(data?.ai.replies_sent)],
+                  ["Avg. first reply", fmtMinutes(data?.response_time.avg_first_reply_minutes)],
+                ].map(([k, v]) => (
+                  <div key={k} style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ color: "#64748b" }}>{k}</span>
+                    <strong style={{ color: "#0f172a" }}>{isLoading ? "…" : v}</strong>
+                  </div>
+                ))}
               </div>
             </div>
-
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "0.74rem", color: "#64748b" }}>
-              <span>Autonomous guardrails ensure human approval before sending when confidence is below 90%.</span>
-              <span style={{ color: "#3562f5", fontWeight: 700 }}>Safe Mode: Enabled</span>
+            <div style={{ paddingTop: "10px", borderTop: "1px solid #f1f5f9", fontSize: "0.72rem", color: "#64748b" }}>
+              Updates automatically as emails arrive.
             </div>
           </motion.div>
 
-          {/* TRUST / SECURITY BENTO CARD (Span 1 col) */}
-          <motion.div
-            whileHover={{ y: -2 }}
-            transition={{ duration: 0.2 }}
-            className="bento-card bento-col-span-1"
-          >
-            <div>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px" }}>
-                <IconShieldCheck size={18} color="#059669" />
-                <h3 style={{ fontSize: "0.95rem", fontWeight: 800, color: "#0f172a", margin: 0 }}>
-                  Enterprise Trust
-                </h3>
-              </div>
-
-              <p style={{ fontSize: "0.8rem", color: "#475569", lineHeight: 1.45, fontStyle: "italic", margin: 0 }}>
-                &ldquo;ProxiPilot handled 84% of our routine service scheduling in week one with zero false responses.&rdquo;
-              </p>
-
-              <div style={{ marginTop: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
-                <div
-                  style={{
-                    width: "28px",
-                    height: "28px",
-                    borderRadius: "50%",
-                    backgroundColor: "#3562f5",
-                    color: "#ffffff",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: "0.75rem",
-                    fontWeight: 700,
-                  }}
-                >
-                  EK
-                </div>
-                <div>
-                  <div style={{ fontSize: "0.78rem", fontWeight: 700, color: "#0f172a" }}>
-                    Elena Rostova
-                  </div>
-                  <div style={{ fontSize: "0.7rem", color: "#64748b" }}>
-                    VP Ops, Apex Systems
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div style={{ paddingTop: "10px", borderTop: "1px solid #f1f5f9", fontSize: "0.72rem", color: "#059669", fontWeight: 700 }}>
-              SOC2 Type II & GDPR Compliant
-            </div>
+          {/* Recent conversations (real) */}
+          <motion.div {...card} className="bento-card bento-col-span-2">
+            <CardTitle icon={<IconMail size={18} color="#3562f5" />}>Recent conversations</CardTitle>
+            <RecentActivity data={data} loading={isLoading} />
           </motion.div>
         </div>
       ) : (
-        /* OPERATIONAL VIEW BENTO GRID (When setup is complete) */
         <>
-          {/* 4 BENTO METRIC CARDS ROW */}
+          {/* Metric cards (real, last 7 days) */}
           <div className="bento-grid">
-            {/* Metric 1 */}
-            <motion.div
-              whileHover={{ y: -2 }}
-              transition={{ duration: 0.2 }}
-              className="bento-card bento-col-span-1"
-            >
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span style={{ fontSize: "0.74rem", fontWeight: 700, color: "#64748b", textTransform: "uppercase" }}>
-                  Total Inbound
-                </span>
-                <IconMail size={16} color="#64748b" />
-              </div>
-              <div style={{ fontSize: "1.9rem", fontWeight: 800, color: "#0f172a", margin: "6px 0 2px 0" }}>
-                1,284
-              </div>
-              <div style={{ fontSize: "0.75rem", color: "#16a34a", fontWeight: 700 }}>
-                +18% from last week
-              </div>
-            </motion.div>
-
-            {/* Metric 2 */}
-            <motion.div
-              whileHover={{ y: -2 }}
-              transition={{ duration: 0.2 }}
-              className="bento-card bento-col-span-1 glow-blue"
-            >
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span style={{ fontSize: "0.74rem", fontWeight: 700, color: "#2563eb", textTransform: "uppercase" }}>
-                  AI Autonomous Handled
-                </span>
-                <IconSparkles size={16} color="#2563eb" />
-              </div>
-              <div style={{ fontSize: "1.9rem", fontWeight: 800, color: "#2563eb", margin: "6px 0 2px 0" }}>
-                82.4%
-              </div>
-              <div style={{ fontSize: "0.75rem", color: "#64748b", fontWeight: 600 }}>
-                1,058 automated drafts
-              </div>
-            </motion.div>
-
-            {/* Metric 3 */}
-            <motion.div
-              whileHover={{ y: -2 }}
-              transition={{ duration: 0.2 }}
-              className="bento-card bento-col-span-1 glow-amber"
-            >
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span style={{ fontSize: "0.74rem", fontWeight: 700, color: "#ea580c", textTransform: "uppercase" }}>
-                  Needs Attention
-                </span>
-                <IconAlertTriangle size={16} color="#ea580c" />
-              </div>
-              <div style={{ fontSize: "1.9rem", fontWeight: 800, color: "#ea580c", margin: "6px 0 2px 0" }}>
-                3
-              </div>
-              <div style={{ fontSize: "0.75rem", color: "#ea580c", fontWeight: 700 }}>
-                Human approval required
-              </div>
-            </motion.div>
-
-            {/* Metric 4 */}
-            <motion.div
-              whileHover={{ y: -2 }}
-              transition={{ duration: 0.2 }}
-              className="bento-card bento-col-span-1"
-            >
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span style={{ fontSize: "0.74rem", fontWeight: 700, color: "#64748b", textTransform: "uppercase" }}>
-                  Avg Response Time
-                </span>
-                <IconClock size={16} color="#64748b" />
-              </div>
-              <div style={{ fontSize: "1.9rem", fontWeight: 800, color: "#0f172a", margin: "6px 0 2px 0" }}>
-                4.2 min
-              </div>
-              <div style={{ fontSize: "0.75rem", color: "#16a34a", fontWeight: 700 }}>
-                -68% faster than baseline
-              </div>
-            </motion.div>
+            <MetricCard label="Customer emails" icon={<IconMail size={16} color="#64748b" />}
+              value={isLoading ? "…" : fmtInt(data?.inbound.count)}
+              sub={typeof change === "number" ? `${change >= 0 ? "+" : ""}${change}% vs previous ${data?.window_days} days` : windowLabel}
+              subColor={typeof change === "number" ? (change >= 0 ? "#16a34a" : "#dc2626") : "#64748b"} />
+            <MetricCard label="AI replies sent" icon={<IconSparkles size={16} color="#2563eb" />} accent="#2563eb" glow="glow-blue"
+              value={isLoading ? "…" : fmtInt(data?.ai.replies_sent)}
+              sub={data ? `${fmtPctValue(data.ai.reply_coverage_pct)} of customer emails • ${fmtInt(data.ai.auto_sent)} auto-sent` : windowLabel} />
+            <MetricCard label="Needs review" icon={<IconAlertTriangle size={16} color="#ea580c" />} accent="#ea580c" glow="glow-amber" subColor="#ea580c"
+              value={isLoading ? "…" : fmtInt(pending)}
+              sub={pending > 0 ? "AI drafts awaiting approval" : "All caught up"} />
+            <MetricCard label="Avg first reply" icon={<IconClock size={16} color="#64748b" />}
+              value={isLoading ? "…" : fmtMinutes(data?.response_time.avg_first_reply_minutes)}
+              sub={data ? `${fmtInt(data.response_time.replied_conversations)} replied conversations • ${windowLabel}` : windowLabel} />
           </div>
 
-          {/* MAIN OPERATIONAL BENTO GRID */}
           <div className="bento-grid">
-            {/* TODAY'S AI ACTIVITY (Span 2 cols on desktop, Row Span 2) */}
-            <motion.div
-              whileHover={{ y: -2 }}
-              transition={{ duration: 0.2 }}
-              className="bento-card bento-col-span-2 bento-row-span-2 glow-blue"
-            >
+            {/* Recent activity (real) */}
+            <motion.div {...card} className="bento-card bento-col-span-2 bento-row-span-2 glow-blue">
               <div>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <IconMail size={18} color="#3562f5" />
-                    <h3 style={{ fontSize: "1rem", fontWeight: 800, color: "#0f172a", margin: 0 }}>
-                      Today&apos;s Live Autonomous Activity
-                    </h3>
-                  </div>
-
-                  <Link
-                    href="/dashboard/inbox"
-                    style={{
-                      fontSize: "0.8rem",
-                      fontWeight: 700,
-                      color: "#3562f5",
-                      textDecoration: "none",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "4px",
-                    }}
-                  >
+                  <CardTitle icon={<IconMail size={18} color="#3562f5" />}>Recent conversations</CardTitle>
+                  <Link href="/dashboard/inbox" style={{ fontSize: "0.8rem", fontWeight: 700, color: "#3562f5", textDecoration: "none", display: "flex", alignItems: "center", gap: "4px" }}>
                     <span>View Inbox</span>
                     <IconArrowRight size={14} />
                   </Link>
                 </div>
+                <RecentActivity data={data} loading={isLoading} />
+              </div>
+            </motion.div>
 
-                <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            {/* Needs attention (real) */}
+            <motion.div {...card} className="bento-card bento-col-span-1 glow-amber">
+              <div>
+                <CardTitle icon={<IconAlertTriangle size={18} color="#d97706" />}>Needs your attention</CardTitle>
+                <div style={{ padding: "12px", borderRadius: "12px", backgroundColor: pending > 0 ? "#fffbeb" : "#f0fdf4", border: `1px solid ${pending > 0 ? "#fef3c7" : "#dcfce7"}`, marginBottom: "10px" }}>
+                  <div style={{ fontSize: "0.8rem", fontWeight: 700, color: pending > 0 ? "#92400e" : "#166534" }}>
+                    {pending > 0 ? `${pending} AI ${pending === 1 ? "draft" : "drafts"} waiting for review` : "No drafts waiting for review"}
+                  </div>
+                  <div style={{ fontSize: "0.72rem", color: pending > 0 ? "#b45309" : "#15803d", marginTop: "4px", lineHeight: 1.4 }}>
+                    {pending > 0
+                      ? "These replies were held for a human check before sending."
+                      : "Every AI draft has been reviewed or sent."}
+                  </div>
+                </div>
+                {pending > 0 && (
+                  <button type="button" onClick={() => router.push("/dashboard/inbox")} style={{
+                    width: "100%", padding: "8px 12px", borderRadius: "8px", backgroundColor: "#d97706", color: "#ffffff",
+                    border: "none", fontSize: "0.78rem", fontWeight: 700, cursor: "pointer",
+                  }}>
+                    Review {pending} {pending === 1 ? "draft" : "drafts"} →
+                  </button>
+                )}
+              </div>
+            </motion.div>
+
+            {/* AI performance (real) */}
+            <motion.div {...card} className="bento-card bento-col-span-1">
+              <div>
+                <CardTitle icon={<IconBrain size={18} color="#3562f5" />}>AI performance</CardTitle>
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px", fontSize: "0.78rem", color: "#64748b" }}>
                   {[
-                    {
-                      title: "Pricing Inquiry & Tier Recommendation",
-                      company: "Acme Corp (Sarah Jenkins)",
-                      status: "Response ready",
-                      badgeBg: "#eff6ff",
-                      badgeColor: "#2563eb",
-                      time: "8m ago",
-                    },
-                    {
-                      title: "Appliance Repair Maintenance Schedule",
-                      company: "Metro Facilities (David Miller)",
-                      status: "Knowledge matched",
-                      badgeBg: "#ecfdf5",
-                      badgeColor: "#16a34a",
-                      time: "24m ago",
-                    },
-                    {
-                      title: "High Intent Enterprise Lead",
-                      company: "Global Logistics Group",
-                      status: "Assigned to Sales",
-                      badgeBg: "#faf5ff",
-                      badgeColor: "#9333ea",
-                      time: "1h ago",
-                    },
-                    {
-                      title: "Product Return Policy Clarification",
-                      company: "Nordic Retail (Hannah Schmidt)",
-                      status: "Auto-Resolved",
-                      badgeBg: "#ecfdf5",
-                      badgeColor: "#16a34a",
-                      time: "2h ago",
-                    },
-                  ].map((item, idx) => (
-                    <div
-                      key={idx}
-                      style={{
-                        padding: "12px 14px",
-                        borderRadius: "12px",
-                        border: "1px solid #f1f5f9",
-                        backgroundColor: "#fafafa",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        transition: "all 0.15s ease",
-                      }}
-                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f8fafc")}
-                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#fafafa")}
-                    >
-                      <div>
-                        <div style={{ fontSize: "0.85rem", fontWeight: 700, color: "#0f172a" }}>
-                          {item.title}
-                        </div>
-                        <div style={{ fontSize: "0.72rem", color: "#64748b", marginTop: "2px" }}>
-                          {item.company} &bull; {item.time}
-                        </div>
-                      </div>
-
-                      <span
-                        style={{
-                          padding: "3px 8px",
-                          borderRadius: "6px",
-                          backgroundColor: item.badgeBg,
-                          color: item.badgeColor,
-                          fontSize: "0.72rem",
-                          fontWeight: 700,
-                        }}
-                      >
-                        {item.status}
-                      </span>
+                    ["Drafts created", fmtInt(data?.ai.drafts_generated)],
+                    ["Approved without edits", fmtPct(data?.ai.approval_rate)],
+                    ["Edited before sending", fmtPct(data?.ai.edit_rate)],
+                    ["Avg. drafting time", typeof data?.ai.avg_processing_seconds === "number" ? `${data.ai.avg_processing_seconds} s` : DASH],
+                    ["Model", data?.ai.model || DASH],
+                  ].map(([k, v]) => (
+                    <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                      <span>{k}</span>
+                      <strong style={{ color: "#0f172a", textAlign: "right" }}>{isLoading ? "…" : v}</strong>
                     </div>
                   ))}
                 </div>
               </div>
-
-              <div style={{ paddingTop: "12px", borderTop: "1px solid #f1f5f9", display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "0.74rem", color: "#64748b" }}>
-                <span>Real-time webhook sync: 100% operational</span>
-                <span style={{ color: "#16a34a", fontWeight: 700 }}>Latency: 142ms</span>
-              </div>
-            </motion.div>
-
-            {/* NEEDS ATTENTION BENTO CARD (Span 1 col) */}
-            <motion.div
-              whileHover={{ y: -2 }}
-              transition={{ duration: 0.2 }}
-              className="bento-card bento-col-span-1 glow-amber"
-            >
-              <div>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px" }}>
-                  <IconAlertTriangle size={18} color="#d97706" />
-                  <h3 style={{ fontSize: "0.95rem", fontWeight: 800, color: "#0f172a", margin: 0 }}>
-                    Human Attention Required
-                  </h3>
-                </div>
-
-                <div
-                  style={{
-                    padding: "12px",
-                    borderRadius: "12px",
-                    backgroundColor: "#fffbeb",
-                    border: "1px solid #fef3c7",
-                    marginBottom: "10px",
-                  }}
-                >
-                  <div style={{ fontSize: "0.8rem", fontWeight: 700, color: "#92400e" }}>
-                    Refund Request &bull; Manual Review
-                  </div>
-                  <div style={{ fontSize: "0.72rem", color: "#b45309", marginTop: "4px", lineHeight: 1.4 }}>
-                    Confidence score below 75% threshold. ProxiPilot drafted a response and paused dispatch.
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => router.push("/dashboard/inbox")}
-                  style={{
-                    width: "100%",
-                    padding: "8px 12px",
-                    borderRadius: "8px",
-                    backgroundColor: "#d97706",
-                    color: "#ffffff",
-                    border: "none",
-                    fontSize: "0.78rem",
-                    fontWeight: 700,
-                    cursor: "pointer",
-                  }}
-                >
-                  Review 3 Pending Drafts →
-                </button>
-              </div>
-
-              <div style={{ fontSize: "0.72rem", color: "#92400e", fontWeight: 600, marginTop: "10px" }}>
-                Zero unauthorized outbound actions.
-              </div>
-            </motion.div>
-
-            {/* AI WORKLOAD SUMMARY (Span 1 col) */}
-            <motion.div
-              whileHover={{ y: -2 }}
-              transition={{ duration: 0.2 }}
-              className="bento-card bento-col-span-1"
-            >
-              <div>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px" }}>
-                  <IconBrain size={18} color="#3562f5" />
-                  <h3 style={{ fontSize: "0.95rem", fontWeight: 800, color: "#0f172a", margin: 0 }}>
-                    AI Autonomous Workload
-                  </h3>
-                </div>
-
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
-                  <span style={{ fontSize: "0.8rem", color: "#64748b" }}>Triage & Dispatch</span>
-                  <span style={{ fontSize: "0.85rem", fontWeight: 800, color: "#2563eb" }}>82%</span>
-                </div>
-
-                <div style={{ width: "100%", height: "8px", borderRadius: "9999px", backgroundColor: "#e2e8f0", overflow: "hidden", marginBottom: "14px" }}>
-                  <div style={{ width: "82%", height: "100%", backgroundColor: "#3562f5", borderRadius: "9999px" }} />
-                </div>
-
-                <div style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "0.75rem", color: "#64748b" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span>Model Engine:</span>
-                    <strong style={{ color: "#0f172a" }}>Sonnet 3.5 / GPT-4o</strong>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span>Vector Grounding:</span>
-                    <strong style={{ color: "#16a34a" }}>100% Verified</strong>
-                  </div>
-                </div>
-              </div>
-
               <div style={{ paddingTop: "10px", borderTop: "1px solid #f1f5f9", fontSize: "0.72rem", color: "#64748b" }}>
-                Capacity: 50,000 emails/month
+                {windowLabel}
               </div>
             </motion.div>
 
-            {/* QUICK ACTIONS ROW (Span 2 cols) */}
-            <motion.div
-              whileHover={{ y: -2 }}
-              transition={{ duration: 0.2 }}
-              className="bento-card bento-col-span-2"
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px" }}>
-                <IconBolt size={18} color="#3562f5" />
-                <h3 style={{ fontSize: "0.95rem", fontWeight: 800, color: "#0f172a", margin: 0 }}>
-                  Quick Launchpad
-                </h3>
-              </div>
-
+            {/* Quick launchpad (navigation only) */}
+            <motion.div {...card} className="bento-card bento-col-span-2">
+              <CardTitle icon={<IconBolt size={18} color="#3562f5" />}>Quick Launchpad</CardTitle>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "10px" }}>
-                <Link
-                  href="/dashboard/inbox"
-                  style={{
-                    padding: "10px",
-                    borderRadius: "10px",
-                    border: "1px solid #e2e8f0",
-                    textDecoration: "none",
-                    textAlign: "center",
-                    color: "#0f172a",
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    gap: "6px",
-                  }}
-                >
-                  <IconMail size={20} color="#3562f5" />
-                  <span style={{ fontSize: "0.76rem", fontWeight: 700 }}>Inbox</span>
-                </Link>
-
-                <Link
-                  href="/dashboard/knowledge"
-                  style={{
-                    padding: "10px",
-                    borderRadius: "10px",
-                    border: "1px solid #e2e8f0",
-                    textDecoration: "none",
-                    textAlign: "center",
-                    color: "#0f172a",
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    gap: "6px",
-                  }}
-                >
-                  <IconDatabase size={20} color="#059669" />
-                  <span style={{ fontSize: "0.76rem", fontWeight: 700 }}>Knowledge</span>
-                </Link>
-
-                <Link
-                  href="/dashboard/integrations"
-                  style={{
-                    padding: "10px",
-                    borderRadius: "10px",
-                    border: "1px solid #e2e8f0",
-                    textDecoration: "none",
-                    textAlign: "center",
-                    color: "#0f172a",
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    gap: "6px",
-                  }}
-                >
-                  <IconBrandGmail size={20} color="#ea4335" />
-                  <span style={{ fontSize: "0.76rem", fontWeight: 700 }}>Mailboxes</span>
-                </Link>
-
-                <Link
-                  href="/dashboard/team"
-                  style={{
-                    padding: "10px",
-                    borderRadius: "10px",
-                    border: "1px solid #e2e8f0",
-                    textDecoration: "none",
-                    textAlign: "center",
-                    color: "#0f172a",
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    gap: "6px",
-                  }}
-                >
-                  <IconUsers size={20} color="#7c3aed" />
-                  <span style={{ fontSize: "0.76rem", fontWeight: 700 }}>Team</span>
-                </Link>
+                {[
+                  { href: "/dashboard/inbox", label: "Inbox", icon: <IconMail size={20} color="#3562f5" /> },
+                  { href: "/dashboard/knowledge", label: "Knowledge", icon: <IconDatabase size={20} color="#059669" /> },
+                  { href: "/dashboard/integrations", label: "Mailboxes", icon: <IconBrandGmail size={20} color="#ea4335" /> },
+                  { href: "/dashboard/team", label: "Team", icon: <IconUsers size={20} color="#7c3aed" /> },
+                ].map((l) => (
+                  <Link key={l.label} href={l.href} style={{
+                    padding: "10px", borderRadius: "10px", border: "1px solid #e2e8f0", textDecoration: "none",
+                    textAlign: "center", color: "#0f172a", display: "flex", flexDirection: "column", alignItems: "center", gap: "6px",
+                  }}>
+                    {l.icon}
+                    <span style={{ fontSize: "0.76rem", fontWeight: 700 }}>{l.label}</span>
+                  </Link>
+                ))}
               </div>
             </motion.div>
           </div>

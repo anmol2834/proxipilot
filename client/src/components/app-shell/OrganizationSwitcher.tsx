@@ -18,6 +18,12 @@ export function OrganizationSwitcher() {
   const open = Boolean(anchorEl);
 
   const orgName = currentOrganization?.name || "My Organization";
+  // Real active-member count from /auth/me; hidden (not guessed) until it is known.
+  const memberCount = currentOrganization?.member_count;
+  const memberLabel =
+    typeof memberCount === "number" && memberCount > 0
+      ? `${memberCount} ${memberCount === 1 ? "member" : "members"}`
+      : currentOrganization?.role || "";
 
   const handleClick = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
@@ -89,7 +95,7 @@ export function OrganizationSwitcher() {
             {orgName}
           </Typography>
           <Typography sx={{ fontSize: "0.68rem", color: "#64748B", lineHeight: 1.2 }}>
-            12 members
+            {memberLabel}
           </Typography>
         </Box>
 

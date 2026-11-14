@@ -17,7 +17,7 @@ import { GmailLogo } from "./ProviderIcons";
 interface OAuthConnectModalProps {
   open: boolean;
   onClose: () => void;
-  onAuthorize: (email: string, displayName?: string) => Promise<void>;
+  onAuthorize: (email: string, displayName?: string, isCancelled?: () => boolean) => Promise<void>;
 }
 
 export function OAuthConnectModal({ open, onClose, onAuthorize }: OAuthConnectModalProps) {
@@ -27,6 +27,9 @@ export function OAuthConnectModal({ open, onClose, onAuthorize }: OAuthConnectMo
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
 
+  // Set when the user cancels mid-flow so a late response never redirects them to Google.
+  const cancelledRef = React.useRef(false);
+
   React.useEffect(() => {
     if (!open) {
       setIsSubmitting(false);
@@ -34,21 +37,43 @@ export function OAuthConnectModal({ open, onClose, onAuthorize }: OAuthConnectMo
     }
   }, [open]);
 
+  // Coming back from Google with the browser Back button restores this page from the
+  // back/forward cache with the modal frozen on "Opening Google...". Reset it.
+  React.useEffect(() => {
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) {
+        cancelledRef.current = false;
+        setIsSubmitting(false);
+        setIsRedirecting(false);
+      }
+    };
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting || isRedirecting) return;
 
+    cancelledRef.current = false;
     setIsSubmitting(true);
     try {
-      await onAuthorize(emailHint.trim(), displayName.trim());
-      setIsRedirecting(true);
+      await onAuthorize(emailHint.trim(), displayName.trim(), () => cancelledRef.current);
+      if (!cancelledRef.current) setIsRedirecting(true);
     } catch {
       setIsSubmitting(false);
     }
   };
 
+  // Cancel always works, including while connecting or opening Google.
   const handleClose = () => {
-    if (isSubmitting || isRedirecting) return;
+    if (isSubmitting || isRedirecting) {
+      cancelledRef.current = true;
+      // A redirect to Google may already be in flight: stop that navigation.
+      if (isRedirecting && typeof window !== "undefined") window.stop();
+    }
+    setIsSubmitting(false);
+    setIsRedirecting(false);
     setDisplayName("");
     setEmailHint("");
     onClose();
@@ -133,7 +158,7 @@ export function OAuthConnectModal({ open, onClose, onAuthorize }: OAuthConnectMo
 
           <IconButton
             onClick={handleClose}
-            disabled={isSubmitting || isRedirecting}
+            aria-label="Close"
             size="small"
             sx={{
               color: "#94A3B8",
@@ -392,7 +417,6 @@ export function OAuthConnectModal({ open, onClose, onAuthorize }: OAuthConnectMo
           <Box sx={{ display: "flex", alignItems: "center", gap: 1.25, ml: "auto" }}>
             <Button
               onClick={handleClose}
-              disabled={isSubmitting || isRedirecting}
               variant="outlined"
               sx={{
                 textTransform: "none",

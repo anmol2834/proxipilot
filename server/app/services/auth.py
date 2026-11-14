@@ -383,6 +383,10 @@ class AuthService:
         )
         db.add(session_rec)
 
+        # A completed sign-in after registration: the dashboard now greets "Welcome back".
+        user.login_count = (user.login_count or 0) + 1
+        user.last_login_at = now_dt.isoformat()
+
         # Record USER_SIGNED_IN audit event
         await audit_service.record(
             db=db,
@@ -518,6 +522,19 @@ class AuthService:
                     )
                 )
 
+        # Real member counts for the organization switcher (one grouped query).
+        if orgs:
+            from sqlalchemy import func as _func
+
+            counts = dict((await db.execute(
+                select(OrganizationMember.organization_id, _func.count())
+                .where(OrganizationMember.organization_id.in_([o.id for o in orgs]),
+                       OrganizationMember.status == MembershipStatus.ACTIVE)
+                .group_by(OrganizationMember.organization_id)
+            )).all())
+            for o in orgs:
+                o.member_count = int(counts.get(o.id, 0))
+
         parts = (user.full_name or "").split()
         first_name = parts[0] if parts else ""
         last_name = " ".join(parts[1:]) if len(parts) > 1 else ""
@@ -533,6 +550,7 @@ class AuthService:
             status="ACTIVE" if user.is_active else "INACTIVE",
             primary_organization_id=primary_org_id,
             organizations=orgs,
+            login_count=int(user.login_count or 0),
         )
 
         try:

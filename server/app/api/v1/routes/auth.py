@@ -295,6 +295,7 @@ async def google_callback(
         db.add(identity)
     else:
         user.last_login_at = datetime.now(timezone.utc).isoformat()
+        user.login_count = (user.login_count or 0) + 1  # returning user signing in again
         if avatar_url and not user.avatar_url:
             user.avatar_url = avatar_url
 
@@ -488,6 +489,7 @@ async def microsoft_callback(
         db.add(identity)
     else:
         user.last_login_at = datetime.now(timezone.utc).isoformat()
+        user.login_count = (user.login_count or 0) + 1  # returning user signing in again
         # Check identity
         ident_stmt = select(AuthenticationIdentity).where(
             AuthenticationIdentity.user_id == user.id,

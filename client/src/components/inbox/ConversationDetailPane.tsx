@@ -238,13 +238,12 @@ export function ConversationDetailPane({
   const isWarm = leadTemperature === "warm";
   const isCold = leadTemperature === "cold";
 
+  // Only real AI output is shown; never an invented description of the email.
   const aiSummaryText =
-    aiSummary?.intent ||
+    (aiSummary?.intent && aiSummary.intent !== "Pending AI analysis" ? aiSummary.intent : "") ||
     (aiSummary?.bulletPoints && aiSummary.bulletPoints.length > 0
       ? aiSummary.bulletPoints.join(" ")
-      : primaryMessage?.body
-      ? `This email is a notification from ${sender.name} regarding "${subject}". Key details and thread content are preserved above.`
-      : `Order update and transaction details from ${sender.name}. All relevant reference data is tracked.`);
+      : "The AI summary appears here once ProxiPilot has processed this conversation.");
 
   return (
     <div
@@ -562,7 +561,7 @@ export function ConversationDetailPane({
           {/* Timestamp + actions on right */}
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
             <span style={{ fontSize: 12, color: "#64748B", whiteSpace: "nowrap" }}>
-              {primaryMessage?.timestampFormatted || conversation.latestMessageAt || "12:44 PM"}
+              {primaryMessage?.timestampFormatted || conversation.latestMessageAt || ""}
             </span>
 
             {/* Star */}
