@@ -9,7 +9,7 @@ Encapsulates:
 """
 
 import json
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError

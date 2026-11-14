@@ -15,6 +15,7 @@ change is audited. Permissions: read = ``inbox.read``; changes = ``inbox.reply``
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status

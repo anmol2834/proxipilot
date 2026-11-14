@@ -6,16 +6,16 @@ readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "ProxiPilot Core Team", email = "engineering@proxipilot.com" }]
 dependencies = [
-    "fastapi>=0.115.0",
+    "fastapi>=0.115.0,<0.142",
     "uvicorn[standard]>=0.30.0",
     "pydantic>=2.8.0",
     "pydantic-settings>=2.4.0",
-    "sqlalchemy[asyncio]>=2.0.30",
+    "sqlalchemy[asyncio]>=2.0.30,<2.1",
     "asyncpg>=0.29.0",
     "alembic>=1.13.0",
     "redis>=5.0.0",
-    "qdrant-client>=1.7.0",
-    "openai>=1.30.0",
+    "qdrant-client>=1.7.0,<1.10",  # code uses AsyncQdrantClient.search (removed in later clients)
+    "openai>=1.30.0,<3.9",
     "httpx>=0.27.0",
     "python-jose[cryptography]>=3.3.0",
     "bcrypt>=4.1.0",

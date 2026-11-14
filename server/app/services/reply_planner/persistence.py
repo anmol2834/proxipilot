@@ -15,7 +15,7 @@ import json
 from typing import Any, Dict, Optional, Tuple
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.contracts.evidence_package import MinimalEvidencePackage
