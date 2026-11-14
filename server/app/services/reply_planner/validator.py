@@ -44,6 +44,27 @@ from app.contracts.reply_planner import (
 from app.core.logging import logger
 
 
+# Template slots a model may emit when it lacks a value. Masked money ("₹ XX,XXX", "Rs. XXX") and
+# bracketed slots ("[price]", "[Model No]"). Real codes containing an X (e.g. "XL", "DX-200") do not
+# match: money needs a currency marker, slots need brackets around a placeholder word.
+_PLACEHOLDER_MONEY = re.compile(r"(?:₹|\brs\.?|\binr|\$|€|£)\s*X{2,}[X,.\s]*", re.IGNORECASE)
+_PLACEHOLDER_SLOT = re.compile(
+    r"[\[{<]\s*(?:insert\s+)?(?:your\s+)?(?:price|amount|cost|rate|total|model(?:\s*(?:no|number))?|sku|"
+    r"product(?:\s*name)?|quantity|date|delivery\s*date|discount|tbd|tba|x{2,})\s*[\]}>]",
+    re.IGNORECASE)
+_MASKED_NUMBER = re.compile(r"(?<![A-Za-z0-9])X{2,}(?:[,.]X{2,})+(?![A-Za-z0-9])")
+
+
+def _placeholders_in(text: str) -> List[str]:
+    found: List[str] = []
+    for rx in (_PLACEHOLDER_MONEY, _PLACEHOLDER_SLOT, _MASKED_NUMBER):
+        for m in rx.finditer(text or ""):
+            val = m.group(0).strip()
+            if val and val not in found:
+                found.append(val)
+    return found
+
+
 _NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?")
 # Money must come from packaged price facts (checked by _verify_exact_prices), never from counts.
 _MONEY = re.compile(r"₹|\brs\.?\s|\binr\b|\$|€|£|\bprice|\bcost|\brate\b|\bmrp\b", re.IGNORECASE)
@@ -143,6 +164,15 @@ class DeterministicReplyValidator:
 
         # 4. Exact Price & Numeric Verification
         prices_checked, prices_verified = self._verify_exact_prices(draft, package, issues)
+
+        # 4b. Placeholder content ("₹ XX,XXX", "[price]", "[Model]"): a reply must never ship a
+        # template slot instead of a verified value.
+        for ph in _placeholders_in(draft.body_text or ""):
+            issues.append(ValidationIssue(
+                issue_code="PLACEHOLDER_CONTENT",
+                severity=ValidationIssueSeverity.CRITICAL,
+                description=f"Draft contains placeholder '{ph}' instead of a verified value; use the evidence value or say it is not available.",
+            ))
 
         # 5. HTML Safety & Sanitization
         self._verify_html_safety(draft, issues)

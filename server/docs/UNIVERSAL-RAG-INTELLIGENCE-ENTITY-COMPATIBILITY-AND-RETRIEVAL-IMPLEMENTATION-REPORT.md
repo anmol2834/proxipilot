@@ -297,3 +297,68 @@ Keyword search latency is unchanged (about 450–500 ms in A/B runs on the same 
 
 **Tests:** `test_lexical_retrieval_unit.py` covers the no-prefix words. `test_rank_fusion_unit.py`
 covers weights, normalisation, and a blind keyword list being unable to overturn the semantic leader.
+
+## 14. Addendum (2026-11-14): per-requirement retrieval, schema-aware roles, placeholder guard
+
+**Context.** A screenshot showed a reply quoting "₹ XX,XXX" and model "DACN000X". It was **not**
+produced by ProxiPilot: none of the 5 AI drafts ever generated contains a placeholder, and replaying
+the same enquiry through the live pipeline returns real models, real prices, size-fit notes and the
+company closing. The generic gaps below were found while auditing the pipeline against the
+universal-RAG specification.
+
+**1. Retrieval was not per requirement (highest impact).**
+- **Symptom:** a compound email ran one semantic search and one lexical search over the whole
+  message, plus unranked 5-item category listings. The dominant topic crowded out every other
+  requirement, and fusion gave every requirement group every candidate.
+- **Fix:**
+  - `router.execute_retrieval` fans out to the single-requirement path
+    (`_execute_single`) once per requirement. Each requirement gets its own query, filters, range
+    and eligibility spec.
+  - Requirements run in bounded parallel (`MAX_PARALLEL_REQUIREMENTS = 4`), each on its own DB
+    session. All requirements are processed; failures are reported, never silently dropped.
+  - Results are merged by entity and tagged with `requirement_ids` (`RetrievedEvidenceItem` →
+    `VerifiedCandidate`).
+  - `CandidateMatcher` gives each group only the evidence retrieved for it.
+- **Unchanged:** single-requirement plans take exactly the previous path.
+
+**2. Role words were not schema-aware.**
+- **Symptom:** "AC gas refill" at a services business was read as a CONSUMABLE request ("refill"),
+  so every record failed the role gate (false NO_MATCH).
+- **Fix:**
+  - `TenantVocabulary.roles_present` records the roles that exist in the tenant catalogue. It is
+    computed by the same cached aggregate query.
+  - A role word restricts results only to roles the business actually has. Catalogues with spare
+    parts keep the part filter.
+
+**3. Placeholder guard.**
+- The reply validator rejects masked money ("₹ XX,XXX", "Rs. XXXX"), masked numbers and bracket
+  slots ("[price]", "[Model No]") as CRITICAL `PLACEHOLDER_CONTENT`.
+- This triggers repair, then human review.
+
+**Tests.** All tests run on isolated synthetic tenants. The home-appliance services fixture is a
+different domain from Dolphy.
+- `test_per_requirement_retrieval.py` (3): each requirement gets its own evidence, groups never
+  receive another requirement's evidence, and a cross-tenant multi-requirement plan is rejected.
+- `test_entity_eligibility_unit.py`: role-presence cases.
+- `test_placeholder_guard_unit.py` (2).
+- 63 existing retrieval/fusion/package/reply tests pass.
+
+**Regression on the real catalogue.** Read-only, with catalogue-derived queries rather than the 100
+customer examples. Results are unchanged: precision@5 0.939, top-1 0.941, hit@5 0.966, 0/558
+wrong-role items.
+
+**Latency.**
+- Sequential single-requirement retrieval from a developer PC: median 3.9 s, max 6.1 s. This is
+  dominated by DB round trips to Neon.
+- Per-requirement fan-out runs requirements in parallel. Each adds one query embedding.
+- The vocabulary query runs once per tenant per 15 minutes (about 2.4 s uncached).
+
+**Remaining limitations (honest).**
+- Dependencies between requirements (product → its warranty) are not yet executed as a graph. Each
+  requirement uses its own text.
+- There is no live integration for stock, orders, tracking, scheduling, invoices or payments. Those
+  requests are reported as `CATEGORY_NOT_CONFIGURED` / human review, never answered.
+- Only one real tenant (product catalogue only) exists, so policies, contacts, FAQs and offers
+  could not be evaluated on real data.
+- No system can guarantee 100% accuracy for every future query and dataset. Failures are made
+  measurable and routed to review instead of being guessed.

@@ -146,6 +146,8 @@ class RetrievedEvidenceItem(BaseModel):
     provenance: EvidenceProvenance
     satisfied_constraints: List[str] = Field(default_factory=list)
     unmet_constraints: List[str] = Field(default_factory=list)
+    # Requirement(s) this item was retrieved for (multi-requirement plans). Empty = whole plan.
+    requirement_ids: List[str] = Field(default_factory=list)
 
 
 class CoverageAssessment(BaseModel):

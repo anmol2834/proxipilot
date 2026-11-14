@@ -49,6 +49,7 @@ class CandidateNormalizer:
         return VerifiedCandidate(
             candidate_id=cand_id,
             entity_id=item.entity_id,
+            requirement_ids=list(item.requirement_ids or []),
             tenant_id=item.provenance.tenant_id or "",
             external_identity_key=item.external_identity_key,
             title=item.title,

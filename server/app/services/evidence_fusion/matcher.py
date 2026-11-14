@@ -86,6 +86,14 @@ class TargetEntityMatcher:
                 pass
             safe_candidates.append(cand)
 
+        # 1b. Requirement attribution: with per-requirement retrieval, each candidate records the
+        # requirement(s) it was retrieved for. A group then gets only its own evidence, so one
+        # requirement's products never answer another requirement (warranty, delivery, contacts...).
+        # Candidates without attribution (whole-plan retrieval) stay available to every group.
+        if group_def.requirement_id and any(c.requirement_ids for c in safe_candidates):
+            safe_candidates = [c for c in safe_candidates
+                               if not c.requirement_ids or group_def.requirement_id in c.requirement_ids]
+
         # 2. Filter by Applicable Candidate Roles
         role_filtered: List[VerifiedCandidate] = []
         for cand in safe_candidates:

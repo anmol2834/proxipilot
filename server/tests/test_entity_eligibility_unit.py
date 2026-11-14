@@ -207,3 +207,21 @@ def test_unknown_intent_still_excludes_parts():
     assert spec.wanted_roles == {ProductRole.FINISHED, ProductRole.SERVICE}
     assert not evaluate(*DISTRACTORS[4], None, spec).eligible      # accessory
     assert evaluate(*AIR_CURTAINS[0], None, spec).eligible
+
+
+def test_role_word_only_restricts_to_roles_the_tenant_has():
+    # Services business (no consumables): "gas refill" names a service, not a consumable request.
+    services = TenantVocabulary(families=[], brand_tokens=frozenset(), roles_present=frozenset({ProductRole.FINISHED}))
+    spec = build_request_spec(_plan("AC gas refill"), services)
+    assert ProductRole.CONSUMABLE not in (spec.wanted_roles or set())
+    assert ProductRole.FINISHED in spec.wanted_roles
+
+    # A catalogue that does stock spare parts keeps the part filter.
+    parts_shop = TenantVocabulary(families=[], brand_tokens=frozenset(),
+                                  roles_present=frozenset({ProductRole.FINISHED, ProductRole.PART}))
+    spec = build_request_spec(_plan("spare parts for my hand dryer"), parts_shop)
+    assert ProductRole.PART in spec.wanted_roles and ProductRole.FINISHED not in spec.wanted_roles
+
+    # Unknown roles (empty set) never rule anything out: previous behaviour.
+    unknown = TenantVocabulary(families=[], brand_tokens=frozenset())
+    assert ProductRole.PART in build_request_spec(_plan("spare parts for my hand dryer"), unknown).wanted_roles

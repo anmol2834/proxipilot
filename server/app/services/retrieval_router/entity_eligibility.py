@@ -205,6 +205,9 @@ class FamilyEntry:
 class TenantVocabulary:
     families: List[FamilyEntry]
     brand_tokens: frozenset
+    # Roles that actually occur in this tenant's catalogue (e.g. a services business has no
+    # CONSUMABLE / PART items). Empty = unknown, so no role is ruled out.
+    roles_present: frozenset = frozenset()
     loaded_at: float = field(default_factory=time.monotonic)
 
 
@@ -223,10 +226,14 @@ async def load_tenant_vocabulary(db, tenant_id: str) -> TenantVocabulary:
     rows = (await db.execute(_t("""
         SELECT coalesce(v.canonical_data->'custom_attributes'->>'category',
                         v.canonical_data->>'sub_category') AS cat,
-               v.canonical_data->>'brand' AS brand, count(*) AS n
+               v.canonical_data->>'brand' AS brand,
+               coalesce(v.canonical_data->'custom_attributes'->>'product_type',
+                        v.canonical_data->>'product_type') AS ptype,
+               v.canonical_data->>'entity_type' AS etype,
+               min(i.title) AS sample_title, count(*) AS n
         FROM knowledge_items i JOIN knowledge_versions v ON v.id = i.current_version_id
         WHERE i.tenant_id = :t AND i.is_active
-        GROUP BY 1, 2"""), {"t": tenant_id})).all()
+        GROUP BY 1, 2, 3, 4"""), {"t": tenant_id})).all()
     brand_tokens: Set[str] = set()
     for r in rows:
         brand_tokens |= tokens(r.brand or "")
@@ -244,7 +251,11 @@ async def load_tenant_vocabulary(db, tenant_id: str) -> TenantVocabulary:
         ft = family_tokens(lab, brand_tokens)
         if ft:
             fams.append(FamilyEntry(label=lab, tokens=frozenset(ft), item_count=n))
-    vocab = TenantVocabulary(families=fams, brand_tokens=frozenset(brand_tokens))
+    roles: Set[ProductRole] = set()
+    for r in rows:
+        cd = {"custom_attributes": {"category": r.cat, "product_type": r.ptype}, "entity_type": r.etype}
+        roles.add(classify_candidate(cd, r.sample_title).role)
+    vocab = TenantVocabulary(families=fams, brand_tokens=frozenset(brand_tokens), roles_present=frozenset(roles))
     _VOCAB_CACHE[tenant_id] = vocab
     return vocab
 
@@ -317,6 +328,11 @@ def build_request_spec(plan: Any, vocab: Optional[TenantVocabulary]) -> RequestS
     target_models = [m.group(1).upper().rstrip("-/") for m in _REL_RE.finditer(text)]
     if wanted and (ProductRole.PART in wanted or ProductRole.ACCESSORY in wanted):
         wanted |= {ProductRole.PART, ProductRole.ACCESSORY}
+    if wanted and vocab and vocab.roles_present and not (wanted & vocab.roles_present):
+        # A role word ("refill", "spare", "packaging"...) can only restrict results to a role this
+        # business actually has. "AC gas refill" at a services company names a SERVICE; treating
+        # it as a CONSUMABLE request rejected every record (false NO_MATCH).
+        wanted = None
     if wanted is None:
         intent = str(getattr(getattr(plan, "intent", None), "value", getattr(plan, "intent", "")) or "").lower()
         # Catalogue retrieval defaults to sellable items. An unknown / other intent must not

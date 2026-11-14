@@ -145,6 +145,8 @@ class VerifiedCandidate(BaseModel):
     retrieval_path: str = "hybrid"
     satisfied_constraints: List[str] = Field(default_factory=list)
     unmet_constraints: List[str] = Field(default_factory=list)
+    # Requirement(s) this candidate was retrieved for; empty = retrieved for the whole plan.
+    requirement_ids: List[str] = Field(default_factory=list)
 
 
 class RequirementEvidenceGroup(BaseModel):

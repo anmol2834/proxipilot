@@ -32,6 +32,7 @@ from app.contracts.retrieval_result import (
     RetrievalResult,
     RetrievalStatus,
     RetrievalStrategyUsed,
+    RetrievedEvidenceItem,
     SourceExecutionMetadata,
 )
 from app.core.database import db_manager
@@ -55,6 +56,9 @@ from app.services.retrieval_router.verifier import (
     fact_verifier as default_fact_verifier,
 )
 
+
+# Requirements retrieved concurrently (each uses its own DB session + query embedding).
+MAX_PARALLEL_REQUIREMENTS = 4
 
 # Weight of a keyword list that could not see every word of the question (see fusion below).
 BLIND_LEXICAL_WEIGHT = 0.05
@@ -85,7 +89,110 @@ class RetrievalRouter:
         envelope: Optional[ContextEnvelope] = None,
         as_of: Optional[datetime] = None,
     ) -> RetrievalResult:
-        """Route, retrieve, verify, and package evidence for the given plan."""
+        """Route, retrieve, verify, and package evidence for the given plan.
+
+        A message with several independent requirements is retrieved PER REQUIREMENT: each one
+        gets its own query text, filters, ranges and eligibility rules (the single-requirement
+        path below), run in bounded parallel on separate sessions. One search over the whole
+        email let the dominant topic crowd out every other requirement. Results are merged by
+        entity and tagged with the requirement(s) they were found for, so evidence fusion gives
+        each requirement only its own evidence.
+        """
+        if plan.tenant_id != tenant_id:
+            # Same guard as the single path, before any fan-out work.
+            raise PermissionError("Cross-tenant plan retrieval rejected by policy")
+        reqs = [r for r in (plan.requirements or []) if (r.query_text or r.description or "").strip()]
+        if len(reqs) < 2:
+            return await self._execute_single(db, tenant_id, plan, envelope, as_of)
+        return await self._execute_per_requirement(tenant_id, plan, reqs, envelope, as_of)
+
+    async def _execute_per_requirement(
+        self,
+        tenant_id: str,
+        plan: RequirementPlan,
+        reqs: List[Any],
+        envelope: Optional[ContextEnvelope],
+        as_of: Optional[datetime],
+    ) -> RetrievalResult:
+        sem = asyncio.Semaphore(MAX_PARALLEL_REQUIREMENTS)
+
+        async def run(req: Any) -> Tuple[Any, Optional[RetrievalResult]]:
+            count = max(1, min(int(req.requested_count or 5), plan.requested_result_count.max_safe_limit))
+            sub = plan.model_copy(update={
+                "intent": req.intent,
+                "query_text": (req.query_text or req.description).strip(),
+                "entities": list(req.entities),
+                "filters": list(req.filters),
+                "range_semantics": req.range_semantics,
+                "requested_attributes": list(req.requested_attributes),
+                "retrieval_strategy": req.retrieval_strategy,
+                "requirements": [req],
+                "requested_result_count": plan.requested_result_count.model_copy(
+                    update={"final_count": count, "explicit_count": count}),
+            })
+            async with sem:
+                try:
+                    async with db_manager.session_factory() as req_db:
+                        return req, await self._execute_single(req_db, tenant_id, sub, envelope, as_of)
+                except PermissionError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 - one requirement must not sink the others
+                    logger.warning("Per-requirement retrieval failed", requirement_id=req.requirement_id,
+                                   error=f"{type(exc).__name__}: {str(exc)[:200]}", tenant_id=tenant_id)
+                    return req, None
+
+        outcomes = await asyncio.gather(*(run(r) for r in reqs))
+
+        merged: Dict[str, RetrievedEvidenceItem] = {}
+        order: List[str] = []
+        warnings: List[str] = []
+        base: Optional[RetrievalResult] = None
+        failed: List[str] = []
+        for req, res in outcomes:
+            if res is None:
+                failed.append(req.requirement_id)
+                continue
+            base = base or res
+            warnings.extend(w for w in res.warnings if w not in warnings)
+            for item in res.results:
+                cur = merged.get(item.entity_id)
+                if cur is None:
+                    merged[item.entity_id] = item.model_copy(update={"requirement_ids": [req.requirement_id]})
+                    order.append(item.entity_id)
+                elif req.requirement_id not in cur.requirement_ids:
+                    cur.requirement_ids.append(req.requirement_id)
+                    if item.relevance_score > cur.relevance_score:
+                        cur.relevance_score = item.relevance_score
+        if failed:
+            warnings.append(f"Retrieval failed for requirement(s) {', '.join(failed)}; their evidence is missing.")
+        if base is None:
+            # Every requirement failed: fall back to one whole-message retrieval.
+            async with db_manager.session_factory() as fb_db:
+                return await self._execute_single(fb_db, tenant_id, plan, envelope, as_of)
+
+        results = [merged[i] for i in order]
+        status = RetrievalStatus.SUCCESS if results else base.status
+        if results and (failed or any(res is not None and not res.results for _r, res in outcomes)):
+            status = RetrievalStatus.PARTIAL
+        logger.info("Per-requirement retrieval merged", tenant_id=tenant_id, plan_id=plan.plan_id,
+                    requirements=len(reqs), failed=len(failed), results=len(results),
+                    per_requirement=[len(res.results) if res else -1 for _r, res in outcomes])
+        return base.model_copy(update={
+            "status": status,
+            "results": results,
+            "warnings": warnings,
+            "plan_reference": base.plan_reference.model_copy(update={"plan_id": plan.plan_id}),
+        })
+
+    async def _execute_single(
+        self,
+        db: AsyncSession,
+        tenant_id: str,
+        plan: RequirementPlan,
+        envelope: Optional[ContextEnvelope] = None,
+        as_of: Optional[datetime] = None,
+    ) -> RetrievalResult:
+        """Single-requirement retrieval: structured + semantic + lexical, eligibility, fusion."""
         start_time = time.perf_counter()
 
         # ---------------------------------------------------------------------
@@ -134,7 +241,8 @@ class RetrievalRouter:
             IntentType.SERVICE_COMPARISON,
             IntentType.PRODUCT_COMPARISON,
         )
-        is_contact_request = intent == IntentType.OTHER and "contact" in (plan.query_text or "").lower()
+        is_contact_request = (intent == IntentType.OTHER and "contact" in (plan.query_text or "").lower()) or (
+            len(plan.requirements or []) == 1 and plan.requirements[0].category == "contacts")
         if not is_contact_request:
             for e in plan.entities:
                 if e.entity_type in ("contact", "department", "person"):
