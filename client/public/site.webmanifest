@@ -1,18 +1,52 @@
 {
-  "name": "Proxipilot — AI Email Automation",
-  "short_name": "Proxipilot",
-  "description": "AI-powered email automation platform. Generate replies before you open your inbox.",
+  "name": "ProxiPilot — Autonomous AI Email Automation Platform",
+  "short_name": "ProxiPilot",
+  "description": "Enterprise autonomous AI email platform. Connect Gmail and Outlook, index enterprise knowledge, and resolve customer emails automatically with vector precision.",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#080d18",
-  "theme_color": "#7c3aed",
+  "background_color": "#FFFFFF",
+  "theme_color": "#2563EB",
   "orientation": "portrait",
+  "categories": ["business", "productivity", "utilities"],
   "icons": [
+    {
+      "src": "/favicon-16x16.png",
+      "sizes": "16x16",
+      "type": "image/png"
+    },
+    {
+      "src": "/favicon-32x32.png",
+      "sizes": "32x32",
+      "type": "image/png"
+    },
+    {
+      "src": "/favicon-48x48.png",
+      "sizes": "48x48",
+      "type": "image/png"
+    },
+    {
+      "src": "/favicon-96x96.png",
+      "sizes": "96x96",
+      "type": "image/png"
+    },
+    {
+      "src": "/android-chrome-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
     {
       "src": "/web-app-manifest-192x192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "maskable"
+    },
+    {
+      "src": "/android-chrome-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
     },
     {
       "src": "/web-app-manifest-512x512.png",
@@ -21,8 +55,8 @@
       "purpose": "maskable"
     },
     {
-      "src": "/favicon-96x96.png",
-      "sizes": "96x96",
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
       "type": "image/png"
     }
   ]

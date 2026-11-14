@@ -9,6 +9,7 @@ import ListItemIcon from "@mui/material/ListItemIcon";
 import Divider from "@mui/material/Divider";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { ProxiPilotLogo } from "@/components/ui/ProxiPilotLogo";
 
 interface NavItem {
   label: string;
@@ -254,39 +255,8 @@ export function AppSidebar({ onItemClick }: AppSidebarProps) {
       {/* Top: Brand Logo + Primary Nav */}
       <Box>
         {/* Brand Logo Header */}
-        <Box
-          component={Link}
-          href="/dashboard"
-          sx={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 1.25,
-            textDecoration: "none",
-            color: "#0F172A",
-            mb: 3,
-            px: 1,
-          }}
-        >
-          <Box
-            sx={{
-              width: 28,
-              height: 28,
-              borderRadius: "8px",
-              backgroundColor: "#2563EB",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "#FFFFFF",
-              boxShadow: "0 2px 8px rgba(37, 99, 235, 0.3)",
-            }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
-            </svg>
-          </Box>
-          <Typography sx={{ fontWeight: 800, fontSize: "1.15rem", color: "#0F172A", letterSpacing: "-0.02em" }}>
-            ProxiPilot
-          </Typography>
+        <Box sx={{ mb: 3, px: 1 }}>
+          <ProxiPilotLogo size={28} href="/dashboard" textSize="1.15rem" />
         </Box>
 
         {/* Primary Nav List */}

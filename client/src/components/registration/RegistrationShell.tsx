@@ -5,6 +5,7 @@ import Link from "next/link";
 import { RegistrationStep } from "@/stores/registration.store";
 import { RegistrationBrandPanel } from "./RegistrationBrandPanel";
 import { RegistrationProgress } from "./RegistrationProgress";
+import { ProxiPilotLogo } from "@/components/ui/ProxiPilotLogo";
 
 interface RegistrationShellProps {
   step: RegistrationStep;
@@ -42,30 +43,7 @@ export function RegistrationShell({
             width: "100%",
           }}
         >
-          <Link
-            href="/"
-            className="pp-signup-brand-logo"
-            style={{ textDecoration: "none" }}
-          >
-            <div className="pp-brand-glyph">
-              <svg width="26" height="30" viewBox="0 0 28 32" fill="none">
-                <path d="M2 13L16 2L16 11L7 17L2 13Z" fill="#0F172A" />
-                <path d="M12 15L26 9L26 19L17 25L12 15Z" fill="#0F172A" />
-                <path d="M7 19L16 26L16 31L2 23L7 19Z" fill="#0F172A" opacity="0.85" />
-              </svg>
-            </div>
-            <span
-              style={{
-                fontWeight: 800,
-                fontSize: "1.15rem",
-                color: "#0F172A",
-                letterSpacing: "-0.025em",
-                marginLeft: "8px",
-              }}
-            >
-              ProxiPilot
-            </span>
-          </Link>
+          <ProxiPilotLogo size={28} href="/" textSize="1.15rem" />
 
           {/* Top Right Action */}
           <div>

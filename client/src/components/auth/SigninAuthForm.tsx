@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { authApi } from "@/lib/api";
 import { env } from "@/config/env";
 import { CustomCheckbox } from "@/components/ui/CustomCheckbox";
+import { ProxiPilotLogo } from "@/components/ui/ProxiPilotLogo";
 
 export function SigninAuthForm() {
   const router = useRouter();
@@ -80,20 +81,8 @@ export function SigninAuthForm() {
   return (
     <div className="pp-signin-form-panel">
       {/* Top Right Brand Logo */}
-      <div style={{ display: "flex", justifyContent: "flex-end", width: "100%" }}>
-        <Link href="/" className="pp-signup-brand-logo" aria-label="ProxiPilot Home">
-          <div className="pp-brand-glyph">
-            <svg width="26" height="30" viewBox="0 0 28 32" fill="none">
-              <path d="M2 13L16 2L16 11L7 17L2 13Z" fill="#0F172A" />
-              <path d="M12 15L26 9L26 19L17 25L12 15Z" fill="#0F172A" />
-              <path
-                d="M7 19L16 26L16 31L2 23L7 19Z"
-                fill="#0F172A"
-                opacity="0.85"
-              />
-            </svg>
-          </div>
-        </Link>
+      <div style={{ display: "flex", justifyContent: "flex-end", width: "100%", marginBottom: "16px" }}>
+        <ProxiPilotLogo size={30} href="/" textSize="1.15rem" />
       </div>
 
       {/* Main Centered Form Container */}

@@ -16,6 +16,7 @@ import Link from "next/link";
 import { Container } from "./layout/Container";
 import { landingConfig } from "@/config/landing";
 import { ExpandableCtaButton } from "@/components/ui/ExpandableCtaButton";
+import { ProxiPilotLogo } from "@/components/ui/ProxiPilotLogo";
 
 export function LandingNavbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -52,49 +53,7 @@ export function LandingNavbar() {
           }}
         >
           {/* Logo / Brand Anchor */}
-          <Box
-            component="a"
-            href="#hero"
-            sx={{
-              display: "flex",
-              alignItems: "center",
-              gap: 1.25,
-              textDecoration: "none",
-              color: "#111827",
-            }}
-          >
-            <Box
-              sx={{
-                width: 32,
-                height: 32,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <svg width="30" height="30" viewBox="0 0 32 32" fill="none">
-                <circle cx="11" cy="16" r="6" fill="#3B82F6" fillOpacity="0.9" />
-                <circle cx="21" cy="16" r="6" fill="#635BFF" fillOpacity="0.9" />
-                <path
-                  d="M16 11.5C17.5 12.8 18.5 14.3 18.5 16C18.5 17.7 17.5 19.2 16 20.5C14.5 19.2 13.5 17.7 13.5 16C13.5 14.3 14.5 12.8 16 11.5Z"
-                  fill="#4F46E5"
-                />
-                <circle cx="16" cy="10" r="3.5" fill="#4F7CFF" />
-              </svg>
-            </Box>
-            <Typography
-              variant="h6"
-              component="span"
-              sx={{
-                fontWeight: 700,
-                fontSize: "1.25rem",
-                letterSpacing: "-0.02em",
-                color: "#111827",
-              }}
-            >
-              ProxiPilot
-            </Typography>
-          </Box>
+          <ProxiPilotLogo size={32} href="#hero" textSize="1.25rem" />
 
           {/* Desktop Navigation Links */}
           <Box
@@ -213,9 +172,7 @@ export function LandingNavbar() {
         }}
       >
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 3 }}>
-          <Typography variant="h6" sx={{ fontWeight: 700, color: "#111827" }}>
-            {navigation.brandName}
-          </Typography>
+          <ProxiPilotLogo size={28} href="#hero" textSize="1.15rem" />
           <IconButton onClick={handleDrawerToggle} aria-label="close navigation menu">
             <CloseIcon />
           </IconButton>

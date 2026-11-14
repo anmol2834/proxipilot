@@ -7,6 +7,16 @@ import { BackgroundImportIndicator } from "@/components/knowledge/BackgroundImpo
 export const metadata: Metadata = {
   title: "Dashboard — ProxiPilot",
   description: "Organization overview and AI-driven inbox intelligence command center.",
+  robots: {
+    index: false,
+    follow: false,
+    nocache: true,
+    googleBot: {
+      index: false,
+      follow: false,
+      noimageindex: true,
+    },
+  },
 };
 
 export default function DashboardLayout({

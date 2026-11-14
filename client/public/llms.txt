@@ -1,0 +1,23 @@
+# ProxiPilot
+
+> Autonomous Multi-Tenant AI Email Automation Platform with Vector RAG.
+
+ProxiPilot connects to enterprise email providers (Gmail, Microsoft Outlook) and autonomously drafts, reviews, and executes customer email workflows grounded in company knowledge with zero hallucination.
+
+## Core Capabilities
+- **Email Synchronization**: Bidirectional real-time OAuth sync for Gmail and Microsoft Outlook with incremental cursor polling and webhook fallbacks.
+- **Enterprise Knowledge RAG**: Multi-category document ingestion (Excel, PDF, CSV) indexed in Qdrant vector database with hybrid semantic + BM25 lexical ranking.
+- **Evidence-Gated Reply Planner**: Proprietary planner that inspects retrieved facts, matches conversation intents, and strictly rejects speculative answers.
+- **Transactional Outbox & Memory**: Outbox relay pattern for idempotent email dispatch, combined with persistent multi-turn thread memory and client style profile calibration.
+- **Multi-Tenant Security**: Cryptographic tenant isolation, role-based access control (RBAC), and SOC 2 ready compliance.
+
+## Key URLs
+- Homepage: https://proxipilot.com
+- Get Started: https://proxipilot.com/signup
+- Sign In: https://proxipilot.com/signin
+- Technical Documentation & Full Context: https://proxipilot.com/llms-full.txt
+
+## Contact & Support
+- Website: https://proxipilot.com
+- Support Email: support@proxipilot.com
+- Headquarters: San Francisco, CA, USA

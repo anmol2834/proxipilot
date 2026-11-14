@@ -8,6 +8,7 @@ import { authApi } from "@/lib/api";
 import { env } from "@/config/env";
 import { CustomCheckbox } from "@/components/ui/CustomCheckbox";
 import { OtpDialog } from "./OtpDialog";
+import { ProxiPilotLogo } from "@/components/ui/ProxiPilotLogo";
 
 export function SignupAuthForm() {
   const router = useRouter();
@@ -114,26 +115,9 @@ export function SignupAuthForm() {
   return (
     <div className="pp-signup-left">
       {/* Top Left Stylized Brand Logo */}
-      <Link href="/" className="pp-signup-brand-logo" aria-label="ProxiPilot Home">
-        <div className="pp-brand-glyph">
-          {/* Exact geometric mark from mockup */}
-          <svg width="26" height="30" viewBox="0 0 28 32" fill="none">
-            <path
-              d="M2 13L16 2L16 11L7 17L2 13Z"
-              fill="#0F172A"
-            />
-            <path
-              d="M12 15L26 9L26 19L17 25L12 15Z"
-              fill="#0F172A"
-            />
-            <path
-              d="M7 19L16 26L16 31L2 23L7 19Z"
-              fill="#0F172A"
-              opacity="0.85"
-            />
-          </svg>
-        </div>
-      </Link>
+      <div style={{ marginBottom: "16px" }}>
+        <ProxiPilotLogo size={32} href="/" textSize="1.2rem" />
+      </div>
 
       {/* Main Centered Form Container */}
       <div className="pp-signup-form-wrapper">
