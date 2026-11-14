@@ -154,7 +154,8 @@ class ReplyPlannerService:
         draft_metrics["org_situations"] = bundle.situations
 
         # 4. Deterministic Validation
-        validation_report, coverage_evals = self.validator.validate_draft(draft, package)
+        validation_report, coverage_evals = self.validator.validate_draft(
+            draft, package, verified_context=bundle.sections.get("catalogue"))
 
         # 5. Bounded Semantic Repair (Max 1 retry if critical issues exist)
         if not validation_report.validation_passed:
@@ -170,7 +171,8 @@ class ReplyPlannerService:
                 package, repair_instructions=repair_instructions, **memory_kwargs
             )
             repaired_draft = self._with_closing(repaired_draft, closing)
-            repaired_report, repaired_evals = self.validator.validate_draft(repaired_draft, package)
+            repaired_report, repaired_evals = self.validator.validate_draft(
+                repaired_draft, package, verified_context=bundle.sections.get("catalogue"))
 
             if repaired_report.validation_passed or len(repaired_report.issues) < len(validation_report.issues):
                 draft = repaired_draft

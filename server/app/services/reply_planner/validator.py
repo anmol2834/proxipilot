@@ -44,6 +44,30 @@ from app.contracts.reply_planner import (
 from app.core.logging import logger
 
 
+_NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?")
+# Money must come from packaged price facts (checked by _verify_exact_prices), never from counts.
+_MONEY = re.compile(r"₹|\brs\.?\s|\binr\b|\$|€|£|\bprice|\bcost|\brate\b|\bmrp\b", re.IGNORECASE)
+
+
+def _numbers_in(text: str) -> Set[str]:
+    out: Set[str] = set()
+    for m in _NUMBER.findall(text or ""):
+        n = m.replace(",", "").rstrip(".")
+        if n:
+            out.add(n.split(".")[0] if n.endswith(".0") else n)
+    return out
+
+
+def _numbers_grounded_in(statement: str, verified_context: str) -> bool:
+    """True when the claim is a non-monetary statement whose every number appears verbatim (as a
+    number, separators ignored) in the verified context. Requires at least one number, so vague
+    wording is never "verified" by this rule."""
+    if _MONEY.search(statement or ""):
+        return False
+    nums = _numbers_in(statement)
+    return bool(nums) and nums <= _numbers_in(verified_context)
+
+
 class DeterministicReplyValidator:
     """Strict, deterministic validation gate for enterprise email drafts."""
 
@@ -82,8 +106,14 @@ class DeterministicReplyValidator:
         self,
         draft: StructuredReplyDraft,
         package: MinimalEvidencePackage,
+        verified_context: Optional[str] = None,
     ) -> Tuple[ReplyValidationReport, List[RequirementCoverageEvaluation]]:
         """Run all deterministic validations against the draft.
+
+        ``verified_context`` is company data computed live from the knowledge base and shown to
+        the drafter (the catalogue overview: total products, category / brand counts, matching
+        item counts). A numeric claim taken from it is grounded even though it is not a packaged
+        product fact.
 
         Returns:
             Tuple of (ReplyValidationReport, List[RequirementCoverageEvaluation])
@@ -171,6 +201,13 @@ class DeterministicReplyValidator:
                             claim.supported_by_signal_id = next(iter(all_signal_ids))
                     else:
                         claim.grounding_type = GroundingType.GENERAL_COURTESY
+                    repaired_deterministically = True
+                    continue
+
+                # B2. Catalogue-level count taken from the verified catalogue overview
+                # ("we list 5,103 products across 140 categories").
+                if verified_context and _numbers_grounded_in(claim.claim_statement, verified_context):
+                    claim.is_verified = True
                     repaired_deterministically = True
                     continue
 
