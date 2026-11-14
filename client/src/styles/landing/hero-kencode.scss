@@ -1,0 +1,43 @@
+// ==============================================================================
+// ProxiPilot Hero Section — Gradient & Vertical Line Grid Background
+// Exact 1:1 implementation of pattern by kencode7 from Uiverse.io
+// Features top white-to-transparent fade over cyan-to-purple linear gradient
+// with 50px vertical grid lines and top-to-bottom mask gradient
+// ==============================================================================
+
+.hero-kencode-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background:
+    linear-gradient(
+      to bottom,
+      #fff 0%,
+      #fff 40%,
+      rgba(255, 255, 255, 0) 100%
+    ),
+    linear-gradient(to right, #0ed2da, #5f29c7);
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: linear-gradient(90deg, #ccc 1px, transparent 1px);
+    background-size: 50px 100%;
+    pointer-events: none;
+    mask-image: linear-gradient(
+      to bottom,
+      rgba(0, 0, 0, 1) 0%,
+      rgba(0, 0, 0, 0) 70%
+    );
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      rgba(0, 0, 0, 1) 0%,
+      rgba(0, 0, 0, 0) 70%
+    );
+  }
+}

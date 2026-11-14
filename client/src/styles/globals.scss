@@ -1,0 +1,132 @@
+// ==============================================================================
+// ProxiPilot Global Stylesheet
+// ==============================================================================
+@use "variables" as *;
+@use "mixins" as *;
+@use "utilities" as *;
+@use "landing/textures";
+@use "landing/animations";
+@use "landing/buttons";
+@use "landing/starry-night";
+@use "landing/hero-kencode";
+@use "components/checkbox";
+@use "pages/signup";
+@use "pages/onboarding";
+@use "components/bento-dashboard";
+
+// CSS Reset & Box Sizing
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --font-inter: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+  // Default color variables (Light Theme Foundation)
+  --bg-default: #ffffff;
+  --bg-soft: #{$neutral-50};
+  --bg-paper: #ffffff;
+  --text-primary: #{$neutral-900};
+  --text-secondary: #{$neutral-500};
+  --border-subtle: #{$neutral-200};
+  --surface-rgb: 255, 255, 255;
+  --color-primary: #{$primary-main};
+  --color-secondary: #{$secondary-main};
+  --color-success: #{$color-success};
+}
+
+[data-theme="dark"] {
+  --bg-default: #{$neutral-950};
+  --bg-paper: #{$neutral-900};
+  --text-primary: #{$neutral-50};
+  --text-secondary: #{$neutral-400};
+  --border-subtle: #{$neutral-800};
+  --surface-rgb: 15, 23, 42;
+  --color-primary: #{$primary-light};
+}
+
+// Globally remove scrollbar width from all pages (clean modern look without layout shift)
+html,
+body,
+* {
+  scrollbar-width: none !important; // Firefox
+  -ms-overflow-style: none !important; // IE/Edge legacy
+  &::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+  }
+}
+
+html {
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  scroll-behavior: smooth;
+  height: 100%;
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: clip;
+  scrollbar-gutter: stable;
+}
+
+body {
+  min-height: 100%;
+  width: 100%;
+  max-width: 100vw;
+  font-family: var(--font-inter);
+  background-color: var(--bg-default);
+  color: var(--text-primary);
+  display: flex;
+  flex-direction: column;
+  overflow-x: clip;
+}
+
+// Media elements
+img,
+picture,
+video,
+canvas,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+// Interactive elements
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+// Accessibility: Respect user prefers-reduced-motion
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+// Utility: spinner keyframe used by upload progress indicators
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}

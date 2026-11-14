@@ -1,0 +1,106 @@
+// ==============================================================================
+// ProxiPilot SCSS Utilities
+// ==============================================================================
+@use "variables" as *;
+@use "mixins" as *;
+
+// Accessibility: Screen Reader Only
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+// Display Utilities
+.d-none {
+  display: none !important;
+}
+.d-block {
+  display: block !important;
+}
+.d-inline-block {
+  display: inline-block !important;
+}
+.d-flex {
+  display: flex !important;
+}
+.d-inline-flex {
+  display: inline-flex !important;
+}
+.d-grid {
+  display: grid !important;
+}
+
+// Flex Layout Helpers
+.flex-1 {
+  flex: 1 1 0%;
+}
+.flex-auto {
+  flex: 1 1 auto;
+}
+.flex-initial {
+  flex: 0 1 auto;
+}
+.flex-none {
+  flex: none;
+}
+.flex-col {
+  flex-direction: column;
+}
+.flex-row {
+  flex-direction: row;
+}
+.flex-wrap {
+  flex-wrap: wrap;
+}
+.items-center {
+  align-items: center;
+}
+.items-start {
+  align-items: flex-start;
+}
+.items-end {
+  align-items: flex-end;
+}
+.justify-center {
+  justify-content: center;
+}
+.justify-between {
+  justify-content: space-between;
+}
+.justify-end {
+  justify-content: flex-end;
+}
+
+// Text Utilities
+.text-truncate {
+  @include text-truncate;
+}
+.text-clamp-2 {
+  @include text-line-clamp(2);
+}
+.text-clamp-3 {
+  @include text-line-clamp(3);
+}
+
+// Scrollbar utility
+.subtle-scroll {
+  @include subtle-scrollbar;
+}
+
+// Full dimensions
+.w-full {
+  width: 100%;
+}
+.h-full {
+  height: 100%;
+}
+.min-h-screen {
+  min-height: 100vh;
+}

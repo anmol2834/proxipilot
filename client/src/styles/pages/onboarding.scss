@@ -1,0 +1,308 @@
+// ==============================================================================
+// ProxiPilot Onboarding Flow Stylesheet
+// 1:1 match to the Signup & Signin Modern Split-Screen SaaS Design System
+// Strictly non-scrollable viewport (100vh max, overflow: hidden)
+// ==============================================================================
+
+@keyframes ppDropdownFadeIn {
+  0% {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+// Fullscreen Split Root
+.pp-onboarding-root {
+  width: 100vw;
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
+  display: flex;
+  background-color: #ffffff;
+  color: #0f172a;
+  box-sizing: border-box;
+  user-select: none;
+}
+
+// Left Column: Step Form
+.pp-onboarding-left {
+  flex: 1;
+  max-width: 48%;
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 24px 44px 16px 44px;
+  box-sizing: border-box;
+  z-index: 1;
+  will-change: transform;
+  animation: ppSlideFromRight 0.75s cubic-bezier(0.16, 1, 0.3, 1) both;
+
+  @media (max-width: 1024px) {
+    max-width: 100%;
+    padding: 20px 24px 16px 24px;
+    animation: none !important;
+    transform: none !important;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    animation: none !important;
+    transform: none !important;
+  }
+}
+
+// Right Column: Vibrant Royal Blue Showcase Panel
+.pp-onboarding-right {
+  flex: 1.15;
+  max-width: 52%;
+  height: calc(100vh - 24px);
+  max-height: calc(100vh - 24px);
+  margin: 12px 14px 12px 0;
+  border-radius: 28px;
+  background: linear-gradient(152deg, #3867fa 0%, #204be5 100%);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 34px 38px 22px 38px;
+  box-sizing: border-box;
+  position: relative;
+  box-shadow: 0 18px 45px -10px rgba(32, 75, 229, 0.35);
+  z-index: 2;
+  will-change: transform;
+  animation: ppSlideFromLeft 0.75s cubic-bezier(0.16, 1, 0.3, 1) both;
+
+  @media (max-width: 1024px) {
+    display: none;
+    animation: none !important;
+    transform: none !important;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    animation: none !important;
+    transform: none !important;
+  }
+}
+
+// Form Centered Wrapper
+.pp-onboarding-form-wrapper {
+  max-width: 420px;
+  width: 100%;
+  margin: auto auto;
+  display: flex;
+  flex-direction: column;
+}
+
+// Step Progress Stepper Bar
+.pp-stepper-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 20px;
+
+  .pp-step-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    transition: all 0.2s ease;
+    cursor: default;
+
+    &.active {
+      background-color: #3562f5;
+      color: #ffffff;
+      box-shadow: 0 2px 8px rgba(53, 98, 245, 0.25);
+    }
+
+    &.completed {
+      background-color: #eff6ff;
+      color: #3562f5;
+      cursor: pointer;
+
+      &:hover {
+        background-color: #dbeafe;
+      }
+    }
+
+    &.pending {
+      background-color: #f1f5f9;
+      color: #94a3b8;
+    }
+  }
+
+  .pp-step-divider {
+    flex: 1;
+    height: 1px;
+    background-color: #e2e8f0;
+  }
+}
+
+// Header Area
+.pp-onboarding-header {
+  margin-bottom: 18px;
+
+  .pp-onboarding-step-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px;
+    border-radius: 6px;
+    background-color: #eff6ff;
+    color: #3562f5;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    margin-bottom: 8px;
+  }
+
+  .pp-onboarding-title {
+    font-size: 1.85rem;
+    font-weight: 700;
+    color: #0f172a;
+    letter-spacing: -0.025em;
+    line-height: 1.2;
+    margin-bottom: 6px;
+  }
+
+  .pp-onboarding-subtitle {
+    font-size: 0.85rem;
+    color: #64748b;
+    line-height: 1.45;
+  }
+}
+
+// Textarea Form Group
+.pp-textarea-container {
+  position: relative;
+  width: 100%;
+
+  textarea {
+    width: 100%;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid #e2e8f0;
+    background-color: #ffffff;
+    color: #0f172a;
+    font-family: inherit;
+    font-size: 0.86rem;
+    line-height: 1.45;
+    resize: none;
+    outline: none;
+    transition: all 0.15s ease;
+    box-sizing: border-box;
+
+    &::placeholder {
+      color: #94a3b8;
+    }
+
+    &:focus {
+      border-color: #3562f5;
+      box-shadow: 0 0 0 3px rgba(53, 98, 245, 0.14);
+    }
+
+    &.has-error {
+      border-color: #ef4444;
+      box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12);
+    }
+  }
+
+  .pp-char-count {
+    display: flex;
+    justify-content: flex-end;
+    font-size: 0.7rem;
+    color: #94a3b8;
+    margin-top: 3px;
+  }
+}
+
+// Action Buttons Row (Back + Continue)
+.pp-onboarding-actions {
+  display: grid;
+  grid-template-columns: 1fr 1.6fr;
+  gap: 12px;
+  margin-top: 18px;
+
+  &.single-action {
+    grid-template-columns: 1fr;
+  }
+
+  .pp-btn-back {
+    height: 44px;
+    border-radius: 10px;
+    border: 1px solid #e2e8f0;
+    background-color: #ffffff;
+    color: #475569;
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: all 0.15s ease;
+
+    &:hover {
+      background-color: #f8fafc;
+      border-color: #cbd5e1;
+      color: #0f172a;
+    }
+
+    &:active {
+      transform: scale(0.985);
+    }
+  }
+
+  .pp-btn-continue {
+    height: 44px;
+    border-radius: 10px;
+    background-color: #3562f5;
+    color: #ffffff;
+    border: none;
+    font-size: 0.92rem;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(53, 98, 245, 0.32);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: all 0.18s ease;
+
+    &:hover:not(:disabled) {
+      background-color: #264fe0;
+      box-shadow: 0 6px 18px rgba(53, 98, 245, 0.42);
+    }
+
+    &:active:not(:disabled) {
+      transform: scale(0.99);
+    }
+
+    &:disabled {
+      opacity: 0.65;
+      cursor: not-allowed;
+    }
+  }
+}
+
+// Error Banner
+.pp-error-banner {
+  background-color: #fef2f2;
+  border: 1px solid #fee2e2;
+  color: #dc2626;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 0.82rem;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

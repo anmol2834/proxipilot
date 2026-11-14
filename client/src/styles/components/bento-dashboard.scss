@@ -1,0 +1,136 @@
+// ==============================================================================
+// ProxiPilot Bento Grid Dashboard Stylesheet
+// Modern Bento Grid Layout with High-Fidelity Micro-Animations
+// ==============================================================================
+
+.bento-dashboard-container {
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding-bottom: 40px;
+  user-select: none;
+}
+
+// Bento Grid Layout Matrix
+.bento-grid {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 18px;
+
+  @media (min-width: 768px) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  @media (min-width: 1080px) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  @media (min-width: 1280px) {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+// Bento Grid Spanning Helpers
+.bento-col-span-1 {
+  grid-column: span 1;
+}
+
+.bento-col-span-2 {
+  @media (min-width: 768px) {
+    grid-column: span 2;
+  }
+}
+
+.bento-col-span-3 {
+  @media (min-width: 1080px) {
+    grid-column: span 3;
+  }
+}
+
+.bento-col-span-4 {
+  @media (min-width: 1280px) {
+    grid-column: span 4;
+  }
+}
+
+.bento-row-span-2 {
+  @media (min-width: 768px) {
+    grid-row: span 2;
+  }
+}
+
+// Standard Bento Card
+.bento-card {
+  position: relative;
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 20px;
+  padding: 22px;
+  box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.02);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  overflow: hidden;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  box-sizing: border-box;
+
+  &:hover {
+    border-color: #cbd5e1;
+    box-shadow: 0 20px 40px -12px rgba(15, 23, 42, 0.08), 0 0 0 1px rgba(53, 98, 245, 0.12);
+    transform: translateY(-2px);
+  }
+
+  // Gradient Border Glow Accent (Optional)
+  &.glow-blue:hover {
+    border-color: #bfdbfe;
+    box-shadow: 0 20px 40px -12px rgba(37, 99, 235, 0.14), 0 0 0 1px rgba(53, 98, 245, 0.2);
+  }
+
+  &.glow-amber:hover {
+    border-color: #fde68a;
+    box-shadow: 0 20px 40px -12px rgba(217, 119, 6, 0.12), 0 0 0 1px rgba(217, 119, 6, 0.2);
+  }
+
+  &.glow-green:hover {
+    border-color: #bbf7d0;
+    box-shadow: 0 20px 40px -12px rgba(16, 185, 129, 0.12), 0 0 0 1px rgba(16, 185, 129, 0.2);
+  }
+}
+
+// Ambient Background Dot Pattern
+.bento-dot-bg {
+  background-image: radial-gradient(rgba(148, 163, 184, 0.25) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+// Micro Pulse Dot
+.bento-pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  position: relative;
+
+  &::after {
+    content: "";
+    position: absolute;
+    inset: -3px;
+    border-radius: 50%;
+    background-color: inherit;
+    opacity: 0.45;
+    animation: bentoPulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+}
+
+@keyframes bentoPulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.45;
+  }
+  50% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}

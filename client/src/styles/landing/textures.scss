@@ -1,0 +1,83 @@
+// ==============================================================================
+// ProxiPilot Landing Page Texture & Background System
+// GPU-friendly, pure CSS, lightweight, no raster image dependencies
+// ==============================================================================
+@use "../variables" as *;
+
+// Subtle Ambient Top Gradient
+.texture-ambient-top {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 1400px;
+  height: 600px;
+  background: radial-gradient(
+    50% 100% at 50% 0%,
+    rgba(99, 91, 255, 0.08) 0%,
+    rgba(79, 124, 255, 0.04) 45%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  pointer-events: none;
+  z-index: 0;
+}
+
+// Subtle Faint Grid Pattern
+.texture-grid {
+  position: absolute;
+  inset: 0;
+  background-size: 40px 40px;
+  background-image:
+    linear-gradient(to right, rgba(230, 234, 240, 0.45) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(230, 234, 240, 0.45) 1px, transparent 1px);
+  mask-image: radial-gradient(ellipse 65% 50% at 50% 50%, #000 60%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse 65% 50% at 50% 50%, #000 60%, transparent 100%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+// Subtle Dot Matrix Pattern
+.texture-dots {
+  position: absolute;
+  inset: 0;
+  background-size: 24px 24px;
+  background-image: radial-gradient(circle, rgba(100, 116, 139, 0.12) 1px, transparent 1px);
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 50%, #000 50%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 50%, #000 50%, transparent 100%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+// Soft Glow Orb (Light Accent)
+.texture-glow-accent {
+  position: absolute;
+  width: 500px;
+  height: 500px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(99, 91, 255, 0.12) 0%,
+    rgba(79, 124, 255, 0.02) 65%,
+    transparent 70%
+  );
+  filter: blur(60px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+// Subtle Section Separator Line
+.texture-divider {
+  position: relative;
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(230, 234, 240, 0.8) 20%,
+    rgba(230, 234, 240, 0.8) 80%,
+    transparent 100%
+  );
+  margin: 0;
+  border: none;
+}

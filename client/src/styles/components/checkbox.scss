@@ -1,0 +1,165 @@
+// ==============================================================================
+// ProxiPilot Custom Animated Morphing Checkbox
+// Adapted from Uiverse.io by SelfMadeSystem & tailored for ProxiPilot Design System.
+// Features: Accessible keyboard navigation, smooth morphing box-to-tick animation,
+// brand primary theme (#4F46E5 / #2563EB), indeterminate support, and fluid scaling.
+// ==============================================================================
+
+@use "../variables" as *;
+
+.proxipilot-checkbox-wrapper {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  gap: 0.6em;
+  line-height: 1.4;
+
+  &.disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+
+  // Visually hidden but accessible input for tab-indexing & screen readers
+  input[type="checkbox"] {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+    margin: 0;
+    pointer-events: none;
+  }
+
+  // The custom checkmark container
+  .checkmark {
+    position: relative;
+    display: inline-block;
+    flex-shrink: 0;
+    border-radius: 0.35em;
+    background-color: transparent;
+    transition:
+      background-color 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+      box-shadow 0.2s ease,
+      transform 0.15s ease;
+
+    // The morphing indicator element
+    &::after {
+      content: "";
+      position: absolute;
+      box-sizing: border-box;
+      transform: rotate(0deg);
+      border: 1.5px solid #94a3b8;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      border-radius: 0.35em;
+      transition:
+        all 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+        border-width 0.1s ease;
+    }
+  }
+
+  // Hover state (when unchecked)
+  &:hover:not(.disabled) input:not(:checked):not(:indeterminate) ~ .checkmark::after {
+    border-color: #6366f1;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+  }
+
+  // Focus-visible ring for keyboard navigation
+  input:focus-visible ~ .checkmark {
+    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.28);
+  }
+
+  // Error state
+  &.has-error input:not(:checked) ~ .checkmark::after {
+    border-color: #ef4444;
+  }
+
+  // ==========================================
+  // Checked State
+  // ==========================================
+  input:checked ~ .checkmark {
+    background-color: #4f46e5;
+    box-shadow: 0 2px 6px rgba(79, 70, 229, 0.3);
+
+    &::after {
+      left: 36%;
+      top: 18%;
+      width: 28%;
+      height: 54%;
+      border-color: transparent #ffffff #ffffff transparent;
+      border-width: 0 2px 2px 0;
+      border-radius: 0;
+      transform: rotate(45deg);
+    }
+  }
+
+  // ==========================================
+  // Indeterminate State (for Tables)
+  // ==========================================
+  input:indeterminate ~ .checkmark {
+    background-color: #4f46e5;
+    box-shadow: 0 2px 6px rgba(79, 70, 229, 0.3);
+
+    &::after {
+      left: 20%;
+      top: 45%;
+      width: 60%;
+      height: 0;
+      border-color: #ffffff;
+      border-width: 2px 0 0 0;
+      border-radius: 1px;
+      transform: rotate(0deg);
+    }
+  }
+
+  // Active click press feedback
+  &:active:not(.disabled) .checkmark {
+    transform: scale(0.92);
+  }
+
+  // Label text
+  .checkbox-label {
+    display: inline-block;
+  }
+
+  // ==========================================
+  // Sizes
+  // ==========================================
+  &.size-sm {
+    font-size: 13px;
+
+    .checkmark {
+      width: 15px;
+      height: 15px;
+    }
+  }
+
+  &.size-md {
+    font-size: 14px;
+
+    .checkmark {
+      width: 18px;
+      height: 18px;
+    }
+  }
+
+  &.size-lg {
+    font-size: 16px;
+
+    .checkmark {
+      width: 22px;
+      height: 22px;
+    }
+  }
+
+  // Blue variant (if used on deep blue themes)
+  &.variant-blue input:checked ~ .checkmark,
+  &.variant-blue input:indeterminate ~ .checkmark {
+    background-color: #2563eb;
+    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.35);
+  }
+}
