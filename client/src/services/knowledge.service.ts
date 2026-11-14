@@ -15,6 +15,7 @@
  */
 
 import { apiClient } from "@/lib/api/client";
+import { env } from "@/config/env";
 import {
   KnowledgeItem,
   KnowledgeCategory,
@@ -388,7 +389,8 @@ class KnowledgeService {
     // Use XMLHttpRequest for real progress tracking
     return new Promise<FileUploadResponseDTO>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
+      // Same base URL as every other API call (NEXT_PUBLIC_API_BASE_URL / NEXT_PUBLIC_API_URL).
+      const baseUrl = env.API_BASE_URL;
       const url = `${baseUrl.replace(/\/+$/, "")}/knowledge/imports/upload`;
 
       xhr.open("POST", url, true);
