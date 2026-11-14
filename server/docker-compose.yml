@@ -1,0 +1,141 @@
+version: "3.9"
+
+services:
+  # ============================================================================
+  # Infrastructure — PostgreSQL (source of truth)
+  # ============================================================================
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: proxipilot
+      POSTGRES_PASSWORD: proxipilot_dev
+      POSTGRES_DB: proxipilot_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U proxipilot -d proxipilot_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # ============================================================================
+  # Infrastructure — Redis (cache, streams, DLQ)
+  # ============================================================================
+  redis:
+    image: redis:7-alpine
+    command: redis-server --save 60 1 --loglevel warning
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # ============================================================================
+  # ProxiPilot API Service
+  # ============================================================================
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://proxipilot:proxipilot_dev@postgres:5432/proxipilot_dev
+      - REDIS_URL=redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ============================================================================
+  # Background Workers (Independently Scalable)
+  # ============================================================================
+  ai-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "app.workers.cli", "--worker", "ai"]
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://proxipilot:proxipilot_dev@postgres:5432/proxipilot_dev
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - .:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  email-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "app.workers.cli", "--worker", "email"]
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://proxipilot:proxipilot_dev@postgres:5432/proxipilot_dev
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - .:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  automation-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "app.workers.cli", "--worker", "automation"]
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://proxipilot:proxipilot_dev@postgres:5432/proxipilot_dev
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - .:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ============================================================================
+  # Local Qdrant Instance (Optional Offline Vector DB)
+  # ============================================================================
+  qdrant:
+    image: qdrant/qdrant:v1.7.4
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  qdrant_data:
+

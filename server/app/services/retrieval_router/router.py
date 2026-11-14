@@ -1,0 +1,615 @@
+"""Retrieval Router — Phase 4.
+
+The core routing decision and execution coordinator:
+1. Validates server-side tenant scope and plan consistency.
+2. Formulates the optimal retrieval execution path:
+   - EXACT_STRUCTURED: for SKUs, exact codes, contacts, or strict numeric ranges.
+   - SEMANTIC_DISCOVERY: for narrative policies, general support FAQs, or troubleshooting.
+   - HYBRID: for comparisons, service discovery, or specifications requiring both exact facts and descriptions.
+3. Executes independent structured and semantic retrieval in parallel using asyncio.gather.
+4. Handles partial failures and timeouts gracefully.
+5. Invokes FactVerifier to reconcile evidence, enforce hard constraints, and rank results.
+6. Packages the output into the stable versioned RetrievalResult contract (`schema_version = '1.0'`).
+"""
+
+from __future__ import annotations
+
+import asyncio
+from datetime import datetime, timezone
+import time
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.services.context_resolver import ContextEnvelope
+from app.contracts.requirement_plan import (
+    IntentType,
+    RequirementPlan,
+    RetrievalStrategy,
+)
+from app.contracts.retrieval_result import (
+    PlanReferenceDTO,
+    RetrievalResult,
+    RetrievalStatus,
+    RetrievalStrategyUsed,
+    SourceExecutionMetadata,
+)
+from app.core.database import db_manager
+from app.core.logging import logger
+from app.models.knowledge import KnowledgeCategory, KnowledgeItem, KnowledgeVersion
+from app.services.retrieval_router.lexical_retriever import (
+    STRONG_MATCH_THRESHOLD,
+    lexical_retriever as default_lexical_retriever,
+)
+from app.services.retrieval_router.semantic_retriever import (
+    SemanticCandidateHit,
+    semantic_retriever,
+    semantic_retriever as default_semantic_retriever,
+)
+from app.services.retrieval_router.structured_retriever import (
+    structured_retriever,
+    structured_retriever as default_structured_retriever,
+)
+from app.services.retrieval_router.verifier import (
+    fact_verifier,
+    fact_verifier as default_fact_verifier,
+)
+
+
+# Weight of a keyword list that could not see every word of the question (see fusion below).
+BLIND_LEXICAL_WEIGHT = 0.05
+
+
+class RetrievalRouter:
+    """Decides and executes the multi-source retrieval plan."""
+
+    def __init__(
+        self,
+        timeout_seconds: float = 25.0,
+        structured_retriever=None,
+        semantic_retriever=None,
+        verifier=None,
+        lexical_retriever=None,
+    ):
+        self._timeout_seconds = timeout_seconds
+        self._structured_retriever = structured_retriever or default_structured_retriever
+        self._semantic_retriever = semantic_retriever or default_semantic_retriever
+        self._verifier = verifier or default_fact_verifier
+        self._lexical_retriever = lexical_retriever or default_lexical_retriever
+
+    async def execute_retrieval(
+        self,
+        db: AsyncSession,
+        tenant_id: str,
+        plan: RequirementPlan,
+        envelope: Optional[ContextEnvelope] = None,
+        as_of: Optional[datetime] = None,
+    ) -> RetrievalResult:
+        """Route, retrieve, verify, and package evidence for the given plan."""
+        start_time = time.perf_counter()
+
+        # ---------------------------------------------------------------------
+        # 1. Tenant Scope Validation
+        # ---------------------------------------------------------------------
+        if not tenant_id or not tenant_id.strip():
+            raise ValueError("tenant_id must be provided and non-empty")
+        if plan.tenant_id != tenant_id:
+            logger.error(
+                "SECURITY: Plan tenant_id does not match authenticated domain tenant",
+                plan_tenant=plan.tenant_id,
+                domain_tenant=tenant_id,
+            )
+            raise PermissionError("Cross-tenant plan retrieval rejected by policy")
+
+        # ---------------------------------------------------------------------
+        # 2. Determine Strategy and Execution Branches
+        # ---------------------------------------------------------------------
+        # Check for exact business keys (SKUs, codes)
+        exact_keys: List[str] = []
+        for e in plan.entities:
+            if e.entity_type in ("sku", "service_code", "product_code", "model_number"):
+                val = e.canonical_value or e.original_text
+                if val:
+                    exact_keys.append(val.strip().upper())
+
+        # Determine target category
+        target_category: Optional[str] = None
+        for f in plan.filters:
+            if f.field == "category" and isinstance(f.value, str):
+                target_category = f.value.lower().strip()
+                break
+        if not target_category:
+            for e in plan.entities:
+                if e.entity_type == "service_category":
+                    target_category = e.canonical_value or e.original_text
+                    break
+        if not target_category:
+            target_category = KnowledgeCategory.PRODUCTS_SERVICES.value
+
+        # Routing decision matrix
+        intent = plan.intent
+        is_exact_sku = len(exact_keys) > 0
+        is_price_range = plan.range_semantics is not None and plan.range_semantics.field == "price"
+        is_comparison = plan.comparison.requested or intent in (
+            IntentType.SERVICE_COMPARISON,
+            IntentType.PRODUCT_COMPARISON,
+        )
+        is_contact_request = intent == IntentType.OTHER and "contact" in (plan.query_text or "").lower()
+        if not is_contact_request:
+            for e in plan.entities:
+                if e.entity_type in ("contact", "department", "person"):
+                    is_contact_request = True
+                    break
+
+        run_structured = False
+        run_semantic = False
+        strategy_used = RetrievalStrategyUsed.HYBRID
+
+        if plan.retrieval_strategy == RetrievalStrategy.CLARIFICATION_REQUIRED and not plan.is_continuation:
+            # Fatal ambiguity prevents retrieval; do not execute broad generic discovery
+            run_structured = False
+            run_semantic = False
+            strategy_used = RetrievalStrategyUsed.EXACT_STRUCTURED
+        elif is_contact_request:
+            run_structured = True
+            run_semantic = False
+            strategy_used = RetrievalStrategyUsed.EXACT_STRUCTURED
+        elif is_exact_sku:
+            run_structured = True
+            # Semantic branch is optional secondary for detailed description
+            run_semantic = True
+            strategy_used = RetrievalStrategyUsed.EXACT_STRUCTURED
+        elif is_price_range and not is_comparison:
+            run_structured = True
+            run_semantic = True
+            strategy_used = RetrievalStrategyUsed.EXACT_STRUCTURED
+        elif intent in (IntentType.POLICY_QUESTION, IntentType.SUPPORT_ISSUE):
+            run_structured = False
+            run_semantic = True
+            strategy_used = RetrievalStrategyUsed.SEMANTIC_DISCOVERY
+        else:
+            # Broad discovery, comparison, recommendations, hybrid
+            run_structured = True
+            run_semantic = True
+            strategy_used = RetrievalStrategyUsed.HYBRID
+
+        # ---------------------------------------------------------------------
+        # 2b. Requirement eligibility spec (role / family / compatibility / specs)
+        # ---------------------------------------------------------------------
+        # Resolved once per plan from the plan + THIS tenant's category vocabulary; the
+        # verifier applies it as a hard gate before ranking.
+        eligibility_spec = None
+        if target_category == KnowledgeCategory.PRODUCTS_SERVICES.value and not is_contact_request:
+            try:
+                from app.services.retrieval_router.entity_eligibility import (
+                    build_request_spec,
+                    load_tenant_vocabulary,
+                )
+
+                vocab = await load_tenant_vocabulary(db, tenant_id)
+                eligibility_spec = build_request_spec(plan, vocab)
+            except Exception as spec_err:  # noqa: BLE001 — never block retrieval on the spec
+                logger.warning("Eligibility spec unavailable; retrieving without it", error=str(spec_err)[:200])
+                eligibility_spec = None
+        # item_id -> (origin, relevance) for structured candidates (see verifier)
+        structured_origin: Dict[str, Tuple[str, float]] = {}
+        result_count = plan.requested_result_count.final_count or 5
+        # Wider candidate pool when eligibility filtering will remove ineligible items.
+        candidate_pool = max(result_count * 4, 20) if eligibility_spec is not None and eligibility_spec.active else result_count
+
+        # ---------------------------------------------------------------------
+        # 3. Parallel Retrieval Execution with Deadlines
+        # ---------------------------------------------------------------------
+        structured_results: List[Tuple[KnowledgeItem, KnowledgeVersion]] = []
+        has_more_structured = False
+        structured_status = "NOT_INVOKED"
+        structured_dur_ms = 0.0
+
+        structured_is_generic_browse = False
+        semantic_results: List[SemanticCandidateHit] = []
+        semantic_status = "NOT_INVOKED"
+        semantic_dur_ms = 0.0
+
+        async def _run_structured_branch() -> None:
+            nonlocal structured_results, has_more_structured, structured_status, structured_dur_ms
+            nonlocal structured_is_generic_browse
+            t0 = time.perf_counter()
+            try:
+                # If plan has multiple decomposed requirements, execute across distinct categories
+                if plan.requirements and len(plan.requirements) > 1:
+                    seen_keys: Set[str] = set()
+                    merged_results: List[Tuple[KnowledgeItem, KnowledgeVersion]] = []
+
+                    # 1. Contacts
+                    has_contact_req = any(
+                        r.category == "contacts" or "contact" in (r.query_text or "").lower()
+                        for r in plan.requirements
+                    )
+                    if has_contact_req:
+                        contact_items = await self._structured_retriever.fetch_contacts(
+                            db=db,
+                            tenant_id=tenant_id,
+                            department_or_role=None,
+                            limit=5,
+                            as_of=as_of,
+                        )
+                        for it, ver in contact_items:
+                            k = f"{it.id}_{ver.id}"
+                            if k not in seen_keys:
+                                seen_keys.add(k)
+                                merged_results.append((it, ver))
+                                structured_origin[it.id] = ("exact_structured", 1.0)
+
+                    # 2. Exact keys
+                    if exact_keys:
+                        exact_items = await self._structured_retriever.fetch_by_exact_keys(
+                            db=db,
+                            tenant_id=tenant_id,
+                            keys=exact_keys,
+                            as_of=as_of,
+                        )
+                        for it, ver in exact_items:
+                            k = f"{it.id}_{ver.id}"
+                            if k not in seen_keys:
+                                seen_keys.add(k)
+                                merged_results.append((it, ver))
+                                structured_origin[it.id] = ("exact_key", 1.0)
+
+                    # 3. Fetch each distinct category represented in requirements
+                    categories_to_fetch = set()
+                    for r in plan.requirements:
+                        if r.category and r.category != "contacts":
+                            categories_to_fetch.add(r.category)
+
+                    for req_cat in categories_to_fetch:
+                        req_range = None
+                        req_filters = []
+                        for r in plan.requirements:
+                            if r.category == req_cat:
+                                if r.range_semantics:
+                                    req_range = r.range_semantics
+                                if r.filters:
+                                    req_filters.extend(r.filters)
+
+                        cat_items, _ = await self._structured_retriever.fetch_by_category_and_range(
+                            db=db,
+                            tenant_id=tenant_id,
+                            category=req_cat,
+                            range_semantics=req_range,
+                            filters=req_filters,
+                            exclude_entity_ids=plan.excluded_entity_ids,
+                            limit=5,
+                            offset=0,
+                            as_of=as_of,
+                        )
+                        # An unfiltered category listing has no relevance ordering: it is a
+                        # "generic" fallback, never authoritative evidence (previously it was
+                        # scored like an exact match and buried every relevant result).
+                        origin = ("constrained", 0.3) if (req_range or req_filters) else ("generic", 0.0)
+                        for it, ver in cat_items:
+                            k = f"{it.id}_{ver.id}"
+                            if k not in seen_keys:
+                                seen_keys.add(k)
+                                merged_results.append((it, ver))
+                                structured_origin.setdefault(it.id, origin)
+
+                    structured_results = merged_results
+                    has_more_structured = False
+                elif is_contact_request:
+                    contact_dept = plan.entities[0].canonical_value if plan.entities else None
+                    structured_results = await self._structured_retriever.fetch_contacts(
+                        db=db,
+                        tenant_id=tenant_id,
+                        department_or_role=contact_dept,
+                        limit=plan.requested_result_count.final_count or 5,
+                        as_of=as_of,
+                    )
+                    has_more_structured = False
+                    for it, _ in structured_results:
+                        structured_origin[it.id] = ("exact_structured", 1.0)
+                elif is_exact_sku:
+                    structured_results = await self._structured_retriever.fetch_by_exact_keys(
+                        db=db,
+                        tenant_id=tenant_id,
+                        keys=exact_keys,
+                        as_of=as_of,
+                    )
+                    has_more_structured = False
+                    for it, _ in structured_results:
+                        structured_origin[it.id] = ("exact_key", 1.0)
+                else:
+                    # Category listing with no relevance ordering. Only authoritative when
+                    # the customer constrained it (filters / price range); otherwise it is
+                    # an unranked fallback (see demotion below).
+                    structured_is_generic_browse = not plan.range_semantics and not any(
+                        f.field != "category" for f in plan.filters
+                    )
+                    target_limit = plan.requested_result_count.final_count or 5
+                    structured_results, has_more_structured = (
+                        await self._structured_retriever.fetch_by_category_and_range(
+                            db=db,
+                            tenant_id=tenant_id,
+                            category=target_category,
+                            range_semantics=plan.range_semantics,
+                            filters=plan.filters,
+                            exclude_entity_ids=plan.excluded_entity_ids,
+                            limit=target_limit,
+                            offset=0,
+                            as_of=as_of,
+                        )
+                    )
+                    origin = ("generic", 0.0) if structured_is_generic_browse else ("constrained", 0.3)
+                    for it, _ in structured_results:
+                        structured_origin.setdefault(it.id, origin)
+
+                # Progressive retrieval for a resolved product family: fetch the family's
+                # members from PostgreSQL (bounded) so the eligible items are always in the
+                # candidate set, whatever the top-K of the similarity branches returned.
+                token_groups: List[List[str]] = []
+                if eligibility_spec is not None:
+                    token_groups += [sorted(f.tokens) for f in eligibility_spec.families]
+                    # "parts for model X": every record that names X (its parts / accessories)
+                    token_groups += [[m.lower()] for m in eligibility_spec.target_models]
+                if token_groups:
+                    fam_items = await self._structured_retriever.fetch_family_candidates(
+                        db=db,
+                        tenant_id=tenant_id,
+                        family_token_groups=token_groups,
+                        limit=150,
+                        as_of=as_of,
+                    )
+                    have = {it.id for it, _ in structured_results}
+                    for it, ver in fam_items:
+                        if it.id not in have:
+                            structured_results.append((it, ver))
+                            have.add(it.id)
+                        if structured_origin.get(it.id, ("generic", 0.0))[0] == "generic":
+                            structured_origin[it.id] = ("family", 0.0)
+
+                structured_status = "SUCCESS" if structured_results else "EMPTY"
+            except Exception as err:
+                structured_status = "FAILED"
+                logger.warning("Structured retrieval branch encountered an error", error=str(err), tenant_id=tenant_id)
+            finally:
+                structured_dur_ms = round((time.perf_counter() - t0) * 1000, 2)
+
+        async def _run_semantic_branch() -> None:
+            nonlocal semantic_results, semantic_status, semantic_dur_ms
+            t0 = time.perf_counter()
+            try:
+                target_top_k = candidate_pool
+                semantic_results = await self._semantic_retriever.search(
+                    tenant_id=tenant_id,
+                    plan=plan,
+                    top_k=target_top_k,
+                    exclude_entity_ids=plan.excluded_entity_ids,
+                )
+                semantic_status = "SUCCESS" if semantic_results else "EMPTY"
+            except Exception as err:
+                semantic_status = "FAILED"
+                logger.warning("Semantic retrieval branch encountered an error", error=str(err), tenant_id=tenant_id)
+            finally:
+                semantic_dur_ms = round((time.perf_counter() - t0) * 1000, 2)
+
+        # Lexical (keyword / SKU) branch — runs alongside whenever the plan searches the
+        # catalogue. It is embedding-model independent, so product names, partial names
+        # and SKUs typed inside a sentence resolve even when dense vectors are weak.
+        lexical_results: List[Tuple[KnowledgeItem, KnowledgeVersion, Any]] = []
+        lexical_status = "NOT_INVOKED"
+        lexical_query = (plan.query_text or "").strip() or " ".join(
+            (e.canonical_value or e.original_text or "") for e in plan.entities
+        ).strip()
+        run_lexical = (run_semantic or (run_structured and not is_contact_request)) and bool(lexical_query)
+
+        async def _run_lexical_branch() -> None:
+            nonlocal lexical_results, lexical_status
+            try:
+                # Own session: an AsyncSession cannot run concurrent operations, and the
+                # structured branch is using `db` at the same time. Loaded attributes and
+                # relationships stay readable after close (expire_on_commit=False).
+                async with db_manager.session_factory() as lexical_db:
+                    lexical_results = await self._lexical_retriever.search(
+                        db=lexical_db,
+                        tenant_id=tenant_id,
+                        query_text=lexical_query,
+                        top_k=candidate_pool,
+                        exclude_entity_ids=plan.excluded_entity_ids,
+                        as_of=as_of,
+                    )
+                lexical_status = "SUCCESS" if lexical_results else "EMPTY"
+            except Exception as err:
+                lexical_status = "FAILED"
+                logger.warning("Lexical retrieval branch encountered an error", error=str(err), tenant_id=tenant_id)
+
+        tasks = []
+        if run_structured:
+            tasks.append(_run_structured_branch())
+        if run_semantic:
+            tasks.append(_run_semantic_branch())
+        if run_lexical:
+            tasks.append(_run_lexical_branch())
+
+        deadline_hit = False
+        if tasks:
+            try:
+                await asyncio.wait_for(asyncio.gather(*tasks), timeout=self._timeout_seconds)
+            except asyncio.TimeoutError:
+                logger.error("Retrieval execution exceeded deadline", timeout_seconds=self._timeout_seconds)
+                # A branch cancelled mid-query leaves the shared session's transaction invalid.
+                # Verify on a FRESH session (a rollback would expire the candidates already
+                # loaded and trigger lazy IO): retrieval degrades to the branches that finished
+                # instead of failing outright.
+                deadline_hit = True
+
+        # An unconstrained category listing says nothing about the customer's question.
+        # It used to enter the verifier as "exact" evidence (base score 100), so the same
+        # arbitrary items outranked every relevant match. Keep it only as a fallback when
+        # the query-driven branches found nothing.
+        if lexical_query and (lexical_results or semantic_results):
+            kept = [(it, v) for it, v in structured_results
+                    if structured_origin.get(it.id, ("exact_structured", 1.0))[0] != "generic"]
+            if len(kept) != len(structured_results):
+                structured_results = kept
+                has_more_structured = False
+
+        # Rank fusion (RRF) of the dense and lexical lists, computed from RANKS before the
+        # weak lexical hits are merged into the semantic list. Raw cosine and IDF scores live
+        # on different scales and must never be compared directly.
+        from app.services.retrieval_router.rank_fusion import ranked_ids, reciprocal_rank_fusion
+
+        # The keyword list only saw the words this catalogue contains. When the question's
+        # other words (often the very thing asked for: "fridge" vs "Mini Bar") are unknown to
+        # it, its ranking describes the leftover words ("hotel room") and counts for less.
+        lexical_coverage = min((h.query_coverage for _i, _v, h in lexical_results), default=1.0)
+        semantic_ids = {h.knowledge_item_id for h in semantic_results}
+        fused_relevance = reciprocal_rank_fusion(
+            [
+                ranked_ids((h.knowledge_item_id, h.score) for h in semantic_results),
+                [it.id for it, _v, _h in lexical_results],
+            ],
+            # Blind keyword list: tie-breaker only. With RRF k=60 any larger weight lets an
+            # item the semantic list ranked ~15th (it matched "hotel room") plus a keyword
+            # rank near the top outrank the semantic #1 (the fridge) - false "agreement".
+            weights=[1.0, 1.0 if lexical_coverage >= 1.0 else BLIND_LEXICAL_WEIGHT],
+        )
+
+        def _is_strong(item_id: str, hit: Any) -> bool:
+            # A confident keyword match is exact evidence only if the keyword branch read the
+            # whole question, or the semantic branch independently found the same item.
+            if hit.exact_key:
+                return True
+            if hit.score < STRONG_MATCH_THRESHOLD:
+                return False
+            return hit.query_coverage >= 1.0 or item_id in semantic_ids
+
+        # Fuse lexical hits: confident name / SKU matches are treated as exact evidence
+        # (ranked ahead of generic category browsing); weaker ones compete with dense
+        # hits on score (the verifier keeps the max score per item).
+        if lexical_results:
+            strong_pairs: List[Tuple[KnowledgeItem, KnowledgeVersion]] = []
+            for item, version, hit in lexical_results:
+                if _is_strong(item.id, hit):
+                    strong_pairs.append((item, version))
+                else:
+                    semantic_results.append(
+                        SemanticCandidateHit(
+                            knowledge_item_id=item.id,
+                            knowledge_version_id=version.id,
+                            score=hit.score,
+                            text_excerpt="",
+                            category=item.category,
+                            payload={"retrieval_source": "lexical", "lexical_blind": lexical_coverage < 1.0},
+                        )
+                    )
+            if strong_pairs:
+                for (it, _v), (_i2, _v2, hit) in zip(
+                        strong_pairs, [x for x in lexical_results if _is_strong(x[0].id, x[2])]):
+                    structured_origin[it.id] = ("exact_key", 1.0) if hit.exact_key else ("lexical", float(hit.score))
+                strong_ids = {it.id for it, _ in strong_pairs}
+                structured_results = strong_pairs + [
+                    (it, v) for it, v in structured_results if it.id not in strong_ids
+                ]
+
+        # ---------------------------------------------------------------------
+        # 4. Authoritative Verification, Fact Checking & Ranking
+        # ---------------------------------------------------------------------
+        async def _verify(verify_db):
+            return await self._verifier.verify_and_rank(
+                db=verify_db,
+                tenant_id=tenant_id,
+                plan=plan,
+                structured_candidates=structured_results,
+                semantic_candidates=semantic_results,
+                has_more_structured=has_more_structured,
+                as_of=as_of,
+                eligibility_spec=eligibility_spec,
+                structured_origin=structured_origin,
+                fused_relevance=fused_relevance,
+            )
+
+        # Verification rehydrates facts from PostgreSQL. A dropped / reset connection on a lossy
+        # link must not fail the customer's reply: retry transient errors on a fresh session.
+        from app.services.knowledge_persistence import _is_transient_db_error
+
+        verified = None
+        for attempt in range(3):
+            try:
+                if deadline_hit or attempt > 0:
+                    async with db_manager.session_factory() as fresh_db:
+                        verified = await _verify(fresh_db)
+                else:
+                    verified = await _verify(db)
+                break
+            except Exception as verify_err:  # noqa: BLE001
+                if attempt < 2 and _is_transient_db_error(verify_err):
+                    logger.warning("Retrieval verification retry after transient DB error",
+                                   attempt=attempt + 1, error=f"{type(verify_err).__name__}: {str(verify_err)[:160]}")
+                    await asyncio.sleep(0.5 * (attempt + 1))
+                    continue
+                raise
+        (
+            final_evidence,
+            coverage,
+            verification,
+            follow_up,
+            retrieval_status,
+            warnings,
+        ) = verified
+
+        total_duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+
+        # ---------------------------------------------------------------------
+        # 5. Assemble Stable Versioned Output Contract
+        # ---------------------------------------------------------------------
+        metadata = SourceExecutionMetadata(
+            structured_source_status=structured_status,
+            semantic_source_status=semantic_status,
+            embedding_profile_id=plan.metadata.embedding_profile_id,
+            strategy_used=strategy_used,
+            duration_ms=total_duration_ms,
+            structured_duration_ms=structured_dur_ms,
+            semantic_duration_ms=semantic_dur_ms,
+            candidate_counts={
+                "structured_candidates": len(structured_results),
+                "semantic_candidates": len(semantic_results),
+                "lexical_candidates": len(lexical_results),
+                "verified_matches": len(final_evidence),
+            },
+        )
+
+        plan_ref = PlanReferenceDTO(
+            schema_version=plan.schema_version,
+            plan_id=plan.plan_id,
+            tenant_id=plan.tenant_id,
+            thread_id=plan.thread_id,
+            message_id=plan.message_id,
+            context_revision=plan.context_revision,
+        )
+
+        result = RetrievalResult(
+            schema_version="1.0",
+            status=retrieval_status,
+            plan_reference=plan_ref,
+            retrieval=metadata,
+            results=final_evidence,
+            coverage=coverage,
+            verification=verification,
+            follow_up=follow_up,
+            warnings=warnings,
+        )
+
+        logger.info(
+            "Retrieval Router completed execution",
+            retrieval_id=result.retrieval_id,
+            plan_id=plan.plan_id,
+            tenant_id=tenant_id,
+            status=result.status.value,
+            strategy=strategy_used.value,
+            matches_count=len(final_evidence),
+            duration_ms=total_duration_ms,
+        )
+
+        return result
+
+
+retrieval_router = RetrievalRouter()
