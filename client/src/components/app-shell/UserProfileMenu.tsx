@@ -18,8 +18,8 @@ export function UserProfileMenu() {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const open = Boolean(anchorEl);
 
-  const fullName = user?.full_name || "Enterprise User";
-  const email = user?.email || "user@proxipilot.com";
+  const fullName = user?.full_name || user?.email?.split("@")[0] || "";
+  const email = user?.email || "";
   const initial = (fullName.charAt(0) || user?.email?.charAt(0) || "U").toUpperCase();
 
   const handleClick = (event: React.MouseEvent<HTMLElement>) => {

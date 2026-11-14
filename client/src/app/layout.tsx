@@ -158,7 +158,7 @@ export default function RootLayout({
     contactPoint: {
       "@type": "ContactPoint",
       contactType: "customer support",
-      email: "support@proxipilot.com",
+      email: "hello@proxipilot.com",
       availableLanguage: ["English"],
     },
     address: {

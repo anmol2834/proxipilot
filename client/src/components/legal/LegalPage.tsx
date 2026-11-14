@@ -2,7 +2,7 @@ import React from "react";
 import Link from "next/link";
 
 /** Contact address shown on the legal pages (also the support address users write to). */
-export const LEGAL_CONTACT_EMAIL = "support@proxipilot.com";
+export const LEGAL_CONTACT_EMAIL = "hello@proxipilot.com";
 export const LEGAL_EFFECTIVE_DATE = "14 November 2026";
 
 export interface LegalSection {

@@ -3,7 +3,7 @@ export const APP_CONFIG = {
   version: "0.1.0",
   description: "Autonomous AI-powered communication and workflow proxy for modern enterprises",
   author: "ProxiPilot Inc.",
-  supportEmail: "support@proxipilot.com",
+  supportEmail: "hello@proxipilot.com",
 
   pagination: {
     defaultPage: 1,
