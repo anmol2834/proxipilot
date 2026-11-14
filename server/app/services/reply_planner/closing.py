@@ -29,7 +29,7 @@ _SIGN_OFF_LINE = re.compile(
     r"^(?:(?:many\s+)?(?:thanks?|thank\s+you)(?:\s+(?:again|so\s+much))?(?:\s*(?:&|and)\s*(?:best\s+|warm\s+|kind\s+)?regards)?"
     r"|(?:best|warm|warmest|kind|kindest|with\s+(?:best|warm|kind)?|many)?\s*regards"
     r"|best(?:\s+wishes)?|cheers|sincerely|yours\s+(?:truly|sincerely|faithfully)|thanking\s+you"
-    r"|dhanyavaa?d|shukriya)[\s,.!]*$",
+    r"|dhanyavaa?d|shukriya)[\s,.!:;\-–—]*$",  # "Thanks —", "Regards -", "Thanks:"
     re.IGNORECASE,
 )
 # Placeholders a model invents when it has no real value: [Your name], [Company Name], <Name> ...

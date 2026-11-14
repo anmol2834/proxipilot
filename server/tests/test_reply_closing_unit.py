@@ -41,6 +41,14 @@ def test_various_model_closings_are_removed():
         assert "[" not in out and "Your order ships Monday." in out
 
 
+def test_dash_terminated_thanks_line_is_removed():
+    # Seen in production: the model ended with "Thanks —" before the appended closing.
+    body = "Hi Ratan,\n\nWe list 5,103 products across 140 categories.\n\nThanks —\n\nRegards,\nDolphy India"
+    out = apply_closing(body, make_closing(None, CO))
+    assert "Thanks —" not in out and _tail(out) == [DEFAULT_SIGN_OFF, CO]
+    assert out.count("Regards,") == 1 and "5,103 products" in out
+
+
 def test_content_after_a_thanks_line_is_not_cut():
     long_line = "We will also send the installation guide and the warranty card with the delivery tomorrow."
     out = apply_closing(f"Hi,\n\nThank you!\n{long_line}", make_closing(None, CO))
