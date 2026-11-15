@@ -50,6 +50,10 @@ from app.services.requirement_planner.validator import (
     DeterministicPlanValidator,
     deterministic_plan_validator,
 )
+from app.services.requirement_planner.expansion import apply_semantic_expansions
+
+# A cold taxonomy load is one aggregate query; never let it hold up planning.
+TAXONOMY_LOAD_TIMEOUT_S = 2.0
 
 
 class RequirementPlannerService:
@@ -121,6 +125,8 @@ class RequirementPlannerService:
         # Items already presented in this thread (for selection state), loaded in parallel with
         # planning on its own session so it adds no latency.
         presented_task = asyncio.create_task(self._load_presented(envelope))
+        # Business context & taxonomy map for AI #1 (cached per tenant), loaded alongside.
+        taxonomy_task = asyncio.create_task(self._load_taxonomy(envelope.tenant_id))
 
         # ---------------------------------------------------------------------
         # Capability Discovery
@@ -130,10 +136,12 @@ class RequirementPlannerService:
         # ---------------------------------------------------------------------
         # Layer B: OpenAI Structured Intent Planning (Fast Path or LLM)
         # ---------------------------------------------------------------------
+        taxonomy = await taxonomy_task
         proposal, is_fast_path, planner_metrics = await self.planner.plan_intent(
             envelope=envelope,
             preprocessed=preprocessed,
             catalogue=catalogue,
+            taxonomy=taxonomy,
         )
 
         metadata = PlanMetadata(
@@ -163,6 +171,9 @@ class RequirementPlannerService:
             presented = await presented_task
         except Exception:  # noqa: BLE001
             presented = []
+        # AI #1 semantic expansions (translation + HyDE concepts + keywords), sanitised and
+        # matched to the requirements they describe. Retrieval aids only.
+        plan = apply_semantic_expansions(plan, proposal)
         plan = apply_selection_state(plan, envelope, presented)
 
         total_duration_ms = (time.perf_counter() - start_t) * 1000.0
@@ -185,6 +196,17 @@ class RequirementPlannerService:
             await self._dispatch_plan_event(plan)
 
         return plan
+
+    @staticmethod
+    async def _load_taxonomy(tenant_id: str):
+        from app.services.business_taxonomy import load_business_taxonomy
+
+        try:
+            async with db_manager.session_factory() as tax_db:
+                return await asyncio.wait_for(load_business_taxonomy(tax_db, tenant_id), timeout=TAXONOMY_LOAD_TIMEOUT_S)
+        except Exception as exc:  # noqa: BLE001 - plan without a taxonomy rather than fail
+            logger.warning("Planning without business taxonomy", tenant_id=tenant_id, error=f"{type(exc).__name__}: {str(exc)[:150]}")
+            return None
 
     @staticmethod
     async def _load_presented(envelope: ContextEnvelope):
@@ -240,7 +262,7 @@ def apply_selection_state(plan: RequirementPlan, envelope: ContextEnvelope, pres
     sel = resolve_selection(customer_texts(envelope), presented, current_requests_alternatives=wants_alternatives)
     if sel is None:
         return plan
-    update = {
+    update: Dict[str, Any] = {
         "active_selection": selection_summary(sel),
         "focus_entity_ids": [sel.item.entity_id],
         "excluded_entity_ids": [],

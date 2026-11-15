@@ -12,6 +12,7 @@ Provides tenant-isolated semantic knowledge retrieval from Qdrant:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import time
 from typing import Any, Dict, List, Optional, Sequence, Set
@@ -70,8 +71,15 @@ class SemanticRetriever:
         top_k: int = 5,
         score_threshold: float = 0.20,
         exclude_entity_ids: Optional[Sequence[str]] = None,
+        extra_queries: Optional[Sequence[str]] = None,
     ) -> List[SemanticCandidateHit]:
-        """Execute tenant-scoped semantic ANN search against Qdrant."""
+        """Execute tenant-scoped semantic ANN search against Qdrant.
+
+        `extra_queries` (AI #1 translations / HyDE concepts) are embedded in the SAME batch call
+        as the primary query and searched in parallel; hits are pooled per knowledge item by
+        their best similarity. If an extra query fails, the others still count; if they all
+        fail, the error propagates exactly as for a single query.
+        """
         if not tenant_id or not tenant_id.strip():
             raise ValueError("tenant_id is required for semantic retrieval")
 
@@ -94,6 +102,11 @@ class SemanticRetriever:
 
         # Bound query length to 500 characters
         query_text = query_text[:500]
+        texts: List[str] = [query_text]
+        for q in extra_queries or []:
+            q = (q or "").strip()[:500]
+            if q and q.lower() not in {t.lower() for t in texts}:
+                texts.append(q)
 
         # 2. Embedding Profile Validation
         profile_id = plan.metadata.embedding_profile_id or "emb_voyage_4_large_1024_v1"
@@ -108,23 +121,26 @@ class SemanticRetriever:
 
         # 3. Generate query vector via active provider
         provider = get_embedding_provider()
-        query_hash = hashlib.sha256(query_text.encode("utf-8")).hexdigest()
         embed_req = EmbeddingBatchRequest(
             model=provider.model_name,
             input_type=EmbeddingInputType.QUERY,
             items=[
                 EmbeddingRequestItem(
-                    item_id="query",
-                    text=query_text,
-                    content_hash=query_hash,
+                    item_id=f"query_{i}",
+                    text=t,
+                    content_hash=hashlib.sha256(t.encode("utf-8")).hexdigest(),
                     metadata={"tenant_id": tenant_id},
                 )
+                for i, t in enumerate(texts)
             ],
             model_name=provider.model_name,
             dimension=provider.dimension,
         )
         embed_res = await provider.embed_batch(embed_req)
-        query_vector = embed_res.results[0].vector
+        by_id = {r.item_id: r.vector for r in embed_res.results if getattr(r, "vector", None)}
+        vectors = [by_id[f"query_{i}"] for i in range(len(texts)) if f"query_{i}" in by_id]
+        if not vectors:
+            raise RuntimeError("Embedding provider returned no query vector")
 
         # 4. Mandatory Qdrant Tenant & Lifecycle Filters
         filter_must: List[Any] = [
@@ -170,15 +186,38 @@ class SemanticRetriever:
         # 5. Execute ANN Search with adaptive limit to accommodate exclusions
         client = qdrant_manager.client
         search_limit = min(max((top_k + len(clean_excluded)) * 3, 20), 60)
-        search_results = await client.search(
-            collection_name=self._collection_name,
-            query_vector=qmodels.NamedVector(name=self._vector_name, vector=query_vector),
-            query_filter=qdrant_filter,
-            limit=search_limit,
-            score_threshold=score_threshold,
+        outcomes = await asyncio.gather(
+            *(
+                client.search(
+                    collection_name=self._collection_name,
+                    query_vector=qmodels.NamedVector(name=self._vector_name, vector=vec),
+                    query_filter=qdrant_filter,
+                    limit=search_limit,
+                    score_threshold=score_threshold,
+                )
+                for vec in vectors
+            ),
+            return_exceptions=True,
         )
+        failures = [o for o in outcomes if isinstance(o, BaseException)]
+        if len(failures) == len(outcomes):
+            raise failures[0]
+        if failures:
+            logger.warning("Some expansion vector queries failed; using the rest",
+                           failed=len(failures), total=len(outcomes), tenant_id=tenant_id)
+        # Pool: best similarity per point across queries (same embedding model, same scale).
+        pooled: Dict[Any, Any] = {}
+        for res in outcomes:
+            if isinstance(res, BaseException):
+                continue
+            for point in res:
+                cur = pooled.get(point.id)
+                if cur is None or float(point.score) > float(cur.score):
+                    pooled[point.id] = point
+        search_results = sorted(pooled.values(), key=lambda pt: float(pt.score), reverse=True)
 
         hits: List[SemanticCandidateHit] = []
+        seen_items: Set[str] = set()
         for point in search_results:
             payload = point.payload or {}
             item_id = payload.get("knowledge_item_id")
@@ -195,6 +234,11 @@ class SemanticRetriever:
                 title_val = (payload.get("title") or "").strip()
                 if title_val and (title_val in clean_excluded or title_val.upper() in clean_excluded):
                     continue
+
+            # Several chunks of one item can match different queries: keep its best only.
+            if item_id in seen_items:
+                continue
+            seen_items.add(item_id)
 
             text_chunk = payload.get("text") or payload.get("text_excerpt") or ""
             hits.append(

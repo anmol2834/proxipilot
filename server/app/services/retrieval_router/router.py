@@ -63,6 +63,45 @@ MAX_PARALLEL_REQUIREMENTS = 4
 # Weight of a keyword list that could not see every word of the question (see fusion below).
 BLIND_LEXICAL_WEIGHT = 0.05
 
+# Weight of the keyword list built from AI #1's expansion keywords: they are model-written
+# guesses, so they reinforce dense matches but never outvote the customer's own words.
+EXPANSION_LEXICAL_WEIGHT = 0.5
+# Extra dense queries per (sub-)plan: translated terms + HyDE concepts, deduplicated.
+MAX_EXPANSION_QUERIES = 4
+_EXACT_ID_ENTITY_TYPES = frozenset({"sku", "service_code", "product_code", "model_number"})
+
+
+def expansion_search_inputs(plan: RequirementPlan, enabled: bool = True) -> Tuple[List[str], str]:
+    """(extra dense queries, expansion keyword query) for a plan.
+
+    Empty when expansions are absent / unusable, so retrieval falls back to the plan's own
+    query text exactly as before. Bypassed when the customer gave an exact identifier.
+    """
+    exps = list(getattr(plan, "semantic_expansions", None) or [])
+    if not enabled or not exps:
+        return [], ""
+    if any((e.entity_type or "").lower() in _EXACT_ID_ENTITY_TYPES and (e.canonical_value or "").strip()
+           for e in plan.entities) or "exact_sku_lookup" in (plan.retrieval_strategy_hints or []):
+        return [], ""
+    base = (plan.query_text or "").strip().lower()
+    queries: List[str] = []
+    seen = {base} if base else set()
+    # Round-robin across needs so a two-need email gets concepts for both within the cap.
+    per_need = [[exp.translated_standard_term, *exp.search_concepts] for exp in exps]
+    for rank in range(max(len(c) for c in per_need)):
+        for cands in per_need:
+            q = (cands[rank] if rank < len(cands) else "").strip()
+            if q and q.lower() not in seen:
+                seen.add(q.lower())
+                queries.append(q)
+    words: List[str] = []
+    for exp in exps:
+        for w in [*exp.keywords, exp.translated_standard_term]:
+            w = (w or "").strip()
+            if w and w.lower() not in (x.lower() for x in words):
+                words.append(w)
+    return queries[:MAX_EXPANSION_QUERIES], " ".join(words)[:300]
+
 
 class RetrievalRouter:
     """Decides and executes the multi-source retrieval plan."""
@@ -133,7 +172,7 @@ class RetrievalRouter:
             "query_text": title or plan.query_text,
             "entities": [PlannedEntity(entity_type="sku", original_text=key, canonical_value=key)] if key else [],
             "filters": [], "range_semantics": None, "requirements": [], "excluded_entity_ids": [],
-            "focus_entity_ids": [],
+            "focus_entity_ids": [], "semantic_expansions": [],
         })
         async with db_manager.session_factory() as f_db:
             res = await self._execute_single(f_db, tenant_id, sub, envelope, as_of)
@@ -167,6 +206,7 @@ class RetrievalRouter:
             "intent": req.intent, "query_text": (req.query_text or req.description).strip(),
             "entities": list(req.entities), "filters": list(req.filters), "range_semantics": req.range_semantics,
             "requirements": [req], "focus_entity_ids": [],
+            "semantic_expansions": [req.semantic_expansion] if req.semantic_expansion else [],
         })
         async with db_manager.session_factory() as r_db:
             res = await self._execute_single(r_db, tenant_id, sub, envelope, as_of)
@@ -195,6 +235,7 @@ class RetrievalRouter:
                 "retrieval_strategy": req.retrieval_strategy,
                 "requirements": [req],
                 "focus_entity_ids": [],
+                "semantic_expansions": [req.semantic_expansion] if req.semantic_expansion else [],
                 "requested_result_count": plan.requested_result_count.model_copy(
                     update={"final_count": count, "explicit_count": count}),
             })
@@ -372,6 +413,11 @@ class RetrievalRouter:
         result_count = plan.requested_result_count.final_count or 5
         # Wider candidate pool when eligibility filtering will remove ineligible items.
         candidate_pool = max(result_count * 4, 20) if eligibility_spec is not None and eligibility_spec.active else result_count
+
+        # AI #1 semantic expansions usable for this (sub-)plan; none when the customer named an
+        # exact identifier (exact lookup needs no expansion) or for contact requests.
+        expansion_queries, expansion_keyword_query = expansion_search_inputs(
+            plan, enabled=not is_contact_request)
 
         # ---------------------------------------------------------------------
         # 3. Parallel Retrieval Execution with Deadlines
@@ -554,11 +600,15 @@ class RetrievalRouter:
             t0 = time.perf_counter()
             try:
                 target_top_k = candidate_pool
+                search_kwargs: Dict[str, Any] = {}
+                if expansion_queries:
+                    search_kwargs["extra_queries"] = expansion_queries
                 semantic_results = await self._semantic_retriever.search(
                     tenant_id=tenant_id,
                     plan=plan,
                     top_k=target_top_k,
                     exclude_entity_ids=plan.excluded_entity_ids,
+                    **search_kwargs,
                 )
                 semantic_status = "SUCCESS" if semantic_results else "EMPTY"
             except Exception as err:
@@ -576,6 +626,30 @@ class RetrievalRouter:
             (e.canonical_value or e.original_text or "") for e in plan.entities
         ).strip()
         run_lexical = (run_semantic or (run_structured and not is_contact_request)) and bool(lexical_query)
+
+        # AI #1 expansions (translation, HyDE concepts, keywords) widen recall for vague, regional
+        # or functional wording. The customer's own words still drive the primary keyword search,
+        # so exact names / codes keep their exact-match strength; keyword hits that exist only
+        # because of model-written keywords are never treated as exact evidence.
+        expansion_lexical: List[Tuple[KnowledgeItem, KnowledgeVersion, Any]] = []
+        expansion_lexical_query = expansion_keyword_query
+        run_expansion_lexical = run_lexical and bool(expansion_lexical_query) and (
+            expansion_lexical_query.lower() != lexical_query.lower())
+
+        async def _run_expansion_lexical_branch() -> None:
+            nonlocal expansion_lexical
+            try:
+                async with db_manager.session_factory() as exp_db:
+                    expansion_lexical = await self._lexical_retriever.search(
+                        db=exp_db,
+                        tenant_id=tenant_id,
+                        query_text=expansion_lexical_query,
+                        top_k=candidate_pool,
+                        exclude_entity_ids=plan.excluded_entity_ids,
+                        as_of=as_of,
+                    )
+            except Exception as err:  # noqa: BLE001 - an aid; never fails retrieval
+                logger.warning("Expansion keyword branch encountered an error", error=str(err), tenant_id=tenant_id)
 
         async def _run_lexical_branch() -> None:
             nonlocal lexical_results, lexical_status
@@ -604,6 +678,8 @@ class RetrievalRouter:
             tasks.append(_run_semantic_branch())
         if run_lexical:
             tasks.append(_run_lexical_branch())
+        if run_expansion_lexical:
+            tasks.append(_run_expansion_lexical_branch())
 
         deadline_hit = False
         if tasks:
@@ -638,16 +714,33 @@ class RetrievalRouter:
         # it, its ranking describes the leftover words ("hotel room") and counts for less.
         lexical_coverage = min((h.query_coverage for _i, _v, h in lexical_results), default=1.0)
         semantic_ids = {h.knowledge_item_id for h in semantic_results}
-        fused_relevance = reciprocal_rank_fusion(
-            [
-                ranked_ids((h.knowledge_item_id, h.score) for h in semantic_results),
-                [it.id for it, _v, _h in lexical_results],
-            ],
-            # Blind keyword list: tie-breaker only. With RRF k=60 any larger weight lets an
-            # item the semantic list ranked ~15th (it matched "hotel room") plus a keyword
-            # rank near the top outrank the semantic #1 (the fridge) - false "agreement".
-            weights=[1.0, 1.0 if lexical_coverage >= 1.0 else BLIND_LEXICAL_WEIGHT],
-        )
+        rank_lists = [
+            ranked_ids((h.knowledge_item_id, h.score) for h in semantic_results),
+            [it.id for it, _v, _h in lexical_results],
+        ]
+        # Blind keyword list: tie-breaker only. With RRF k=60 any larger weight lets an
+        # item the semantic list ranked ~15th (it matched "hotel room") plus a keyword
+        # rank near the top outrank the semantic #1 (the fridge) - false "agreement".
+        rank_weights = [1.0, 1.0 if lexical_coverage >= 1.0 else BLIND_LEXICAL_WEIGHT]
+        if expansion_lexical:
+            rank_lists.append([it.id for it, _v, _h in expansion_lexical])
+            rank_weights.append(EXPANSION_LEXICAL_WEIGHT)
+            have_ids = semantic_ids | {it.id for it, _v, _h in lexical_results}
+            for item, version, hit in expansion_lexical:
+                if item.id in have_ids:
+                    continue
+                have_ids.add(item.id)
+                semantic_results.append(
+                    SemanticCandidateHit(
+                        knowledge_item_id=item.id,
+                        knowledge_version_id=version.id,
+                        score=hit.score,
+                        text_excerpt="",
+                        category=item.category,
+                        payload={"retrieval_source": "expansion_lexical", "lexical_blind": True},
+                    )
+                )
+        fused_relevance = reciprocal_rank_fusion(rank_lists, weights=rank_weights)
 
         def _is_strong(item_id: str, hit: Any) -> bool:
             # A confident keyword match is exact evidence only if the keyword branch read the

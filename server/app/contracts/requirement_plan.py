@@ -176,6 +176,19 @@ class PlanMetadata(BaseModel):
     fast_path_used: bool = False
 
 
+class SemanticExpansion(BaseModel):
+    """AI #1's semantic expansion of one customer need (multilingual + HyDE).
+
+    Retrieval aids only: they widen what the dense / keyword search can find. They are never
+    evidence, never filters and never shown to the customer; verification still decides.
+    """
+
+    original_text: str = Field(default="", description="Customer's exact phrase for this need")
+    translated_standard_term: str = Field(default="", description="Standard English (B2B) term for the need")
+    search_concepts: List[str] = Field(default_factory=list, description="Hypothetical record texts (HyDE)")
+    keywords: List[str] = Field(default_factory=list, description="Precise nouns / verbs for keyword search")
+
+
 class PlannedRequirement(BaseModel):
     """An independent requirement decomposed from a complex multi-intent query.
 
@@ -196,6 +209,8 @@ class PlannedRequirement(BaseModel):
     requested_count: int = Field(default=5)
     clarification_required: bool = False
     clarification_reason: Optional[str] = None
+    # AI #1 semantic expansion matched to this requirement (None = search the query text only)
+    semantic_expansion: Optional[SemanticExpansion] = None
 
 
 # =============================================================================
@@ -243,6 +258,8 @@ class RequirementPlan(BaseModel):
     retrieval_strategy: RetrievalStrategy = RetrievalStrategy.SEMANTIC_DISCOVERY
     retrieval_strategy_hints: List[str] = Field(default_factory=list)
     query_text: str = Field(default="", description="Sanitized semantic query text for retrieval embedding")
+    # AI #1 multilingual / HyDE expansions of the customer's needs (retrieval aids only)
+    semantic_expansions: List[SemanticExpansion] = Field(default_factory=list)
 
     # Novelty & Continuation Metadata
     is_continuation: bool = Field(default=False, description="True if continuing an antecedent discovery session")
@@ -305,5 +322,9 @@ class PlannerProposalDTO(BaseModel):
     clarification_needed: bool = Field(default=False)
     clarification_reason: Optional[str] = Field(default=None)
     semantic_search_query: str = Field(description="Distilled search query for vector retrieval")
+    search_requirements: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Per-need expansion: original_text, translated_standard_term, search_concepts, keywords",
+    )
     retrieval_hints: List[str] = Field(default_factory=list)
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
