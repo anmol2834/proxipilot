@@ -78,10 +78,10 @@ Date: 2026-11-15. This is a code-level and runtime audit of the backend, the wor
 | F-05 | **Medium (authz)** | Business-profile and workspace-preference **writes** only required `organization.read`, so any read-only member could overwrite org settings. | They now require `organization.update` (Owner/Admin). Onboarding is unaffected (Owner). | same file |
 | F-06 | **Medium (security)** | The fixed developer OTP `123456` was accepted on every non-production environment, **including staging**. | Accepted only in `development` / `test`; fails closed (`services/auth.py: accepts_dev_master_otp`). | `test_auth_master_otp_unit.py` |
 | F-07 | **Medium (perf)** | Evidence fusion ran a tenant `GROUP BY` on **every** call: one extra DB session per email (about 0.43 s cross-region). It also made the fusion burst benchmark DB-bound. | Cached per tenant for 60 s and invalidated when an import completes (`evidence_fusion/service.py`, `import_worker.py`). Failures are not cached. | `test_fusion_category_cache_unit.py` |
-| F-08 | Low | `/api/v1/metrics` is public. Only Python/process metrics are exposed, no tenant data. | **Not changed** (infra): proposed nginx `allow 127.0.0.1; deny all;` for `/metrics` and `/api/v1/metrics`. | – |
+| F-08 | Low | `/api/v1/metrics` is public. Only Python/process metrics are exposed, no tenant data. | **Applied 2026-11-15:** nginx `allow 127.0.0.1; allow ::1; deny all;` for `/metrics` and `/api/v1/metrics`. Public requests now get 403; `/ready` and `/health` still return 200. Backup in `/root/api.proxipilot.com.nginx.bak-*`. | verified with curl |
 | F-09 | Low (QA safety) | The root `conftest.py` loaded `.env` with `override=True`, so tests could never be pointed at isolated infrastructure: they were always forced onto `.env` (the exhausted Upstash and the production database). | `override=False`: explicit environment variables win, and `.env` fills only unset values. | used throughout this run |
 | F-10 | Low (QA safety, **open**) | The session-end safety net purges organisations by **name and time**, not by ownership, so two concurrent test sessions on the shared database delete each other's data. | Documented, not changed. Run test sessions one at a time until fixtures tag a run ID. | – |
-| P-01 | **Medium (perf)** | `pool_pre_ping` costs about 240 ms per checkout over the cross-region link. | New setting `DB_POOL_PRE_PING` (default **true**, so behaviour is unchanged). Setting it to false in production is proposed, not applied. | – |
+| P-01 | **Medium (perf)** | `pool_pre_ping` costs about 240 ms per checkout over the cross-region link. | New setting `DB_POOL_PRE_PING` (default **true**). **Applied in production on 2026-11-15: `DB_POOL_PRE_PING=false`.** An app-pool session now takes p50 190 ms (was 431 ms), and a connection idle for 70 s still worked. `.env` backup: `.env.bak-preping-*`. | measured on EC2 |
 
 Fixed earlier this session: `json` NameError on `/feedback/threads/{id}/draft` (34 production 500s on 2026-11-14, already fixed in code), OAuth callback 500 when Redis was down (commit 9db8323), Upstash quota outage (Redis moved to EC2).
 
@@ -91,7 +91,7 @@ Fixed earlier this session: `json` NameError on `/feedback/threads/{id}/draft` (
 |---|---|---|---|
 | Fusion: category query per email | 1 DB session (~430 ms prod) | 0 when cached (≤1 per tenant per minute) | Code done, not deployed |
 | Fusion compute per call (profiled) | – | < 1 ms, excluding I/O | Measured locally |
-| Session checkout with `DB_POOL_PRE_PING=false` | 431 ms | 192 ms (EC2 measurement) | Setting added; production switch pending approval |
+| Session checkout with `DB_POOL_PRE_PING=false` | 431 ms | 190 ms (app pool, EC2, after the switch) | **Applied in production** |
 | Estimated saving for the 14 AI-path sessions | – | up to about 3.4 s per email (less where sessions run in parallel) | **Estimate**: verify after deploy with the same log percentiles |
 | Fusion 10k burst | timed out (> 420 s) | completes in 294 s: 10,000/10,000 outcomes, 0 errors, p50 863 ms | The test's 500/s and p95 < 50 ms targets are **not met**. 5,000 items have no envelope, so each re-reads the message body from the database, 0.4–1.4 s per read over the dev PC link. The test was not weakened. |
 | Retrieval router 10k burst | times out | – | **Stale test**: its mocks predate the router's own DB sessions, and its fake vector search lacks the `exclude_entity_ids` argument. Needs test maintenance. |
@@ -122,11 +122,12 @@ Fixed earlier this session: `json` NameError on `/feedback/threads/{id}/draft` (
 - **Browser end-to-end UI tests:** not run. Client checks were the type check and an API-client review.
 - **The 100 customer-query scenarios:** not run against Dolphy data, per your instruction. The generalised selection and semantic-gap behaviours are covered on the synthetic fixture tenant.
 - **A real 10k webhook burst against production:** not run (it would write to the production database).
-- **No production deploy**, no production `.env` change and no nginx change during this audit. All proposed changes need approval.
+- **Deployed after approval:** commits 76a4a5b and 0d76bce; `DB_POOL_PRE_PING=false`; nginx `/metrics` restriction. End-to-end per-email timing has not been re-measured yet because no email arrived after the change. Compare the section 3 percentiles on the next traffic.
 
 ## 10. Rollback
 
 - **Code:** revert the audit commit. All changes are additive or local, with no schema migration.
-- **Pool:** `DB_POOL_PRE_PING=true`, or remove the line, then restart `proxipilot-api`.
+- **Pool:** `DB_POOL_PRE_PING=true`, or remove the line, then `sudo systemctl restart proxipilot-api`.
+- **nginx:** restore `/root/api.proxipilot.com.nginx.bak-*` over `/etc/nginx/sites-available/api.proxipilot.com`, then `sudo nginx -t && sudo systemctl reload nginx`.
 - **Stream deletion:** reverting `core/messaging.py` restores the old behaviour. Entries already deleted were fully processed.
 - **Authorization tightening:** revert `services/onboarding.py`. No data changes.
