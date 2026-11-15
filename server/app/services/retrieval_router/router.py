@@ -102,9 +102,76 @@ class RetrievalRouter:
             # Same guard as the single path, before any fan-out work.
             raise PermissionError("Cross-tenant plan retrieval rejected by policy")
         reqs = [r for r in (plan.requirements or []) if (r.query_text or r.description or "").strip()]
+        if plan.focus_entity_ids:
+            focused = await self._execute_focused(tenant_id, plan, reqs, envelope, as_of)
+            if focused is not None:
+                return focused
         if len(reqs) < 2:
             return await self._execute_single(db, tenant_id, plan, envelope, as_of)
         return await self._execute_per_requirement(tenant_id, plan, reqs, envelope, as_of)
+
+    async def _execute_focused(
+        self,
+        tenant_id: str,
+        plan: RequirementPlan,
+        reqs: List[Any],
+        envelope: Optional[ContextEnvelope],
+        as_of: Optional[datetime],
+    ) -> Optional[RetrievalResult]:
+        """The customer already selected an item: retrieve exactly that item (by its exact key, with
+        authoritative facts), never a fresh catalogue discovery. Requirements about other knowledge
+        (policies, contacts, delivery...) are still retrieved on their own. Returns None (normal
+        retrieval) if the selected item can no longer be found."""
+        from app.contracts.requirement_plan import PlannedEntity
+
+        sel = plan.active_selection or {}
+        key = (sel.get("external_key") or "").strip()
+        title = (sel.get("title") or "").strip()
+        focus = set(plan.focus_entity_ids)
+        sub = plan.model_copy(update={
+            "intent": IntentType.PRODUCT_LOOKUP,
+            "query_text": title or plan.query_text,
+            "entities": [PlannedEntity(entity_type="sku", original_text=key, canonical_value=key)] if key else [],
+            "filters": [], "range_semantics": None, "requirements": [], "excluded_entity_ids": [],
+            "focus_entity_ids": [],
+        })
+        async with db_manager.session_factory() as f_db:
+            res = await self._execute_single(f_db, tenant_id, sub, envelope, as_of)
+        selected = [i for i in res.results if i.entity_id in focus]
+        if not selected:
+            logger.warning("Selected item not retrievable; using normal retrieval", tenant_id=tenant_id,
+                           plan_id=plan.plan_id, focus=list(focus))
+            return None
+        results = list(selected)
+        other = [r for r in reqs if (r.category or "products_services") != "products_services"]
+        warnings = list(res.warnings)
+        if other:
+            extra = await self._execute_per_requirement(tenant_id, plan, other, envelope, as_of) if len(other) > 1                 else await self._run_one_requirement(tenant_id, plan, other[0], envelope, as_of)
+            seen = {i.entity_id for i in results}
+            cat_of = {r.requirement_id: r.category for r in other}
+            # Product evidence comes only from the selection; another requirement contributes only
+            # items of its own knowledge category (a category the business has no data for is
+            # reported downstream as not configured, never back-filled with catalogue products).
+            results += [i for i in extra.results if i.entity_id not in seen
+                        and any(cat_of.get(rid) == i.category for rid in (i.requirement_ids or []))]
+            warnings += [w for w in extra.warnings if w not in warnings]
+        logger.info("Focused retrieval for selected item", tenant_id=tenant_id, plan_id=plan.plan_id,
+                    selected=title[:80], other_requirements=len(other), results=len(results))
+        return res.model_copy(update={
+            "status": RetrievalStatus.SUCCESS, "results": results, "warnings": warnings,
+            "plan_reference": res.plan_reference.model_copy(update={"plan_id": plan.plan_id}),
+        })
+
+    async def _run_one_requirement(self, tenant_id, plan, req, envelope, as_of) -> RetrievalResult:
+        sub = plan.model_copy(update={
+            "intent": req.intent, "query_text": (req.query_text or req.description).strip(),
+            "entities": list(req.entities), "filters": list(req.filters), "range_semantics": req.range_semantics,
+            "requirements": [req], "focus_entity_ids": [],
+        })
+        async with db_manager.session_factory() as r_db:
+            res = await self._execute_single(r_db, tenant_id, sub, envelope, as_of)
+        return res.model_copy(update={"results": [i.model_copy(update={"requirement_ids": [req.requirement_id]})
+                                                  for i in res.results]})
 
     async def _execute_per_requirement(
         self,
@@ -127,6 +194,7 @@ class RetrievalRouter:
                 "requested_attributes": list(req.requested_attributes),
                 "retrieval_strategy": req.retrieval_strategy,
                 "requirements": [req],
+                "focus_entity_ids": [],
                 "requested_result_count": plan.requested_result_count.model_copy(
                     update={"final_count": count, "explicit_count": count}),
             })

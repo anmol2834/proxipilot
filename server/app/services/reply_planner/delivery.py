@@ -26,6 +26,13 @@ from app.core.logging import logger
 from app.core.messaging import DomainEvent, event_bus
 from app.core.redis import redis_manager
 from app.contracts.reply_planner import ReplyPlan, ReplyDisposition
+
+# Customer-safe, validated replies the policy gate allows to go out automatically. HUMAN_REVIEW,
+# REJECTED, NO_REPLY_REQUIRED and RETRYABLE_FAILURE never auto-send (they used to, whenever
+# validation passed, because only is_sendable was checked).
+AUTO_SENDABLE_DISPOSITIONS = frozenset({
+    ReplyDisposition.SEND, ReplyDisposition.PARTIAL_RESPONSE, ReplyDisposition.CLARIFY,
+})
 from app.contracts.evidence_package import MinimalEvidencePackage
 from app.models.inbox import EmailMessage, EmailThread, MessageDirection, ThreadStatus
 from app.models.integration import ConnectedIntegrationAccount
@@ -97,6 +104,16 @@ class OutboundEmailDeliveryService:
         """Deliver the reply plan to the recipient via Gmail if eligible and auto-send is allowed."""
         if not reply_plan.draft:
             logger.info("No draft in reply plan, skipping delivery", plan_id=reply_plan.plan_id)
+            return None
+
+        # Only dispositions the policy gate marks customer-safe may go out automatically;
+        # everything else stays a draft for the team.
+        if reply_plan.disposition not in AUTO_SENDABLE_DISPOSITIONS:
+            logger.info(
+                "Reply held for the team: disposition is not SEND",
+                plan_id=reply_plan.plan_id,
+                disposition=reply_plan.disposition.value,
+            )
             return None
 
         # Verify sendability

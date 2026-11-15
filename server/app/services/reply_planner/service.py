@@ -21,6 +21,7 @@ Key Capabilities:
 from __future__ import annotations
 
 import asyncio
+import re
 import json
 import time
 from typing import Any, Dict, List, Optional
@@ -190,6 +191,14 @@ class ReplyPlannerService:
             allow_auto_send=allow_auto_send,
         )
 
+        # 6a. Commercial negotiation: a discount / better-price request needs the team's decision
+        # unless the business has an approved discount in the evidence. Never auto-send it.
+        auto_sendable = (ReplyDisposition.SEND, ReplyDisposition.PARTIAL_RESPONSE, ReplyDisposition.CLARIFY)
+        if (disposition in auto_sendable and requests_negotiation(bundle.customer_message)
+                and not has_discount_evidence(package)):
+            disposition = ReplyDisposition.HUMAN_REVIEW
+            human_review_reason = "Customer asked for a discount / better price; no approved discount is configured."
+
         # 6b. Context Intelligence Engine: high risks (customer chasing an overdue promise, a price
         # that changed since it was quoted while the customer orders), company practices needing
         # approval, or very low context confidence must never be auto-sent.
@@ -318,3 +327,30 @@ class ReplyPlannerService:
 
 # Global singleton instance
 reply_planner_service = ReplyPlannerService()
+
+
+_NEGOTIATION = re.compile(
+    r"\b(discount|discounted|best (?:price|rate|deal|offer)|better (?:price|rate|deal|offer)|lowest (?:price|rate)|"
+    r"negotiat\w*|reduce (?:the )?price|price reduction|special (?:price|rate)|bulk (?:price|rate|discount)|"
+    r"concession|kam (?:karo|kijiye|kar do)|discount (?:do|dijiye|milega))\b",
+    re.IGNORECASE,
+)
+
+
+def requests_negotiation(customer_message: Optional[str]) -> bool:
+    """Customer asks for a discount or a better commercial deal (any business)."""
+    return bool(customer_message and _NEGOTIATION.search(customer_message))
+
+
+def has_discount_evidence(package: Any) -> bool:
+    """An approved, non-zero discount is present in the verified evidence."""
+    for req in getattr(package, "requirements", None) or []:
+        for f in getattr(req, "facts", None) or []:
+            if "discount" in (getattr(f, "attribute_name", "") or "").lower():
+                try:
+                    if float(getattr(f, "typed_value", 0) or 0) > 0:
+                        return True
+                except (TypeError, ValueError):
+                    if getattr(f, "typed_value", None):
+                        return True
+    return False

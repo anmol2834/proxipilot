@@ -461,6 +461,17 @@ class ReplyDrafter:
             f"STRATEGY: {package.action_context.safe_response_strategy}",
         ]
 
+        if package.active_selection_title and not package.is_continuation:
+            prompt_parts.append(
+                "CUSTOMER'S SELECTED ITEM (chosen earlier in this conversation): "
+                f"{package.active_selection_title}. "
+                "Keep the reply about this item and the customer's current request (ordering, quantity, "
+                "price, discount, specifications...). Do NOT list or suggest other products and do NOT say "
+                "'here are additional options' unless the customer explicitly asked for alternatives. "
+                "Use the customer's stated quantity; any total must be computed only from the verified unit "
+                "price. Never promise or invent a discount that is not in the evidence."
+            )
+
         if package.is_continuation:
             prompt_parts.append(
                 f"CONVERSATION CONTINUATION: Customer asked for more/different options.\n"

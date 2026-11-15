@@ -249,6 +249,12 @@ class RequirementPlan(BaseModel):
     continuation_type: Optional[str] = Field(default=None, description="MORE_OPTIONS | DIFFERENT_OPTIONS | CHEAPER_OPTIONS")
     excluded_entity_ids: List[str] = Field(default_factory=list, description="Canonical entity IDs/SKUs to exclude")
 
+    # Conversation selection state (derived from the thread, never invented): the item the customer
+    # chose among those already presented. While set, catalogue requirements retrieve ONLY these
+    # entities instead of rediscovering the catalogue.
+    active_selection: Optional[Dict[str, Optional[str]]] = Field(default=None)
+    focus_entity_ids: List[str] = Field(default_factory=list)
+
     # Validation & Evidence
     validation_status: ValidationStatus = ValidationStatus.READY_FOR_RETRIEVAL
     validation_errors: List[str] = Field(default_factory=list)

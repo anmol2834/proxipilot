@@ -290,6 +290,8 @@ class MinimalEvidencePackage(BaseModel):
     continuation_type: Optional[str] = None
     previously_presented_entity_ids: List[str] = Field(default_factory=list)
     novelty_verified: bool = Field(default=False)
+    # Item the customer selected earlier in the conversation (title), if any.
+    active_selection_title: Optional[str] = None
 
     # Budget & Observability
     budget_metrics: PackageBudgetMetrics = Field(default_factory=PackageBudgetMetrics)

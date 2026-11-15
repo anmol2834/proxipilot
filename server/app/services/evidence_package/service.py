@@ -135,6 +135,7 @@ class MinimalEvidencePackageService:
             is_continuation=is_cont,
             continuation_type=cont_type,
             previously_presented_entity_ids=excl_ids,
+            active_selection_title=((plan.active_selection or {}).get("title") if plan else None),
             novelty_verified=is_cont,
             budget_metrics=budget_metrics,
             warnings=list(fusion_result.warnings),

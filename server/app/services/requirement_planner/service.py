@@ -16,12 +16,14 @@ Dispatch to Downstream Retrieval Pipeline via Domain Event
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any, Dict, List, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.contracts.requirement_plan import (
+    IntentType,
     PlanMetadata,
     RequirementPlan,
     ValidationStatus,
@@ -116,6 +118,10 @@ class RequirementPlannerService:
             subject=curr_msg.subject,
         )
 
+        # Items already presented in this thread (for selection state), loaded in parallel with
+        # planning on its own session so it adds no latency.
+        presented_task = asyncio.create_task(self._load_presented(envelope))
+
         # ---------------------------------------------------------------------
         # Capability Discovery
         # ---------------------------------------------------------------------
@@ -150,6 +156,15 @@ class RequirementPlannerService:
             metadata=metadata,
         )
 
+        # ---------------------------------------------------------------------
+        # Layer D: Conversation selection state (deterministic, from thread evidence)
+        # ---------------------------------------------------------------------
+        try:
+            presented = await presented_task
+        except Exception:  # noqa: BLE001
+            presented = []
+        plan = apply_selection_state(plan, envelope, presented)
+
         total_duration_ms = (time.perf_counter() - start_t) * 1000.0
         logger.info(
             "Requirement plan generated successfully",
@@ -170,6 +185,15 @@ class RequirementPlannerService:
             await self._dispatch_plan_event(plan)
 
         return plan
+
+    @staticmethod
+    async def _load_presented(envelope: ContextEnvelope):
+        from app.services.conversation_selection import load_presented_items
+
+        if not envelope.thread_id:
+            return []
+        async with db_manager.session_factory() as sel_db:
+            return await load_presented_items(sel_db, envelope.tenant_id, envelope.thread_id)
 
     async def _dispatch_plan_event(self, plan: RequirementPlan) -> None:
         """Publish requirement plan event to Redis stream 'ai_processing'."""
@@ -195,3 +219,36 @@ class RequirementPlannerService:
 
 # Singleton orchestrator service instance
 requirement_planner_service = RequirementPlannerService()
+
+
+_ALTERNATIVE_INTENTS = (IntentType.MORE_OPTIONS, IntentType.DIFFERENT_OPTIONS)
+
+
+def apply_selection_state(plan: RequirementPlan, envelope: ContextEnvelope, presented) -> RequirementPlan:
+    """Resolve the customer's active selection from the thread and make the plan honour it.
+
+    - A message that names an already-presented item is a SELECTION, never "more options": it must
+      not exclude that item and must not rediscover the catalogue.
+    - Follow-ups (order, quantity, discount, warranty...) keep the selection.
+    - Asking for alternatives without naming an item clears it (normal discovery continues).
+    """
+    from app.services.conversation_selection import customer_texts, resolve_selection, selection_summary
+
+    if not presented:
+        return plan
+    wants_alternatives = plan.intent in _ALTERNATIVE_INTENTS
+    sel = resolve_selection(customer_texts(envelope), presented, current_requests_alternatives=wants_alternatives)
+    if sel is None:
+        return plan
+    update = {
+        "active_selection": selection_summary(sel),
+        "focus_entity_ids": [sel.item.entity_id],
+        "excluded_entity_ids": [],
+    }
+    if wants_alternatives and sel.named_in_current:
+        # "Okay, I want <presented item>" was misread as a continuation request.
+        update.update({"intent": IntentType.PRODUCT_LOOKUP, "is_continuation": False, "continuation_type": None})
+    logger.info("Conversation selection resolved", plan_id=plan.plan_id, thread_id=plan.thread_id,
+                selected=sel.item.title[:80], named_in_current=sel.named_in_current,
+                original_intent=plan.intent.value)
+    return plan.model_copy(update=update)
