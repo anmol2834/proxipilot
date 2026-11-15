@@ -10,7 +10,6 @@ Core Responsibilities:
 """
 
 from datetime import datetime, timedelta, timezone
-import json
 import secrets
 from typing import List, Optional, Tuple
 import uuid
@@ -45,6 +44,12 @@ from app.models.auth import (
 from app.models.organization import MembershipStatus, Organization, OrganizationMember, Role, User
 from app.services.audit import audit_service
 from app.services.session_cache import cache_session
+
+
+def accepts_dev_master_otp(environment: str) -> bool:
+    """Whether the fixed developer OTP (123456) is accepted. Fail closed: only local
+    development and automated tests, never a hosted environment (staging previously did)."""
+    return environment in ("development", "test")
 
 
 class AuthService:
@@ -180,7 +185,7 @@ class AuthService:
             )
 
         # Verification check (in dev environment, allow 123456 for fast developer/testing experience)
-        is_dev = get_settings().environment != "production"
+        is_dev = accepts_dev_master_otp(get_settings().environment)
         if cached_otp != otp_input and not (is_dev and otp_input == "123456"):
             challenge.attempt_count += 1
             if challenge.attempt_count >= self.MAX_OTP_ATTEMPTS:

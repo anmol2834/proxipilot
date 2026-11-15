@@ -737,7 +737,11 @@ class KnowledgeImportWorker(BaseWorker):
             # New/changed catalogue: product-family vocabulary must reflect it immediately.
             try:
                 from app.services.retrieval_router.entity_eligibility import invalidate_tenant_vocabulary
+                from app.services.business_taxonomy import invalidate_business_taxonomy
+                from app.services.evidence_fusion.service import invalidate_configured_categories
                 invalidate_tenant_vocabulary(event.tenant_id)
+                invalidate_business_taxonomy(event.tenant_id)
+                invalidate_configured_categories(event.tenant_id)
             except Exception:  # noqa: BLE001
                 pass
             logger.info("Import job pipeline completed successfully", job_id=job_id, final_status=final_status.value)

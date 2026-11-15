@@ -130,6 +130,10 @@ class EventBus(ABC):
         pass
 
 
+# Dead-letter streams have no consumer; keep the most recent entries for inspection.
+DLQ_MAX_ENTRIES = 10_000
+
+
 class RedisStreamsEventBus(EventBus):
     """Production-grade Redis Streams Event Bus implementation."""
 
@@ -290,10 +294,22 @@ class RedisStreamsEventBus(EventBus):
         return events
 
     async def acknowledge(self, stream_name: str, group_name: str, message_id: str) -> None:
-        """Acknowledge message processing in group."""
+        """Acknowledge message processing in group, then delete the entry.
+
+        Every stream here is a work queue with exactly ONE consumer group, and nothing reads
+        processed entries back. Without the delete, acknowledged entries stayed in the stream
+        forever: unbounded growth until Redis reached maxmemory (noeviction) and every XADD
+        failed, stopping the whole pipeline. Deleting only after a successful ACK keeps the
+        stream bounded by the real backlog, so a burst is never trimmed before it is processed.
+        """
         client = redis_manager.client
         full_stream = self._resolve_stream(stream_name)
-        await client.xack(full_stream, group_name, message_id)
+        acked = await client.xack(full_stream, group_name, message_id)
+        if acked:
+            try:
+                await client.xdel(full_stream, message_id)
+            except Exception as err:  # noqa: BLE001 - the ACK already succeeded; retried next time
+                logger.warning("Stream entry delete after ack failed", stream=full_stream, error=str(err))
 
     async def send_to_dlq(self, original_stream: str, event: DomainEvent, error: str) -> str:
         """Append unprocessable message to the DLQ stream."""
@@ -303,7 +319,9 @@ class RedisStreamsEventBus(EventBus):
         dlq_payload["dlq_error"] = error
         dlq_payload["dlq_timestamp"] = datetime.now(timezone.utc).isoformat()
 
-        msg_id = await client.xadd(dlq_stream, cast(Dict[Any, Any], dlq_payload))
+        # Terminal entries kept for inspection only: bound them (approximate trim is O(1)).
+        msg_id = await client.xadd(dlq_stream, cast(Dict[Any, Any], dlq_payload),
+                                   maxlen=DLQ_MAX_ENTRIES, approximate=True)
         logger.warn(
             "Event moved to Dead Letter Queue",
             dlq_stream=dlq_stream,

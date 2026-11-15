@@ -108,61 +108,70 @@ class EmailWorker(BaseWorker):
             except Exception as err:
                 logger.warning("Redis lock check failed in EmailWorker", error=str(err))
 
-            # Database check: Ensure message exists, is INBOUND, and has not already been replied to
-            from sqlalchemy import select
-            from app.models.inbox import EmailMessage, MessageDirection
-            from app.models.outbound import OutboundMessage, DeliveryStatus
-            async with db_manager.session_factory() as check_session:
-                msg = await check_session.get(EmailMessage, message_id)
-                if not msg:
-                    logger.warning("Message not found for context resolution", message_id=message_id)
-                    return
-                if msg.direction != MessageDirection.INBOUND.value:
-                    logger.info("Message is not inbound, skipping context resolution", message_id=message_id, direction=msg.direction)
-                    return
+            try:
+                # Database check: Ensure message exists, is INBOUND, and has not already been replied to
+                from sqlalchemy import select
+                from app.models.inbox import EmailMessage, MessageDirection
+                from app.models.outbound import OutboundMessage, DeliveryStatus
+                async with db_manager.session_factory() as check_session:
+                    msg = await check_session.get(EmailMessage, message_id)
+                    if not msg:
+                        logger.warning("Message not found for context resolution", message_id=message_id)
+                        return
+                    if msg.direction != MessageDirection.INBOUND.value:
+                        logger.info("Message is not inbound, skipping context resolution", message_id=message_id, direction=msg.direction)
+                        return
 
-                stmt_replied = select(EmailMessage.id).where(
-                    EmailMessage.thread_id == thread_id,
-                    EmailMessage.direction == MessageDirection.OUTBOUND.value,
-                    EmailMessage.in_reply_to_external_id == msg.external_message_id,
+                    stmt_replied = select(EmailMessage.id).where(
+                        EmailMessage.thread_id == thread_id,
+                        EmailMessage.direction == MessageDirection.OUTBOUND.value,
+                        EmailMessage.in_reply_to_external_id == msg.external_message_id,
+                    )
+                    if (await check_session.execute(stmt_replied)).scalar_one_or_none():
+                        logger.info("Message has already been replied to (EmailMessage exists), skipping", message_id=message_id)
+                        return
+
+                    stmt_out_sent = select(OutboundMessage.id).where(
+                        OutboundMessage.thread_id == thread_id,
+                        OutboundMessage.in_reply_to_external_id == msg.external_message_id,
+                        OutboundMessage.delivery_status == DeliveryStatus.SENT.value,
+                    )
+                    if (await check_session.execute(stmt_out_sent)).scalar_one_or_none():
+                        logger.info("Message has already been replied to (OutboundMessage exists), skipping", message_id=message_id)
+                        return
+
+                envelope = await context_resolver.resolve_context(
+                    tenant_id=tenant_id,
+                    integration_account_id=account_id,
+                    thread_id=thread_id,
+                    current_message_id=message_id,
                 )
-                if (await check_session.execute(stmt_replied)).scalar_one_or_none():
-                    logger.info("Message has already been replied to (EmailMessage exists), skipping", message_id=message_id)
-                    return
-
-                stmt_out_sent = select(OutboundMessage.id).where(
-                    OutboundMessage.thread_id == thread_id,
-                    OutboundMessage.in_reply_to_external_id == msg.external_message_id,
-                    OutboundMessage.delivery_status == DeliveryStatus.SENT.value,
+                logger.info(
+                    "Conversation context resolved by email worker",
+                    event_id=event.event_id,
+                    tenant_id=tenant_id,
+                    thread_id=thread_id,
+                    message_id=message_id,
+                    revision=envelope.context_revision,
+                    open_requirements=len([r for r in envelope.unresolved_requirements if r.status.value == "OPEN"]),
                 )
-                if (await check_session.execute(stmt_out_sent)).scalar_one_or_none():
-                    logger.info("Message has already been replied to (OutboundMessage exists), skipping", message_id=message_id)
-                    return
 
-            envelope = await context_resolver.resolve_context(
-                tenant_id=tenant_id,
-                integration_account_id=account_id,
-                thread_id=thread_id,
-                current_message_id=message_id,
-            )
-            logger.info(
-                "Conversation context resolved by email worker",
-                event_id=event.event_id,
-                tenant_id=tenant_id,
-                thread_id=thread_id,
-                message_id=message_id,
-                revision=envelope.context_revision,
-                open_requirements=len([r for r in envelope.unresolved_requirements if r.status.value == "OPEN"]),
-            )
-
-            # Stage 3: Requirement & Intent Planner
-            from app.services.requirement_planner import requirement_planner_service
-            async with db_manager.session_factory() as session:
-                await requirement_planner_service.plan_requirements(
-                    envelope=envelope,
-                    db=session,
-                    dispatch_event=True,
-                )
+                # Stage 3: Requirement & Intent Planner
+                from app.services.requirement_planner import requirement_planner_service
+                async with db_manager.session_factory() as session:
+                    await requirement_planner_service.plan_requirements(
+                        envelope=envelope,
+                        db=session,
+                        dispatch_event=True,
+                    )
+            except Exception:
+                # Free the single-flight lock so the stream's retry (PEL redelivery) can run;
+                # otherwise the retry is skipped as "already in progress" and the email is lost.
+                try:
+                    await redis_client.delete(resolve_lock_key)
+                except Exception as rel_err:  # noqa: BLE001 - the lock still expires
+                    logger.warning("Could not release context-resolve lock", error=str(rel_err))
+                raise
 
         elif event_type == "email.outbound.sent":
             logger.info(

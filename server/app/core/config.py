@@ -42,6 +42,11 @@ class DatabaseSettings(BaseAppConfig):
     # never pay connection setup / serverless compute wake-up latency.
     warm_connections: int = Field(default=3, alias="DB_WARM_CONNECTIONS", ge=0, le=20)
     keepalive_interval_seconds: int = Field(default=60, alias="DB_KEEPALIVE_INTERVAL_SECONDS", ge=0)
+    # Liveness ping on every pool checkout. Over a cross-region link each ping costs several
+    # round trips (~240 ms measured EC2 ap-south-1 -> Neon ap-southeast-1) on EVERY session.
+    # Can be disabled where connections are kept warm (keepalive + LIFO + recycle) and callers
+    # retry transient errors; dead connections are still invalidated on first use.
+    pool_pre_ping: bool = Field(default=True, alias="DB_POOL_PRE_PING")
 
     @computed_field  # type: ignore[prop-decorator]
     @property

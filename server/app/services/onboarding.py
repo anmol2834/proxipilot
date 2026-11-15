@@ -220,7 +220,7 @@ class OnboardingService:
             db=db,
             user_id=user_id,
             organization_id=organization_id,
-            permission_key="organization.read",
+            permission_key="organization.update",
         )
 
         now_str = datetime.now(timezone.utc).isoformat()
@@ -327,7 +327,7 @@ class OnboardingService:
             db=db,
             user_id=user_id,
             organization_id=organization_id,
-            permission_key="organization.read",
+            permission_key="organization.update",
         )
 
         now_str = datetime.now(timezone.utc).isoformat()
@@ -396,6 +396,15 @@ class OnboardingService:
     ) -> Dict[str, Any]:
         """Resolves real activation status (connected mailboxes and indexed knowledge items) for organization."""
         org_id = organization_id
+        if org_id:
+            # A caller-supplied organization must be one the caller belongs to: these counts
+            # are tenant data (previously any authenticated user could read any org's counts).
+            await authorization_service.require(
+                db=db,
+                user_id=user_id,
+                organization_id=org_id,
+                permission_key="organization.read",
+            )
         if not org_id:
             # Query first active organization for user
             mem_stmt = (

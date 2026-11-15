@@ -52,7 +52,9 @@ class DatabaseManager:
             max_overflow=self._settings.max_overflow,
             pool_timeout=self._settings.pool_timeout_seconds,
             pool_recycle=self._settings.pool_recycle_seconds,
-            pool_pre_ping=True,  # Discards stale serverless pooler connections
+            # Discards stale serverless pooler connections (configurable: costs ~240 ms per
+            # checkout on a cross-region link, see DatabaseSettings.pool_pre_ping).
+            pool_pre_ping=self._settings.pool_pre_ping,
             # LIFO keeps reusing the few warm (keepalive-pinged) connections instead of
             # rotating through every idle one, so requests rarely hit a cold connection.
             pool_use_lifo=True,

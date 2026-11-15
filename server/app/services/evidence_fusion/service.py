@@ -202,30 +202,7 @@ class EvidenceFusionService:
         # ---------------------------------------------------------------------
         # Query Tenant Configured Categories (Zero Hallucination Guard)
         # ---------------------------------------------------------------------
-        configured_categories: Set[str] = set()
-        try:
-            from sqlalchemy import select
-            from app.models.knowledge import KnowledgeItem
-
-            if db is not None:
-                cat_stmt = select(KnowledgeItem.category).where(
-                    KnowledgeItem.tenant_id == tenant_id,
-                ).group_by(KnowledgeItem.category)
-                cat_res = await db.execute(cat_stmt)
-                configured_categories = {row[0] for row in cat_res.fetchall() if row[0]}
-            else:
-                async with db_manager.session_factory() as session:
-                    cat_stmt = select(KnowledgeItem.category).where(
-                        KnowledgeItem.tenant_id == tenant_id,
-                    ).group_by(KnowledgeItem.category)
-                    cat_res = await session.execute(cat_stmt)
-                    configured_categories = {row[0] for row in cat_res.fetchall() if row[0]}
-        except Exception as exc:
-            logger.warning(
-                "Could not query configured knowledge categories in EvidenceFusionService",
-                error=str(exc),
-                tenant_id=tenant_id,
-            )
+        configured_categories: Set[str] = await configured_categories_for(tenant_id, db)
 
         # Union with categories present in provided or retrieved candidates
         if all_candidates:
@@ -398,3 +375,43 @@ class EvidenceFusionService:
 
 
 evidence_fusion_service = EvidenceFusionService()
+
+
+# ---------------------------------------------------------------------------
+# Tenant configured categories (zero-hallucination guard), cached briefly per tenant
+# ---------------------------------------------------------------------------
+# One GROUP BY over the tenant's knowledge used to run on EVERY fusion call (one extra DB
+# session per email; ~0.4 s cross-region). Categories only change when knowledge is imported,
+# and the import worker invalidates this cache when an import completes.
+CONFIGURED_CATEGORIES_TTL_S = 60.0
+_CONFIGURED_CATEGORIES: Dict[str, Tuple[float, Set[str]]] = {}
+
+
+async def configured_categories_for(tenant_id: str, db: Optional[AsyncSession] = None) -> Set[str]:
+    hit = _CONFIGURED_CATEGORIES.get(tenant_id)
+    if hit is not None and time.monotonic() - hit[0] < CONFIGURED_CATEGORIES_TTL_S:
+        return set(hit[1])
+    try:
+        from sqlalchemy import select
+        from app.models.knowledge import KnowledgeItem
+
+        stmt = select(KnowledgeItem.category).where(KnowledgeItem.tenant_id == tenant_id).group_by(KnowledgeItem.category)
+        if db is not None:
+            rows = (await db.execute(stmt)).fetchall()
+        else:
+            async with db_manager.session_factory() as session:
+                rows = (await session.execute(stmt)).fetchall()
+    except Exception as exc:  # noqa: BLE001 - same fail-soft behaviour as before (not cached)
+        logger.warning(
+            "Could not query configured knowledge categories in EvidenceFusionService",
+            error=str(exc),
+            tenant_id=tenant_id,
+        )
+        return set()
+    cats = {row[0] for row in rows if row[0]}
+    _CONFIGURED_CATEGORIES[tenant_id] = (time.monotonic(), cats)
+    return set(cats)
+
+
+def invalidate_configured_categories(tenant_id: str) -> None:
+    _CONFIGURED_CATEGORIES.pop(tenant_id, None)

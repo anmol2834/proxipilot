@@ -44,6 +44,16 @@ def _capture_contact_insights(tenant_id: str, message_id: str, plan, retrieval_r
         logger.warning("Contact insight capture could not be scheduled", error=str(err)[:200])
 
 
+async def _release_lock(key: str) -> None:
+    """Best-effort release of a per-message pipeline lock so a retry is not blocked."""
+    try:
+        from app.core.redis import redis_manager
+
+        await redis_manager.client.delete(key)
+    except Exception as err:  # noqa: BLE001 - the lock still expires on its own
+        logger.warning("Could not release AI pipeline lock", key=key, error=str(err))
+
+
 class AiWorker(BaseWorker):
     """Worker responsible for asynchronous AI Intent classification, RAG, and response generation."""
 
@@ -98,6 +108,7 @@ class AiWorker(BaseWorker):
             except Exception as r_err:
                 logger.warning("Redis lock error in AI worker", error=str(r_err))
 
+            delivery_started = False
             try:
                 from app.contracts.requirement_plan import RequirementPlan
                 from app.services.retrieval_router import retrieval_router_service
@@ -181,6 +192,7 @@ class AiWorker(BaseWorker):
                 # Automated Outbound Delivery via Gmail
                 if reply_plan_res.validation_report.is_sendable:
                     from app.services.reply_planner import outbound_delivery_service
+                    delivery_started = True
                     await outbound_delivery_service.deliver_reply(
                         tenant_id=event.tenant_id,
                         reply_plan=reply_plan_res,
@@ -192,7 +204,16 @@ class AiWorker(BaseWorker):
                     error=str(exc),
                     plan_id=plan_payload.get("plan_id"),
                     tenant_id=event.tenant_id,
+                    retryable=not delivery_started,
                 )
+                if not delivery_started:
+                    # Nothing was sent: free the per-message lock and let the stream retry
+                    # (PEL redelivery, then DLQ after max_retries) instead of silently
+                    # dropping the customer's email. A delivery failure is NOT retried here:
+                    # Gmail may have accepted the send before the error, and a retry after the
+                    # send lock expires could email the customer twice.
+                    await _release_lock(plan_lock_key)
+                    raise
         elif event.event_type == "email.retrieval.completed":
             retrieval_payload = event.payload or {}
             logger.info(
@@ -237,6 +258,7 @@ class AiWorker(BaseWorker):
             except Exception:
                 pass
 
+            pkg_delivery_started = False
             try:
                 from app.contracts.evidence_package import MinimalEvidencePackage
                 from app.services.reply_planner import reply_planner_service
@@ -258,6 +280,7 @@ class AiWorker(BaseWorker):
 
                 if reply_plan_res.validation_report.is_sendable:
                     from app.services.reply_planner import outbound_delivery_service
+                    pkg_delivery_started = True
                     await outbound_delivery_service.deliver_reply(
                         tenant_id=event.tenant_id,
                         reply_plan=reply_plan_res,
@@ -269,7 +292,11 @@ class AiWorker(BaseWorker):
                     package_id=package_payload.get("package_id"),
                     tenant_id=event.tenant_id,
                     error=str(exc),
+                    retryable=not pkg_delivery_started,
                 )
+                if not pkg_delivery_started:
+                    await _release_lock(pkg_lock_key)
+                    raise
         elif event.event_type == "email.reply_plan.created":
             reply_plan_payload = event.payload or {}
             logger.info(
