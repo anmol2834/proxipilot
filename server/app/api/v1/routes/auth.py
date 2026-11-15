@@ -178,10 +178,27 @@ from fastapi.responses import RedirectResponse
 from app.core.config import get_settings
 from app.core.redis import redis_manager
 from app.core.security import create_access_token
+from app.services.session_cache import cache_session
 from app.models.organization import User, Organization, OrganizationMember, MembershipStatus, Role
 from app.models.auth import AuthenticationIdentity, AuthProvider, Session as UserSession
 from app.models.onboarding import OnboardingState
 from app.services.onboarding import onboarding_service
+
+
+async def _oauth_failure_redirect(db: AsyncSession, provider: str, exc: Exception) -> RedirectResponse:
+    """Log an unexpected OAuth callback failure and send the user back to sign-in."""
+    from app.core.logging import logger
+
+    logger.exception("OAuth callback failed", provider=provider, error=str(exc)[:300])
+    try:
+        await db.rollback()
+    except Exception:
+        pass
+    frontend_base = getattr(get_settings(), "frontend_url", "http://localhost:3000").rstrip("/")
+    return RedirectResponse(
+        url=f"{frontend_base}/signin?error=signin_unavailable",
+        status_code=status.HTTP_302_FOUND,
+    )
 
 
 @router.get("/google", summary="Initiate Google OAuth flow")
@@ -214,6 +231,18 @@ async def google_callback(
     code: Optional[str] = None,
     error: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
+):
+    """Never show a raw 500 page to a user returning from the provider."""
+    try:
+        return await _google_callback(code=code, error=error, db=db)
+    except Exception as exc:
+        return await _oauth_failure_redirect(db, "google", exc)
+
+
+async def _google_callback(
+    code: Optional[str],
+    error: Optional[str],
+    db: AsyncSession,
 ):
     """Handle Google OAuth code exchange, user creation/lookup, and issue session."""
     settings = get_settings()
@@ -339,16 +368,13 @@ async def google_callback(
     # Commit all writes in a single batch atomic transaction
     await db.commit()
 
-    redis_client = redis_manager.client
-    session_ttl = int(timedelta(days=7).total_seconds())
-    # Parallelize Redis session writes
-    await asyncio.gather(
-        redis_client.set(f"session:{jti}", user.id, ex=session_ttl),
-        redis_client.set(
-            f"session:id:{session_id}",
-            json.dumps({"user_id": user.id, "expires_at": expires_at.isoformat()}),
-            ex=session_ttl,
-        ),
+    # Best-effort cache; the committed DB session is authoritative.
+    await cache_session(
+        jti=jti,
+        session_id=session_id,
+        user_id=user.id,
+        expires_at_iso=expires_at.isoformat(),
+        ttl_seconds=int(timedelta(days=7).total_seconds()),
     )
 
     settings = get_settings()
@@ -413,6 +439,18 @@ async def microsoft_callback(
     code: Optional[str] = None,
     error: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
+):
+    """Never show a raw 500 page to a user returning from the provider."""
+    try:
+        return await _microsoft_callback(code=code, error=error, db=db)
+    except Exception as exc:
+        return await _oauth_failure_redirect(db, "microsoft", exc)
+
+
+async def _microsoft_callback(
+    code: Optional[str],
+    error: Optional[str],
+    db: AsyncSession,
 ):
     """Handle Microsoft OAuth code exchange, user creation/lookup, and issue session."""
     settings = get_settings()
@@ -525,15 +563,13 @@ async def microsoft_callback(
     db.add(session_rec)
     await db.commit()
 
-    redis_client = redis_manager.client
-    session_ttl = int(timedelta(days=7).total_seconds())
-    await asyncio.gather(
-        redis_client.set(f"session:{jti}", user.id, ex=session_ttl),
-        redis_client.set(
-            f"session:id:{session_id}",
-            json.dumps({"user_id": user.id, "expires_at": expires_at.isoformat()}),
-            ex=session_ttl,
-        ),
+    # Best-effort cache; the committed DB session is authoritative.
+    await cache_session(
+        jti=jti,
+        session_id=session_id,
+        user_id=user.id,
+        expires_at_iso=expires_at.isoformat(),
+        ttl_seconds=int(timedelta(days=7).total_seconds()),
     )
 
     if is_new_user:

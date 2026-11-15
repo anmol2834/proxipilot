@@ -44,6 +44,7 @@ from app.models.auth import (
 )
 from app.models.organization import MembershipStatus, Organization, OrganizationMember, Role, User
 from app.services.audit import audit_service
+from app.services.session_cache import cache_session
 
 
 class AuthService:
@@ -237,11 +238,12 @@ class AuthService:
         await db.commit()
 
         # Cache session in Redis
-        await redis_client.set(f"session:{jti}", user.id, ex=int(timedelta(days=7).total_seconds()))
-        await redis_client.set(
-            f"session:id:{session_id}",
-            json.dumps({"user_id": user.id, "expires_at": expires_at.isoformat()}),
-            ex=int(timedelta(days=7).total_seconds()),
+        await cache_session(
+            jti=jti,
+            session_id=session_id,
+            user_id=user.id,
+            expires_at_iso=expires_at.isoformat(),
+            ttl_seconds=int(timedelta(days=7).total_seconds()),
         )
 
         # Generate JWT access token with session_id
@@ -401,12 +403,12 @@ class AuthService:
         await db.commit()
 
         # Cache in Redis
-        redis_client = redis_manager.client
-        await redis_client.set(f"session:{jti}", user.id, ex=int(session_duration.total_seconds()))
-        await redis_client.set(
-            f"session:id:{session_id}",
-            json.dumps({"user_id": user.id, "expires_at": expires_at.isoformat()}),
-            ex=int(session_duration.total_seconds()),
+        await cache_session(
+            jti=jti,
+            session_id=session_id,
+            user_id=user.id,
+            expires_at_iso=expires_at.isoformat(),
+            ttl_seconds=int(session_duration.total_seconds()),
         )
 
         access_token = create_access_token(

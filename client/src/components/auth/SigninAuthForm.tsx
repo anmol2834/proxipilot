@@ -33,6 +33,10 @@ export function SigninAuthForm() {
         setErrorMessage(
           "Failed to exchange OAuth token with provider. Please try again."
         );
+      } else if (errorParam === "signin_unavailable") {
+        setErrorMessage(
+          "We couldn't complete sign-in right now. Please try again in a moment."
+        );
       } else {
         setErrorMessage(errorParam);
       }
