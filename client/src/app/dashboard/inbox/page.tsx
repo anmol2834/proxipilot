@@ -14,6 +14,7 @@ import {
   ConversationList,
   ConversationDetailPane,
   DeleteConfirmDialog,
+  IsolatedAiPromptBox,
 } from "@/components/inbox";
 import { LeadTemperature, Conversation } from "@/types/inbox.types";
 
@@ -61,6 +62,16 @@ function InboxContent() {
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 
+  // AI Prompt Box state (isolated to currently opened conversation)
+  const [isAiPromptOpen, setIsAiPromptOpen] = useState(false);
+  const [activeDraftText, setActiveDraftText] = useState("");
+  const [injectedDraftText, setInjectedDraftText] = useState<string | null>(null);
+
+  const handleApplyAiDraft = (text: string) => {
+    setInjectedDraftText(text);
+    setActiveDraftText(text);
+  };
+
   // Sync URL selection — on desktop both panes stay visible; on mobile (<768px) switches to detail
   const handleSelectConversation = (id: string) => {
     router.replace(`/dashboard/inbox?conversation=${id}`, { scroll: false });
@@ -71,6 +82,8 @@ function InboxContent() {
     if (target?.unread) {
       markAsReadMutation.mutate(id);
     }
+    // Reset injected draft when switching conversations
+    setInjectedDraftText(null);
   };
 
   const handleToggleStar = (id: string, currentStarred: boolean) => {
@@ -129,15 +142,15 @@ function InboxContent() {
   return (
     <>
       <style>{`
-        body:has(.inbox-responsive-grid) {
+        body:has(.inbox-responsive-container) {
           overflow: hidden !important;
           height: 100vh !important;
           max-height: 100vh !important;
         }
         @media (min-width: 768px) {
-          .inbox-responsive-grid {
-            display: grid !important;
-            grid-template-columns: 350px 1fr !important;
+          .inbox-responsive-container {
+            display: flex !important;
+            flex-direction: row !important;
           }
           .inbox-list-column {
             display: flex !important;
@@ -147,9 +160,10 @@ function InboxContent() {
           }
         }
         @media (max-width: 767px) {
-          .inbox-responsive-grid {
+          .inbox-responsive-container {
             display: flex !important;
             flex-direction: column !important;
+            position: relative !important;
           }
           .inbox-list-column.mobile-hidden {
             display: none !important;
@@ -157,61 +171,91 @@ function InboxContent() {
           .inbox-detail-column.mobile-hidden {
             display: none !important;
           }
+          .inbox-ai-prompt-column {
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            bottom: 0 !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            z-index: 100 !important;
+          }
         }
       `}</style>
 
-      {/* Full-bleed inbox split pane container */}
+      {/* Full-bleed inbox split pane container with animated sliding columns */}
       <div
-        className="inbox-responsive-grid"
+        className="inbox-responsive-container"
         style={{
-          display: "grid",
-          gridTemplateColumns: "350px 1fr",
+          display: "flex",
+          flexDirection: "row",
           height: "100%",
           maxHeight: "100%",
           width: "100%",
           minHeight: 0,
           overflow: "hidden",
           background: "#FFFFFF",
+          position: "relative",
         }}
       >
-        {/* Left pane — conversation list (always visible on desktop) */}
+        {/* Left pane — conversation list (smoothly slides off to the left when AI prompt opens) */}
         <div
           className={`inbox-list-column ${mobileDetailOpen ? "mobile-hidden" : ""}`}
           style={{
             height: "100%",
             maxHeight: "100%",
-            width: "100%",
+            width: isAiPromptOpen ? 0 : 350,
+            minWidth: isAiPromptOpen ? 0 : 350,
+            maxWidth: isAiPromptOpen ? 0 : 350,
             minHeight: 0,
             overflow: "hidden",
             display: "flex",
             flexDirection: "column",
-            borderRight: "1px solid #E8ECF0",
+            borderRight: isAiPromptOpen ? "none" : "1px solid #E8ECF0",
+            opacity: isAiPromptOpen ? 0 : 1,
+            pointerEvents: isAiPromptOpen ? "none" : "auto",
+            transform: isAiPromptOpen ? "translateX(-100%)" : "translateX(0)",
+            transition:
+              "width 0.38s cubic-bezier(0.16, 1, 0.3, 1), min-width 0.38s cubic-bezier(0.16, 1, 0.3, 1), max-width 0.38s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.28s ease, transform 0.38s cubic-bezier(0.16, 1, 0.3, 1)",
+            flexShrink: 0,
           }}
         >
-          <ConversationList
-            conversations={allConversations}
-            selectedId={selectedConversation?.id || null}
-            onSelect={handleSelectConversation}
-            onToggleStar={handleToggleStar}
-            isLoading={isLoading}
-            isFetchingNextPage={isFetchingNextPage}
-            hasNextPage={Boolean(hasNextPage)}
-            fetchNextPage={fetchNextPage}
-          />
+          <div
+            style={{
+              width: 350,
+              minWidth: 350,
+              height: "100%",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <ConversationList
+              conversations={allConversations}
+              selectedId={selectedConversation?.id || null}
+              onSelect={handleSelectConversation}
+              onToggleStar={handleToggleStar}
+              isLoading={isLoading}
+              isFetchingNextPage={isFetchingNextPage}
+              hasNextPage={Boolean(hasNextPage)}
+              fetchNextPage={fetchNextPage}
+            />
+          </div>
         </div>
 
-        {/* Right pane — conversation detail (always visible on desktop) */}
+        {/* Center pane — conversation detail (smoothly expands when left list slides off or prompt opens) */}
         <div
           className={`inbox-detail-column ${!mobileDetailOpen ? "mobile-hidden" : ""}`}
           style={{
             height: "100%",
             maxHeight: "100%",
-            width: "100%",
-            minHeight: 0,
+            flex: "1 1 0%",
+            minWidth: 0,
             overflow: "hidden",
             display: "flex",
             flexDirection: "column",
             position: "relative",
+            transition: "flex 0.38s cubic-bezier(0.16, 1, 0.3, 1)",
           }}
         >
           <ConversationDetailPane
@@ -223,7 +267,55 @@ function InboxContent() {
             onSetLeadTemperature={handleSetLeadTemperature}
             onDeleteClick={() => setIsDeleteDialogOpen(true)}
             onBackToList={() => setMobileDetailOpen(false)}
+            isAiPromptOpen={isAiPromptOpen}
+            onToggleAiPrompt={() => setIsAiPromptOpen((prev) => !prev)}
+            injectedDraftText={injectedDraftText}
+            onDraftTextChange={(text) => setActiveDraftText(text)}
           />
+        </div>
+
+        {/* Right pane — isolated AI prompt box (smoothly slides open from right) */}
+        <div
+          className="inbox-ai-prompt-column"
+          style={{
+            height: "100%",
+            maxHeight: "100%",
+            width: isAiPromptOpen ? 430 : 0,
+            minWidth: isAiPromptOpen ? 430 : 0,
+            maxWidth: isAiPromptOpen ? 430 : 0,
+            minHeight: 0,
+            overflow: "hidden",
+            display: "flex",
+            flexDirection: "column",
+            borderLeft: isAiPromptOpen ? "1px solid #E2E8F0" : "none",
+            opacity: isAiPromptOpen ? 1 : 0,
+            pointerEvents: isAiPromptOpen ? "auto" : "none",
+            transform: isAiPromptOpen ? "translateX(0)" : "translateX(100%)",
+            transition:
+              "width 0.38s cubic-bezier(0.16, 1, 0.3, 1), min-width 0.38s cubic-bezier(0.16, 1, 0.3, 1), max-width 0.38s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.28s ease, transform 0.38s cubic-bezier(0.16, 1, 0.3, 1)",
+            flexShrink: 0,
+            background: "#FFFFFF",
+            boxShadow: isAiPromptOpen ? "-8px 0 24px rgba(15, 23, 42, 0.05)" : "none",
+            zIndex: 10,
+          }}
+        >
+          <div
+            style={{
+              width: 430,
+              minWidth: 430,
+              height: "100%",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <IsolatedAiPromptBox
+              isOpen={isAiPromptOpen}
+              conversation={selectedConversation}
+              currentDraft={activeDraftText}
+              onApplyDraft={handleApplyAiDraft}
+              onClose={() => setIsAiPromptOpen(false)}
+            />
+          </div>
         </div>
       </div>
 

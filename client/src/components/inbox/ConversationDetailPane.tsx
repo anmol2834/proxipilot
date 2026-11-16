@@ -36,6 +36,10 @@ interface ConversationDetailPaneProps {
   onSetLeadTemperature: (temp: LeadTemperature) => void;
   onDeleteClick: () => void;
   onBackToList?: () => void;
+  isAiPromptOpen?: boolean;
+  onToggleAiPrompt?: () => void;
+  injectedDraftText?: string | null;
+  onDraftTextChange?: (text: string) => void;
 }
 
 function ToolbarBtn({
@@ -153,11 +157,28 @@ export function ConversationDetailPane({
   onSetLeadTemperature,
   onDeleteClick,
   onBackToList,
+  isAiPromptOpen = false,
+  onToggleAiPrompt,
+  injectedDraftText,
+  onDraftTextChange,
 }: ConversationDetailPaneProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [replyText, setReplyText] = useState("");
   const [isReplyOpen, setIsReplyOpen] = useState(false);
   const threadId = conversation?.id ?? "";
+
+  // Synchronize reply text changes with parent / AI Copilot
+  useEffect(() => {
+    onDraftTextChange?.(replyText);
+  }, [replyText, onDraftTextChange]);
+
+  // Handle external AI draft injection (e.g. from IsolatedAiPromptBox)
+  useEffect(() => {
+    if (injectedDraftText !== undefined && injectedDraftText !== null) {
+      setReplyText(injectedDraftText);
+      setIsReplyOpen(true);
+    }
+  }, [injectedDraftText]);
 
   // AI draft for this conversation: when one exists it is pre-filled in the reply box (already
   // open), so the user only reviews and clicks Send. Without a draft only the Reply button shows.
@@ -966,24 +987,35 @@ export function ConversationDetailPane({
               {/* Right: AI Improve + Send button */}
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <button
+                  type="button"
+                  onClick={() => {
+                    if (!isReplyOpen) setIsReplyOpen(true);
+                    onToggleAiPrompt?.();
+                  }}
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
-                    gap: 5,
-                    padding: "6px 12px",
+                    gap: 6,
+                    padding: "6px 13px",
                     borderRadius: 8,
-                    border: "1px solid #EDE9FE",
-                    background: "#F5F3FF",
-                    color: "#7C3AED",
+                    border: isAiPromptOpen ? "1px solid #7C3AED" : "1px solid #EDE9FE",
+                    background: isAiPromptOpen
+                      ? "linear-gradient(135deg, #7C3AED 0%, #6366F1 100%)"
+                      : "#F5F3FF",
+                    color: isAiPromptOpen ? "#FFFFFF" : "#7C3AED",
                     fontSize: 12.5,
                     fontWeight: 600,
                     cursor: "pointer",
                     fontFamily: "inherit",
-                    transition: "all 0.12s",
+                    transition: "all 0.16s ease",
+                    boxShadow: isAiPromptOpen
+                      ? "0 2px 8px rgba(124, 58, 237, 0.28)"
+                      : "none",
                   }}
+                  title={isAiPromptOpen ? "Close AI Copilot (Esc)" : "Improve reply with AI"}
                 >
-                  <IconSparkles size={14} color="#7C3AED" />
-                  Improve with AI
+                  <IconSparkles size={14} color={isAiPromptOpen ? "#FFFFFF" : "#7C3AED"} />
+                  {isAiPromptOpen ? "AI Copilot Active" : "Improve with AI"}
                 </button>
 
                 {/* Send split button */}

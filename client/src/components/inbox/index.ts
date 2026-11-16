@@ -3,3 +3,4 @@ export * from "./ConversationListItem";
 export * from "./ConversationList";
 export * from "./ConversationDetailPane";
 export * from "./DeleteConfirmDialog";
+export * from "./IsolatedAiPromptBox";
