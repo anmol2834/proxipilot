@@ -51,6 +51,7 @@ class CandidateNormalizer:
             entity_id=item.entity_id,
             requirement_ids=list(item.requirement_ids or []),
             near_match_for=getattr(item, "near_match_for", None),
+            rank_tier=int(getattr(item, "rank_tier", 0) or 0),
             tenant_id=item.provenance.tenant_id or "",
             external_identity_key=item.external_identity_key,
             title=item.title,

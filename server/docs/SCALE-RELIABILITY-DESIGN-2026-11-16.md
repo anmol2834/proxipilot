@@ -35,6 +35,13 @@ Result: O(n) per query, and a correct record outside the window was silently mis
    - `search_exhaustive` is set on the result;
    - when it is false, the reply never claims an item does not exist (`search_incomplete` → drafter rule).
 
+**Price-ordered ranking tiers** ("cheapest / most expensive <family>"):
+1. Items whose own category is the requested family, with a verified size.
+2. The same, but the size is not stated.
+3. Items that match only through their title, e.g. a combo panel "with hand dryer".
+
+Price ordering applies within each tier. The tier is carried on each item (`rank_tier`) so the fusion verifier keeps the same order.
+
 **Measured at 100,000 rows** (server-side `EXPLAIN ANALYZE`, session-only temp table):
 
 | Query | Indexed | Old full scan |

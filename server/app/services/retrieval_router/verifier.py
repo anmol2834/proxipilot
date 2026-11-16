@@ -55,6 +55,16 @@ AUTHORITY_WEIGHTS: Dict[str, float] = {
 }
 
 
+def _own_family_match(elig: Any, spec: Any) -> bool:
+    """True when the candidate's own (source-category) family is one of the requested families, or
+    no family was requested."""
+    fams = {getattr(f, "label", "").lower() for f in (getattr(spec, "families", None) or [])}
+    if not fams or elig is None:
+        return True
+    own = (getattr(getattr(elig, "facets", None), "family", "") or "").lower()
+    return own in fams
+
+
 def price_order(criterion: Optional[str]) -> Optional[str]:
     """'asc' / 'desc' when a ranking criterion asks for price ordering (free-text tolerant)."""
     c = (criterion or "").lower()
@@ -74,6 +84,7 @@ class CandidateVerificationResult:
         is_hard_constraint_satisfied: bool,
         composite_rank_score: float,
         size_unverified: bool = False,
+        own_family_match: bool = True,
     ):
         self.evidence_item = evidence_item
         self.is_hard_constraint_satisfied = is_hard_constraint_satisfied
@@ -81,6 +92,9 @@ class CandidateVerificationResult:
         # The customer stated a size and this record states none: it may still fit, but it must not
         # outrank items that verifiably match (e.g. when ordering by price).
         self.size_unverified = size_unverified
+        # The item's OWN category is the requested family (not just a title mention such as
+        # "panel with hand dryer"): such items answer "cheapest / most expensive <family>" first.
+        self.own_family_match = own_family_match
 
 
 class FactVerifier:
@@ -440,6 +454,7 @@ class FactVerifier:
                     size_unverified=bool(
                         elig is not None and getattr(eligibility_spec, "nominal", None)
                         and not any("_matches_" in x for x in elig.satisfied)),
+                    own_family_match=_own_family_match(elig, eligibility_spec),
                 )
             )
 
@@ -464,8 +479,10 @@ class FactVerifier:
             head, tail = valid_candidates[:pool_size], valid_candidates[pool_size:]
             priced = [c for c in head if _price(c) is not None]
             unpriced = [c for c in head if _price(c) is None]
-            priced.sort(key=lambda c: (c.size_unverified, _price(c) if order == "asc" else -_price(c),
-                                       -c.composite_rank_score))
+            priced.sort(key=lambda c: (not c.own_family_match, c.size_unverified,
+                                       _price(c) if order == "asc" else -_price(c), -c.composite_rank_score))
+            for c in priced:
+                c.evidence_item.rank_tier = (0 if c.own_family_match else 2) + (1 if c.size_unverified else 0)
             valid_candidates = priced + unpriced + tail
 
         # Determine target count limit (from plan's requested count or max safe limit 20)

@@ -148,6 +148,9 @@ class VerifiedCandidate(BaseModel):
     # Requirement(s) this candidate was retrieved for; empty = retrieved for the whole plan.
     requirement_ids: List[str] = Field(default_factory=list)
     near_match_for: Optional[str] = None
+    # Ordering tier for 'cheapest / most expensive' (0 = item's own category is the requested family and
+    # its size is verified; higher = matched only via its title, or size not stated). Lower ranks first.
+    rank_tier: int = 0
 
 
 class RequirementEvidenceGroup(BaseModel):

@@ -212,7 +212,8 @@ class EvidenceFactVerifier:
                 v = getattr(c.pricing, "calculated_total", None) if c.pricing else None
                 return float(v) if v not in (None, "") and float(v) > 0 else None
             priced = sorted([c for c in verified_candidates if _p(c) is not None],
-                            key=lambda c: (_p(c) if order == "asc" else -_p(c), -c.composite_score))
+                            key=lambda c: (int(getattr(c, "rank_tier", 0) or 0),
+                                           _p(c) if order == "asc" else -_p(c), -c.composite_score))
             verified_candidates = priced + [c for c in verified_candidates if _p(c) is None]
 
         # Closest-code suggestions (requested code does not exist) are kept apart from the count.

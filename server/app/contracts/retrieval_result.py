@@ -151,6 +151,9 @@ class RetrievedEvidenceItem(BaseModel):
     # Set when this item is NOT the requested identifier but the closest existing one to it
     # (the requested code does not exist). Never present it as the requested code.
     near_match_for: Optional[str] = None
+    # Ordering tier for 'cheapest / most expensive' (0 = item's own category is the requested family and
+    # its size is verified; higher = matched only via its title, or size not stated). Lower ranks first.
+    rank_tier: int = 0
 
 
 class CoverageAssessment(BaseModel):
