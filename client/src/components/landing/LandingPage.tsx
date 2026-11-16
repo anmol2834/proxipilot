@@ -30,8 +30,44 @@ export function LandingPage() {
         overflowX: "clip",
       }}
     >
+      {/* Accessible Skip Link for Keyboard & Screen Reader Users (SEO / WCAG 2.1 AA) */}
+      <Box
+        component="a"
+        href="#main-content"
+        sx={{
+          position: "absolute",
+          top: -100,
+          left: 16,
+          zIndex: 9999,
+          backgroundColor: "#2563EB",
+          color: "#FFFFFF",
+          padding: "8px 16px",
+          borderRadius: "6px",
+          fontWeight: 700,
+          textDecoration: "none",
+          transition: "top 0.2s ease",
+          "&:focus": {
+            top: 16,
+          },
+        }}
+      >
+        Skip to main content
+      </Box>
+
       <LandingNavbar />
-      <Box component="main" sx={{ flexGrow: 1, width: "100%", maxWidth: "100vw", overflowX: "clip" }}>
+
+      <Box
+        component="main"
+        id="main-content"
+        tabIndex={-1}
+        sx={{
+          flexGrow: 1,
+          width: "100%",
+          maxWidth: "100vw",
+          overflowX: "clip",
+          outline: "none",
+        }}
+      >
         <HeroSection />
         <ProblemSection />
         <ProductShowcaseSection />
@@ -44,6 +80,7 @@ export function LandingPage() {
         <FAQSection />
         <FinalCTASection />
       </Box>
+
       <LandingFooter />
     </Box>
   );

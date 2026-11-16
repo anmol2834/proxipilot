@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "prebuild": "node -e \"try { fs.rmSync('.next/server', { recursive: true, force: true }); } catch (e) {}\"",
-    "build": "node -e \"try { fs.rmSync('.next/server', { recursive: true, force: true }); } catch (e) {}\" && next build",
+    "prebuild": "node -e \"try { fs.rmSync('.next/dev', { recursive: true, force: true }); fs.rmSync('.next/server', { recursive: true, force: true }); } catch (e) {}\"",
+    "build": "node -e \"try { fs.rmSync('.next/dev', { recursive: true, force: true }); fs.rmSync('.next/server', { recursive: true, force: true }); } catch (e) {}\" && next build",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
