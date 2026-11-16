@@ -227,6 +227,14 @@ class RedisStreamsEventBus(EventBus):
                             msg_id=msg_id,
                             error=str(parse_err),
                         )
+                        # A poison message must not be reclaimed forever: dead-letter + ack it.
+                        await self.send_to_dlq(
+                            stream_name,
+                            DomainEvent(event_type="corrupted.event", tenant_id="system",
+                                        payload={"raw": str(data)[:2000], "error": str(parse_err)}),
+                            str(parse_err),
+                        )
+                        await self.acknowledge(stream_name, group_name, msg_id)
                 if reclaimed_events:
                     return reclaimed_events
         except Exception:
@@ -292,6 +300,55 @@ class RedisStreamsEventBus(EventBus):
                     await self.acknowledge(stream_name, group_name, msg_id)
 
         return events
+
+    async def read_own_pending(
+        self, stream_name: str, group_name: str, consumer_name: str, count: int = 100,
+    ) -> List[tuple[str, DomainEvent]]:
+        """Entries this consumer had claimed but never acknowledged (its previous run crashed or was
+        restarted mid-task). Re-processed immediately at startup instead of waiting for the XAUTOCLAIM
+        idle window (60-120 s). Consumer handlers are idempotent (per-message locks + DB guards)."""
+        client = redis_manager.client
+        full_stream = self._resolve_stream(stream_name)
+        try:
+            raw: Any = await client.xreadgroup(groupname=group_name, consumername=consumer_name,
+                                               streams={full_stream: "0"}, count=count)
+        except Exception as err:  # noqa: BLE001
+            logger.warning("Own pending recovery read failed", stream=full_stream, error=str(err))
+            return []
+        out: List[tuple[str, DomainEvent]] = []
+        for _stream, messages in raw or []:
+            for msg_id, data in messages or []:
+                if not data:   # entry deleted while pending: nothing to process, release it
+                    await client.xack(full_stream, group_name, msg_id)
+                    continue
+                try:
+                    out.append((str(msg_id), DomainEvent.from_stream_payload(data)))
+                except Exception as parse_err:  # noqa: BLE001
+                    await self.send_to_dlq(stream_name, DomainEvent(
+                        event_type="corrupted.event", tenant_id="system",
+                        payload={"raw": str(data)[:2000], "error": str(parse_err)}), str(parse_err))
+                    await self.acknowledge(stream_name, group_name, str(msg_id))
+        return out
+
+    async def stream_stats(self, stream_name: str, group_name: str) -> Dict[str, Any]:
+        """Length, pending, consumer lag and oldest-pending idle time for one stream/group (O(1)
+        Redis calls: XLEN, XINFO GROUPS, XPENDING summary + one XPENDING range of 1)."""
+        client = redis_manager.client
+        full_stream = self._resolve_stream(stream_name)
+        stats: Dict[str, Any] = {"stream": stream_name, "length": 0, "pending": 0, "lag": None,
+                                 "oldest_pending_idle_ms": 0}
+        stats["length"] = int(await client.xlen(full_stream))
+        for g in await client.xinfo_groups(full_stream):
+            name = g.get("name")
+            if (name.decode() if isinstance(name, bytes) else name) == group_name:
+                stats["pending"] = int(g.get("pending") or 0)
+                lag = g.get("lag")
+                stats["lag"] = int(lag) if lag is not None else None
+        if stats["pending"]:
+            oldest = await client.xpending_range(full_stream, group_name, min="-", max="+", count=1)
+            if oldest:
+                stats["oldest_pending_idle_ms"] = int(oldest[0].get("time_since_delivered") or 0)
+        return stats
 
     async def acknowledge(self, stream_name: str, group_name: str, message_id: str) -> None:
         """Acknowledge message processing in group, then delete the entry.

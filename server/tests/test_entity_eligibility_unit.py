@@ -11,6 +11,7 @@ import pytest
 from app.services.retrieval_router.entity_eligibility import (
     FamilyEntry,
     ProductRole,
+    SELLABLE_ROLES,
     TenantVocabulary,
     _VOCAB_CACHE,
     build_request_spec,
@@ -101,7 +102,7 @@ def test_air_curtain_request_admits_only_complete_air_curtains():
     spec = build_request_spec(_plan("I am looking to purchase air curtains for a door with a width of 4 feet. "
                                     "Please suggest models and prices"), VOCAB)
     assert [f.label for f in spec.families] == ["Air Curtain"]
-    assert spec.wanted_roles == {ProductRole.FINISHED, ProductRole.SERVICE}
+    assert spec.wanted_roles == set(SELLABLE_ROLES)
     assert spec.length_mm.value == pytest.approx(1219.2)
     for cd, title in AIR_CURTAINS:
         assert evaluate(cd, title, None, spec).eligible, title
@@ -204,7 +205,7 @@ def test_vocabulary_cache_is_tenant_scoped():
 
 def test_unknown_intent_still_excludes_parts():
     spec = build_request_spec(_plan("I want to buy air curtain", intent="unknown"), VOCAB)
-    assert spec.wanted_roles == {ProductRole.FINISHED, ProductRole.SERVICE}
+    assert spec.wanted_roles == set(SELLABLE_ROLES)
     assert not evaluate(*DISTRACTORS[4], None, spec).eligible      # accessory
     assert evaluate(*AIR_CURTAINS[0], None, spec).eligible
 
@@ -260,3 +261,16 @@ def test_sizes_never_gate_a_request_without_sizes():
     spec = build_request_spec(_plan("ice box price"), _vocab("Ice Box"))
     assert spec.nominal == []
     assert evaluate(*_row("Ice Box Solid Door 40 LTR", "Ice Box", "Finish Goods"), None, spec).eligible
+
+
+def test_bundle_vs_individual_item():
+    bundle = classify_candidate({"custom_attributes": {"category": "Soap Dispenser", "product_type": "Finish Goods"}},
+                                "Black ABS Soap Dispenser Set of 2 300ML")
+    single = classify_candidate({"custom_attributes": {"category": "Soap Dispenser", "product_type": "Finish Goods"}},
+                                "Black ABS Soap Dispenser 300ML")
+    part = classify_candidate({"custom_attributes": {"category": "Spare Parts", "product_type": "Spare Parts"}},
+                              "Repair Kit")
+    assert bundle.role == ProductRole.BUNDLE and single.role == ProductRole.FINISHED and part.role == ProductRole.PART
+    vocab = _vocab("Soap Dispenser")
+    assert ProductRole.BUNDLE in build_request_spec(_plan("soap dispenser price"), vocab).wanted_roles
+    assert ProductRole.BUNDLE not in build_request_spec(_plan("single soap dispenser price"), vocab).wanted_roles

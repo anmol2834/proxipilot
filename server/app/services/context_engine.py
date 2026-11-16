@@ -401,36 +401,23 @@ def humanize_key(v: str) -> str:
     return (v or "").replace("_", " ").strip().capitalize()
 
 
-async def catalogue_overview(tenant_id: str, terms: Sequence[str] = ()) -> Optional[str]:
-    """Verified catalogue-level facts so count questions are answered from the uploaded rows:
-    total items, per-category and per-brand counts, and the EXACT number of items matching each
-    product the customer asked about (so a reply never presents the top-N retrieved items as the
-    whole range). Always live (no cache): a fresh upload is reflected on the very next email.
-    Runs in parallel with the other memories, so it adds no wall-clock time."""
-    term_tokens = [(t, count_terms(t)) for t in terms]
-    term_tokens = [(t, toks) for t, toks in term_tokens if toks]
-    params: Dict[str, Any] = {"t": tenant_id}
-    term_sql = []
-    for i, (_, toks) in enumerate(term_tokens):
-        conds = []
-        for j, tok in enumerate(toks):
-            params[f"k{i}_{j}"] = f"%{tok}%"
-            conds.append(f"hay ILIKE :k{i}_{j}")
-        term_sql.append(f"SELECT 'term' AS kind, '{i}' AS k, count(*) AS n FROM cur WHERE {' AND '.join(conds)}")
+_OVERVIEW_TTL_S = 120.0
+_OVERVIEW_BASE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+
+
+async def _overview_base(tenant_id: str) -> Dict[str, Any]:
+    """Catalogue-level counts (categories, top brands / product categories, stock presence).
+    One aggregate per tenant, cached for _OVERVIEW_TTL_S and cleared when knowledge changes, instead
+    of an O(n) scan on every email."""
+    hit = _OVERVIEW_BASE.get(tenant_id)
+    if hit and time.monotonic() - hit[0] < _OVERVIEW_TTL_S:
+        return hit[1]
     async with db_manager.session_factory() as db:
         rows = (await db.execute(text("""
             WITH cur AS (
                 SELECT i.category, v.canonical_data AS cd,
                        coalesce(v.canonical_data->'custom_attributes'->>'category',
-                                v.canonical_data->>'sub_category') AS pcat,
-                       lower(coalesce(i.title, '') || ' ' || coalesce(v.canonical_data->>'name', '') || ' ' ||
-                             coalesce(v.canonical_data->>'product_name', '') || ' ' ||
-                             coalesce(v.canonical_data->>'category', '') || ' ' ||
-                             coalesce(v.canonical_data->'custom_attributes'->>'category', '') || ' ' ||
-                             coalesce(v.canonical_data->'custom_attributes'->>'product_type', '') || ' ' ||
-                             coalesce(v.canonical_data->>'sub_category', '') || ' ' ||
-                             coalesce(v.canonical_data->>'brand', '') || ' ' ||
-                             coalesce(v.canonical_data->>'sku', '')) AS hay
+                                v.canonical_data->>'sub_category') AS pcat
                 FROM knowledge_items i JOIN knowledge_versions v ON v.id = i.current_version_id
                 WHERE i.tenant_id = :t AND i.is_active
             )
@@ -446,21 +433,81 @@ async def catalogue_overview(tenant_id: str, terms: Sequence[str] = ()) -> Optio
             UNION ALL
             SELECT 'stock', NULL, count(*) FROM cur
              WHERE cd ?| array['stock', 'stock_quantity', 'quantity_available', 'in_stock', 'availability']
-            """ + "".join("\nUNION ALL\n" + q for q in term_sql)), params)).all()
-    cats = [(r.k, int(r.n)) for r in rows if r.kind == "cat"]
-    brands = [(r.k, int(r.n)) for r in rows if r.kind == "brand"]
-    stock = next((int(r.n) for r in rows if r.kind == "stock"), 0)
-    by_idx = {r.k: int(r.n) for r in rows if r.kind == "term"}
-    pcats = [(r.k, int(r.n)) for r in rows if r.kind == "pcat"]
-    pcat_total = next((int(r.n) for r in rows if r.kind == "pcat_total"), 0)
-    term_counts = [(t, by_idx.get(str(i), 0)) for i, (t, _) in enumerate(term_tokens)]
-    return format_catalogue_overview(sum(n for _, n in cats), cats, brands, stock > 0, term_counts,
-                                     product_categories=pcats, product_category_total=pcat_total)
+            """), {"t": tenant_id})).all()
+    base = {
+        "cats": [(r.k, int(r.n)) for r in rows if r.kind == "cat"],
+        "brands": [(r.k, int(r.n)) for r in rows if r.kind == "brand"],
+        "pcats": [(r.k, int(r.n)) for r in rows if r.kind == "pcat"],
+        "pcat_total": next((int(r.n) for r in rows if r.kind == "pcat_total"), 0),
+        "stock": next((int(r.n) for r in rows if r.kind == "stock"), 0),
+    }
+    _OVERVIEW_BASE[tenant_id] = (time.monotonic(), base)
+    return base
+
+
+async def _term_counts(tenant_id: str, term_tokens: List[Tuple[str, List[str]]]) -> List[Tuple[str, int]]:
+    """Exact number of catalogue items matching each requested product term (all of its words)."""
+    if not term_tokens:
+        return []
+    from app.services.knowledge_search_index import is_available
+
+    async with db_manager.session_factory() as db:
+        if await is_available(db, tenant_id):
+            # GIN full-text index: posting-list intersection, no catalogue scan
+            out: List[Tuple[str, int]] = []
+            for term, toks in term_tokens:
+                q = " & ".join(f"{re.sub(r'[^a-z0-9]', '', t.lower())}:*" for t in toks if re.sub(r"[^a-z0-9]", "", t.lower()))
+                if not q:
+                    out.append((term, 0))
+                    continue
+                n = (await db.execute(text("""SELECT count(*) FROM knowledge_search_index
+                    WHERE tenant_id = :t AND search_tsv @@ to_tsquery('simple', :q)"""), {"t": tenant_id, "q": q})).scalar()
+                out.append((term, int(n or 0)))
+            return out
+        params: Dict[str, Any] = {"t": tenant_id}
+        term_sql = []
+        for i, (_, toks) in enumerate(term_tokens):
+            conds = []
+            for j, tok in enumerate(toks):
+                params[f"k{i}_{j}"] = f"%{tok}%"
+                conds.append(f"hay ILIKE :k{i}_{j}")
+            term_sql.append(f"SELECT '{i}' AS k, count(*) AS n FROM cur WHERE {' AND '.join(conds)}")
+        rows = (await db.execute(text("""
+            WITH cur AS (
+                SELECT lower(coalesce(i.title, '') || ' ' || coalesce(v.canonical_data->>'name', '') || ' ' ||
+                             coalesce(v.canonical_data->>'product_name', '') || ' ' ||
+                             coalesce(v.canonical_data->>'category', '') || ' ' ||
+                             coalesce(v.canonical_data->'custom_attributes'->>'category', '') || ' ' ||
+                             coalesce(v.canonical_data->'custom_attributes'->>'product_type', '') || ' ' ||
+                             coalesce(v.canonical_data->>'sub_category', '') || ' ' ||
+                             coalesce(v.canonical_data->>'brand', '') || ' ' ||
+                             coalesce(v.canonical_data->>'sku', '')) AS hay
+                FROM knowledge_items i JOIN knowledge_versions v ON v.id = i.current_version_id
+                WHERE i.tenant_id = :t AND i.is_active
+            )
+            """ + "\nUNION ALL\n".join(term_sql)), params)).all()
+        by_idx = {r.k: int(r.n) for r in rows}
+        return [(t, by_idx.get(str(i), 0)) for i, (t, _) in enumerate(term_tokens)]
+
+
+async def catalogue_overview(tenant_id: str, terms: Sequence[str] = ()) -> Optional[str]:
+    """Verified catalogue-level facts so count questions are answered from the uploaded rows:
+    total items, per-category and per-brand counts, and the EXACT number of items matching each
+    product the customer asked about (so a reply never presents the top-N retrieved items as the
+    whole range). Base counts are cached briefly (cleared on any knowledge change); term counts use
+    the full-text index when available. Runs in parallel with the other memories."""
+    term_tokens = [(t, count_terms(t)) for t in terms]
+    term_tokens = [(t, toks) for t, toks in term_tokens if toks]
+    base, term_counts = await asyncio.gather(_overview_base(tenant_id), _term_counts(tenant_id, term_tokens))
+    cats = base["cats"]
+    return format_catalogue_overview(sum(n for _, n in cats), cats, base["brands"], base["stock"] > 0, term_counts,
+                                     product_categories=base["pcats"], product_category_total=base["pcat_total"])
 
 
 def invalidate_catalogue_overview(tenant_id: str) -> None:
-    """Kept for API compatibility: the overview is computed live, nothing to invalidate."""
-    return None
+    """Called when the tenant's knowledge changes: the next email sees fresh counts."""
+    _OVERVIEW_BASE.pop(tenant_id, None)
+
 
 
 # ---------------------------------------------------------------------------

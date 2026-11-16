@@ -147,10 +147,20 @@ class StructuredRetriever:
             return []
         from sqlalchemy import text as _text
 
-        rows = (await db.execute(_text("""
-            SELECT upper(external_identity_key) AS k FROM knowledge_items
-            WHERE tenant_id = :t AND is_active AND upper(external_identity_key) LIKE :p
-            LIMIT 2000"""), {"t": tenant_id, "p": prefix.group(0) + "%"})).scalars().all()
+        from app.services.knowledge_search_index import is_available as _idx_ok
+
+        if await _idx_ok(db, tenant_id):
+            # trigram GIN index: nearest codes without scanning the catalogue
+            rows = (await db.execute(_text("""
+                SELECT code_upper FROM knowledge_search_index
+                WHERE tenant_id = :t AND code_upper % :c AND code_upper LIKE :p
+                ORDER BY similarity(code_upper, :c) DESC LIMIT 50"""),
+                {"t": tenant_id, "c": code, "p": prefix.group(0) + "%"})).scalars().all()
+        else:
+            rows = (await db.execute(_text("""
+                SELECT upper(external_identity_key) AS k FROM knowledge_items
+                WHERE tenant_id = :t AND is_active AND upper(external_identity_key) LIKE :p
+                LIMIT 2000"""), {"t": tenant_id, "p": prefix.group(0) + "%"})).scalars().all()
         scored = sorted(
             ((d, k) for k in set(rows) if k != code and (d := _edit_distance(code, k)) <= max_distance),
             key=lambda dk: (dk[0], _numeric_gap(code, dk[1]), dk[1]),
@@ -306,6 +316,80 @@ class StructuredRetriever:
         paged_results = matched_pairs[offset : offset + limit]
         return paged_results, has_more
 
+    async def fetch_indexed_candidates(
+        self,
+        db: AsyncSession,
+        tenant_id: str,
+        families: Sequence[str],
+        roles: Optional[Sequence[str]] = None,
+        nominal: Optional[Sequence[Any]] = None,
+        price_order: Optional[str] = None,
+        price_min: Optional[float] = None,
+        price_max: Optional[float] = None,
+        top_n: int = 5,
+        budget: int = 2000,
+        as_of: Optional[datetime] = None,
+    ) -> Tuple[List[Tuple[KnowledgeItem, KnowledgeVersion]], bool, int]:
+        """Every catalogue item matching the HARD constraints, evaluated by PostgreSQL over the whole
+        catalogue through ``knowledge_search_index`` (B-tree / GIN; O(log n + k)).
+
+        Returns (candidates, exhaustive, total_matching):
+          * price-ordered ("cheapest" / "most expensive"): the exact top-N by price over ALL matches,
+            read in index order -> always exhaustive.
+          * otherwise: up to ``budget`` matches; exhaustive when every match fitted in the budget.
+        A record outside an initial vector / keyword window can therefore never be missed, and a
+        budget overflow is reported instead of a false NO_MATCH.
+        """
+        if not families:
+            return [], True, 0
+        where = ["tenant_id = :t", "family = ANY(:fams)"]
+        params: Dict[str, Any] = {"t": tenant_id, "fams": [f.lower() for f in families]}
+        if roles:
+            # records whose role could not be determined stay in (same rule as the eligibility gate)
+            where.append("(item_role = ANY(:roles) OR item_role IS NULL OR item_role = 'UNKNOWN')")
+            params["roles"] = list(roles)
+        col = {"volume": "volume_ml", "weight": "weight_g", "power": "power_w"}
+        for i, c in enumerate(nominal or []):
+            column = col.get(getattr(c, "kind", ""))
+            if not column:
+                continue
+            for j, w in enumerate(getattr(c, "wanted", []) or []):
+                params[f"w{i}_{j}lo"], params[f"w{i}_{j}hi"] = w * 0.98, w * 1.02
+            if getattr(c, "wanted", None):
+                ors = " OR ".join(f"{column} BETWEEN :w{i}_{j}lo AND :w{i}_{j}hi" for j in range(len(c.wanted)))
+                where.append(f"({column} IS NULL OR {ors})")
+            for j, x in enumerate(getattr(c, "excluded", []) or []):
+                params[f"x{i}_{j}lo"], params[f"x{i}_{j}hi"] = x * 0.98, x * 1.02
+                where.append(f"({column} IS NULL OR NOT ({column} BETWEEN :x{i}_{j}lo AND :x{i}_{j}hi))")
+        if price_min is not None:
+            where.append("price >= :pmin")
+            params["pmin"] = price_min
+        if price_max is not None:
+            where.append("price <= :pmax")
+            params["pmax"] = price_max
+        clause = " AND ".join(where)
+        total = int((await db.execute(_sql_text(f"SELECT count(*) FROM knowledge_search_index WHERE {clause}"),
+                                      params)).scalar() or 0)
+        if total == 0:
+            return [], True, 0
+        if price_order in ("asc", "desc"):
+            # sized items first, then price in index order: exact top-N over the whole catalogue
+            direction = "ASC" if price_order == "asc" else "DESC"
+            limit = max(top_n * 3, top_n + 10)
+            order = f"price {direction} NULLS LAST, knowledge_item_id"
+            exhaustive = True
+        else:
+            limit = min(total, budget)
+            order = "knowledge_item_id"
+            exhaustive = total <= budget
+        params["lim"] = limit
+        ids = (await db.execute(_sql_text(
+            f"SELECT knowledge_item_id FROM knowledge_search_index WHERE {clause} ORDER BY {order} LIMIT :lim"),
+            params)).scalars().all()
+        found = await CanonicalKnowledgeReader.get_current_items_batch(
+            db=db, tenant_id=tenant_id, item_ids=list(ids), as_of=as_of)
+        return [found[i] for i in ids if i in found], exhaustive, total
+
     async def fetch_family_candidates(
         self,
         db: AsyncSession,
@@ -425,3 +509,8 @@ def _numeric_gap(a: str, b: str) -> int:
     if not na or not nb:
         return 10**9
     return abs(int(na.group(0)) - int(nb.group(0)))
+
+
+def _sql_text(sql: str):
+    from sqlalchemy import text as _t
+    return _t(sql)

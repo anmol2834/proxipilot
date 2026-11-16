@@ -171,6 +171,7 @@ class EvidenceFusionService:
             duration_ms = (time.perf_counter() - start_time) * 1000.0
             result = VerifiedEvidenceResult(
                 price_ranking_unscoped=bool(getattr(retrieval_result, "price_ranking_unscoped", False)),
+                search_incomplete=getattr(retrieval_result, "search_exhaustive", None) is False,
                 schema_version="1.0",
                 fusion_id=f"fus_{uuid.uuid4().hex[:12]}",
                 verifier_version="1.0.0",
@@ -320,6 +321,7 @@ class EvidenceFusionService:
         # Construct final versioned VerifiedEvidenceResult
         result = VerifiedEvidenceResult(
             price_ranking_unscoped=bool(getattr(retrieval_result, "price_ranking_unscoped", False)),
+                search_incomplete=getattr(retrieval_result, "search_exhaustive", None) is False,
             schema_version="1.0",
             fusion_id=f"fus_{uuid.uuid4().hex[:12]}",
             verifier_version="1.0.0",

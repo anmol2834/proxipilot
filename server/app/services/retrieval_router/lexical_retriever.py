@@ -152,6 +152,16 @@ class LexicalRetriever:
             return []
 
         params: Dict[str, object] = {"tid": tenant_id, "toks": tokens, "lim": max(1, top_k) * 3}
+        # Very large catalogues: a GIN full-text prefilter narrows the scan to the best candidates
+        # (posting-list lookup instead of a regex over every item). Smaller catalogues keep the
+        # exact full scan, so ranking is unchanged where it is already fast.
+        prefilter = ""
+        cand = await _prefilter_candidates(db, tenant_id, tokens)
+        if cand is not None:
+            if not cand:
+                return []
+            params["cand"] = cand
+            prefilter = " AND i.id = ANY(:cand)"
         match_cols = []
         for i, tok in enumerate(tokens):
             params[f"p{i}"] = _word_pattern(tok)
@@ -194,7 +204,7 @@ class LexicalRetriever:
                                  v.canonical_data->>'sku') AS hay
                 FROM knowledge_items i
                 LEFT JOIN knowledge_versions v ON v.id = i.current_version_id
-                WHERE i.tenant_id = :tid AND i.is_active
+                WHERE i.tenant_id = :tid AND i.is_active{prefilter}
             ),
             m AS (
                 SELECT id, vid, title, k,
@@ -258,3 +268,42 @@ class LexicalRetriever:
 
 
 lexical_retriever = LexicalRetriever()
+
+
+_TENANT_SIZE: Dict[str, Tuple[float, int]] = {}
+_SIZE_TTL_S = 300.0
+_TSQ_SAFE = re.compile(r"[^a-z0-9]")
+
+
+async def _prefilter_candidates(db, tenant_id: str, tokens: List[str]) -> Optional[List[str]]:
+    """Candidate ids from the GIN full-text index for tenants above the configured size, else None
+    (= no prefilter). Prefix matching (tok:*) keeps partial words and codes findable."""
+    import time as _time
+
+    from sqlalchemy import text as _t
+
+    from app.core.config import get_retrieval_budget
+    from app.services.knowledge_search_index import is_available
+
+    budget = get_retrieval_budget()
+    if budget.lexical_prefilter_threshold <= 0 or not await is_available(db, tenant_id):
+        return None
+    hit = _TENANT_SIZE.get(tenant_id)
+    if hit is None or _time.monotonic() - hit[0] > _SIZE_TTL_S:
+        n = int((await db.execute(_t("SELECT count(*) FROM knowledge_search_index WHERE tenant_id = :t"),
+                                  {"t": tenant_id})).scalar() or 0)
+        _TENANT_SIZE[tenant_id] = (_time.monotonic(), n)
+    else:
+        n = hit[1]
+    if n <= budget.lexical_prefilter_threshold:
+        return None
+    terms = [t for t in (_TSQ_SAFE.sub("", tok) for tok in tokens) if t]
+    if not terms:
+        return None
+    tsq = " | ".join(f"{t}:*" for t in terms)
+    rows = (await db.execute(_t("""
+        SELECT knowledge_item_id FROM knowledge_search_index
+        WHERE tenant_id = :t AND search_tsv @@ to_tsquery('simple', :q)
+        ORDER BY ts_rank_cd(search_tsv, to_tsquery('simple', :q)) DESC
+        LIMIT :lim"""), {"t": tenant_id, "q": tsq, "lim": budget.lexical_prefilter_limit})).scalars().all()
+    return list(rows)

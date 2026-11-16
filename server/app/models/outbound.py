@@ -30,6 +30,14 @@ class DeliveryStatus(str, Enum):
     FAILED = "failed"                # Send attempt failed, will retry
     DEAD_LETTER = "dead_letter"      # Max retries exceeded, permanently failed
     CANCELLED = "cancelled"          # Cancelled before dispatch (human rejection etc.)
+    # Delivery state machine (reconciled sends; see services/reply_planner/delivery_state.py)
+    PENDING = "pending"                              # created, never sent
+    SEND_ATTEMPTED = "send_attempted"                # durable marker written BEFORE calling Gmail
+    PROVIDER_ACCEPTED = "provider_accepted"          # Gmail returned a message id
+    DELIVERY_UNKNOWN = "delivery_unknown"            # timeout / 5xx: Gmail may or may not have sent it
+    RECONCILIATION_REQUIRED = "reconciliation_required"  # outcome still unknown; reconciler checks Gmail
+    FAILED_RETRYABLE = "failed_retryable"            # verified NOT sent; safe to retry
+    FAILED_FINAL = "failed_final"                    # permanently failed (4xx / attempts exhausted)
 
 
 class OutboundMessage(Base, TenantAwareMixin):

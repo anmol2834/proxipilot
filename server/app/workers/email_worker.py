@@ -112,7 +112,8 @@ class EmailWorker(BaseWorker):
                 # Database check: Ensure message exists, is INBOUND, and has not already been replied to
                 from sqlalchemy import select
                 from app.models.inbox import EmailMessage, MessageDirection
-                from app.models.outbound import OutboundMessage, DeliveryStatus
+                from app.models.outbound import OutboundMessage
+                from app.services.reply_planner.delivery_state import BLOCKING_STATUSES
                 async with db_manager.session_factory() as check_session:
                     msg = await check_session.get(EmailMessage, message_id)
                     if not msg:
@@ -134,7 +135,7 @@ class EmailWorker(BaseWorker):
                     stmt_out_sent = select(OutboundMessage.id).where(
                         OutboundMessage.thread_id == thread_id,
                         OutboundMessage.in_reply_to_external_id == msg.external_message_id,
-                        OutboundMessage.delivery_status == DeliveryStatus.SENT.value,
+                        OutboundMessage.delivery_status.in_(BLOCKING_STATUSES),
                     )
                     if (await check_session.execute(stmt_out_sent)).scalar_one_or_none():
                         logger.info("Message has already been replied to (OutboundMessage exists), skipping", message_id=message_id)

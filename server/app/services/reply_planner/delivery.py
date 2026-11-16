@@ -39,6 +39,11 @@ from app.models.integration import ConnectedIntegrationAccount
 from app.models.ai import AIResponse
 from app.models.outbound import OutboundMessage, DeliveryStatus
 from app.services.gmail_client import gmail_client, GmailApiException
+from app.services.reply_planner.delivery_state import (
+    BLOCKING_STATUSES,
+    SUCCESS_STATUSES,
+    dispatch_with_reconciliation,
+)
 
 
 class OutboundEmailDeliveryService:
@@ -190,7 +195,7 @@ class OutboundEmailDeliveryService:
                     OutboundMessage.idempotency_key == reply_plan.idempotency_key,
                     and_(
                         OutboundMessage.thread_id == thread.id,
-                        OutboundMessage.delivery_status == DeliveryStatus.SENT.value,
+                        OutboundMessage.delivery_status.in_(BLOCKING_STATUSES),
                         or_(
                             OutboundMessage.in_reply_to_external_id == current_msg.external_message_id,
                             OutboundMessage.idempotency_key.like(f"pp_out_{tenant_id[:12]}_{thread.id}_{current_msg.id}%"),
@@ -200,7 +205,7 @@ class OutboundEmailDeliveryService:
             )
             out_res = await db.execute(stmt_out)
             outbound_msg_records = out_res.scalars().all()
-            existing_sent = next((o for o in outbound_msg_records if o.delivery_status == DeliveryStatus.SENT.value), None)
+            existing_sent = next((o for o in outbound_msg_records if o.delivery_status in BLOCKING_STATUSES), None)
 
             if existing_sent:
                 logger.warning(
@@ -284,29 +289,27 @@ class OutboundEmailDeliveryService:
             # 7. Dispatch via Gmail API in the exact same thread
             t_gmail_start = time.perf_counter()
             try:
-                access_token = await gmail_client.get_valid_access_token(account, db)
-                provider_res = await gmail_client.send_message(
-                    access_token=access_token,
-                    to_email=recipient_email,
-                    subject=reply_subject,
-                    body_text=reply_plan.draft.body_text,
-                    body_html=reply_plan.draft.body_html,
-                    from_email=account.email_address,
-                    thread_id=thread.external_thread_id,
-                    in_reply_to_header=in_reply_to,
-                    references_header=references,
-                    auto_submitted=True,   # automatic AI reply (human-approved sends are not marked)
-                )
+                provider_res = await dispatch_with_reconciliation(
+                    db, outbound_msg, account, gmail_thread_id=thread.external_thread_id,
+                    send_kwargs=dict(
+                        to_email=recipient_email,
+                        subject=reply_subject,
+                        body_text=reply_plan.draft.body_text,
+                        body_html=reply_plan.draft.body_html,
+                        from_email=account.email_address,
+                        thread_id=thread.external_thread_id,
+                        in_reply_to_header=in_reply_to,
+                        references_header=references,
+                        auto_submitted=True,   # automatic AI reply (human-approved sends are not marked)
+                    ))
             except Exception as send_err:
                 logger.error(
-                    "Failed to dispatch email via Gmail API",
-                    error=str(send_err),
+                    "Outbound delivery not confirmed",
+                    error=str(send_err)[:300],
+                    delivery_status=outbound_msg.delivery_status,
                     account_email=account.email_address,
                     to_email=recipient_email,
                 )
-                outbound_msg.delivery_status = DeliveryStatus.FAILED.value
-                outbound_msg.last_error = str(send_err)
-                await db.commit()
                 raise
             gmail_duration_ms = (time.perf_counter() - t_gmail_start) * 1000
 
@@ -491,7 +494,9 @@ class OutboundEmailDeliveryService:
                 idem_key = f"pp_draft_{ai_response_id}"
                 existing = (await db.execute(select(OutboundMessage).where(
                     OutboundMessage.tenant_id == tenant_id, OutboundMessage.idempotency_key == idem_key,
-                    OutboundMessage.delivery_status == DeliveryStatus.SENT.value))).scalar_one_or_none()
+                    OutboundMessage.delivery_status.in_(BLOCKING_STATUSES)))).scalar_one_or_none()
+                if existing is not None and existing.delivery_status not in SUCCESS_STATUSES:
+                    return {"status": "in_flight", "delivery_status": existing.delivery_status}
                 if existing is not None or ai_resp.approval_status == "sent":
                     return {"status": "already_sent", "provider_message_id": existing.provider_message_id if existing else None}
 
@@ -565,7 +570,9 @@ class OutboundEmailDeliveryService:
             async with db_manager.session_factory() as db:
                 existing = (await db.execute(select(OutboundMessage).where(
                     OutboundMessage.tenant_id == tenant_id, OutboundMessage.idempotency_key == idem_key,
-                    OutboundMessage.delivery_status == DeliveryStatus.SENT.value))).scalar_one_or_none()
+                    OutboundMessage.delivery_status.in_(BLOCKING_STATUSES)))).scalar_one_or_none()
+                if existing is not None and existing.delivery_status not in SUCCESS_STATUSES:
+                    return {"status": "in_flight", "delivery_status": existing.delivery_status}
                 if existing is not None:
                     return {"status": "already_sent", "provider_message_id": existing.provider_message_id}
                 thread = await db.get(EmailThread, thread_id)
@@ -610,23 +617,15 @@ class OutboundEmailDeliveryService:
             ai_response_id=ai_response_id, integration_account_id=account.id, sent_by_user_id=user_id,
             to_emails=json.dumps([recipient]), subject=subject, body_html=body_html, body_text=text_out,
             idempotency_key=idem_key, in_reply_to_external_id=parent.external_message_id,
-            delivery_status=DeliveryStatus.SENDING.value,
+            delivery_status=DeliveryStatus.PENDING.value,
         )
         db.add(outbound)
-        await db.commit()
-
-        try:
-            token = await gmail_client.get_valid_access_token(account, db)
-            provider_res = await gmail_client.send_message(
-                access_token=token, to_email=recipient, subject=subject, body_text=text_out,
-                body_html=body_html, from_email=account.email_address, thread_id=thread.external_thread_id,
-                in_reply_to_header=in_reply_to, references_header=references,
-            )
-        except Exception as send_err:
-            outbound.delivery_status = DeliveryStatus.FAILED.value
-            outbound.last_error = str(send_err)[:1000]
-            await db.commit()
-            raise
+        # committed by the dispatcher together with SEND_ATTEMPTED (one round trip)
+        provider_res = await dispatch_with_reconciliation(
+            db, outbound, account, gmail_thread_id=thread.external_thread_id,
+            send_kwargs=dict(to_email=recipient, subject=subject, body_text=text_out, body_html=body_html,
+                             from_email=account.email_address, thread_id=thread.external_thread_id,
+                             in_reply_to_header=in_reply_to, references_header=references))
 
         now = datetime.now(timezone.utc)
         prov_id = str(provider_res.get("id")) if provider_res.get("id") is not None else None

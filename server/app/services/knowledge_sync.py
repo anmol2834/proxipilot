@@ -209,6 +209,18 @@ class KnowledgeSyncService:
         degrade to "eventually consistent" (event + sweep), not fail the user's request.
         """
         try:
+            from app.services.context_engine import invalidate_catalogue_overview
+            invalidate_catalogue_overview(tenant_id)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            # Indexed retrieval projection: one-row upsert / removal (O(log n)).
+            from app.services.knowledge_search_index import upsert_items
+            await asyncio.wait_for(upsert_items(tenant_id, [item_id]), timeout=5.0)
+        except Exception as idx_err:  # noqa: BLE001 - the periodic rebuild / next import repairs it
+            logger.warning("knowledge search index upsert failed", tenant_id=tenant_id, item_id=item_id,
+                           error=str(idx_err)[:200])
+        try:
             result = await asyncio.wait_for(
                 self.sync_item(
                     tenant_id, item_id, item=item, version=version,

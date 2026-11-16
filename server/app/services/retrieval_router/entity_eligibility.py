@@ -47,10 +47,13 @@ class ProductRole(str, Enum):
     RAW_MATERIAL = "RAW_MATERIAL"
     PACKAGING = "PACKAGING"
     CONSUMABLE = "CONSUMABLE"
+    BUNDLE = "BUNDLE"            # a set / kit / combo / multi-pack of finished items
     UNKNOWN = "UNKNOWN"
 
 
-SELLABLE_ROLES = frozenset({ProductRole.FINISHED, ProductRole.SERVICE})
+SELLABLE_ROLES = frozenset({ProductRole.FINISHED, ProductRole.SERVICE, ProductRole.BUNDLE})
+# Multi-item offer cues in a record title ("Set of 2", "Pack of 6", "Combo", "Kit", "3 pcs").
+_BUNDLE_RE = re.compile(r"\b(?:set of \d+|pack of \d+|(?:[2-9]|[1-9]\d+)\s*(?:pcs|pieces|pc)|combo|bundle|kit)\b", re.IGNORECASE)
 
 # Generic commerce role vocabulary (language-level, not business-level). Order = priority.
 _ROLE_CUES: Tuple[Tuple[ProductRole, Tuple[str, ...]], ...] = (
@@ -74,6 +77,8 @@ _REQUEST_ROLE_WORDS: Tuple[Tuple[ProductRole, Tuple[str, ...]], ...] = (
     (ProductRole.PACKAGING, ("packing material", "packaging")),
     (ProductRole.CONSUMABLE, ("consumable", "consumables", "refill", "refills", "cartridge")),
 )
+# "single / individual piece": the customer wants one unit, not a set / kit / multi-pack.
+_INDIVIDUAL_RE = re.compile(r"\b(?:single|individual|one piece|1 ?pc|per piece|loose)\b", re.IGNORECASE)
 # Category words that describe a sales channel / grouping, not what the thing is.
 _GENERIC_FAMILY_WORDS = frozenset({
     "product", "products", "item", "items", "goods", "finished", "finish", "series", "range", "collection",
@@ -185,6 +190,9 @@ def classify_candidate(canonical: Optional[Dict[str, Any]], title: Optional[str]
     # even when its source type says finished goods (common in real catalogues).
     if related and role in (None, ProductRole.FINISHED):
         role, source, conf = ProductRole.PART, "title_relation", 0.75
+    # A sellable item offered as a set / kit / combo / multi-pack is a bundle, not a single unit.
+    if role in (None, ProductRole.FINISHED) and _BUNDLE_RE.search(name or ""):
+        role, source, conf = ProductRole.BUNDLE, "title_bundle", 0.8
     if role is None:
         role = ProductRole.UNKNOWN
     text = " ".join(str(x) for x in (name, category or "", ptype) if x)
@@ -356,6 +364,8 @@ def build_request_spec(plan: Any, vocab: Optional[TenantVocabulary]) -> RequestS
         # explicit support / troubleshooting request is left ungated.
         if intent not in _UNGATED_INTENTS:
             wanted = set(SELLABLE_ROLES)
+            if _INDIVIDUAL_RE.search(text):
+                wanted.discard(ProductRole.BUNDLE)
     if wanted and wanted & {ProductRole.PART, ProductRole.ACCESSORY} and codes and not target_models:
         # "spare part for model X": X identifies the parent product, not the item wanted.
         target_models = sorted(codes)

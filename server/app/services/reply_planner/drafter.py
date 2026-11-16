@@ -462,6 +462,13 @@ class ReplyDrafter:
             f"STRATEGY: {package.action_context.safe_response_strategy}",
         ]
 
+        if getattr(package, "search_incomplete", False):
+            prompt_parts.append(
+                "SEARCH COVERAGE: more catalogue items matched than could be checked for this reply. Never say "
+                "the business does not have / does not sell an item; present what was verified and say the team "
+                "will confirm anything else."
+            )
+
         if getattr(package, "price_ranking_unscoped", False):
             prompt_parts.append(
                 "PRICE RANKING SCOPE: the customer asked for the cheapest / most expensive item, but the request "
@@ -551,6 +558,13 @@ class ReplyDrafter:
                 + commitment_context
             )
 
+        prompt_parts.append(
+            "\nEVIDENCE AUTHORITY (highest wins): verified catalogue record > business profile / owner-entered "
+            "data > imported documents > supporting excerpts > conversation memory > the customer's own claims. "
+            "Prices, codes, stock and specifications come ONLY from Verified Facts. If two facts disagree, use the "
+            "higher-authority one and never mention the other; if equal-authority facts disagree, do not choose: "
+            "say the team will confirm."
+        )
         prompt_parts.append("\nACTIVE REQUIREMENTS & EVIDENCE:")
         for idx, req in enumerate(package.requirements, start=1):
             prompt_parts.append(f"\n[Requirement {idx}] ID: {req.requirement_id}")
@@ -559,8 +573,8 @@ class ReplyDrafter:
             prompt_parts.append(f"  Coverage: {req.coverage_status.value}")
 
             if req.facts:
-                prompt_parts.append("  Verified Facts:")
-                for f in req.facts:
+                prompt_parts.append("  Verified Facts (strongest authority first):")
+                for f in sorted(req.facts, key=lambda x: -(getattr(x, "authority_score", 0.0) or 0.0)):
                     curr_unit = f.currency_or_unit or ""
                     item_title = f.entity_title or f.external_identity_key or f.entity_id
                     sku_tag = f" [Code: {f.external_identity_key}]" if f.external_identity_key else ""
@@ -570,11 +584,11 @@ class ReplyDrafter:
                         attr, attr.replace("_", " ").capitalize())
                     value = f"{f.typed_value} {curr_unit}".strip()
                     prompt_parts.append(
-                        f"    - FactID: {f.fact_id} | Item: \"{item_title}\"{sku_tag} | {label}: {value}"
+                        f"    - FactID: {f.fact_id} | Item: \"{item_title}\"{sku_tag} | {label}: {value} | Authority: {_authority_tier(f)}"
                     )
 
             if req.supporting_excerpts:
-                prompt_parts.append("  Supporting Excerpts:")
+                prompt_parts.append("  Supporting Excerpts (context only - never the source of a price, code or specification):")
                 for exc in req.supporting_excerpts:
                     prompt_parts.append(f"    - Excerpt: \"{exc.text}\"")
 
@@ -927,3 +941,17 @@ class ReplyDrafter:
 
 # Global singleton
 reply_drafter = ReplyDrafter()
+
+
+def _authority_tier(fact) -> str:
+    """Human-readable authority of a packaged fact, from its provenance (no business vocabulary)."""
+    src = (getattr(fact, "source_system", "") or "").lower()
+    level = (getattr(fact, "authority_level", "") or "").lower()
+    score = float(getattr(fact, "authority_score", 0.0) or 0.0)
+    if src == "postgresql" and score >= 0.7:
+        return "verified catalogue record"
+    if "profile" in level or "owner" in level or "admin" in level:
+        return "business profile / owner data"
+    if src == "qdrant" or "semantic" in level:
+        return "document passage (lower)"
+    return f"{level or src or 'unspecified'} ({score:.2f})"

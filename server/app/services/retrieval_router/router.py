@@ -415,6 +415,8 @@ class RetrievalRouter:
         structured_origin: Dict[str, Tuple[str, float]] = {}
         # item_id -> requested code it approximates (the requested code itself does not exist)
         near_for: Dict[str, str] = {}
+        # indexed progressive retrieval outcome: was every catalogue match considered?
+        index_search: Dict[str, Any] = {"used": False, "exhaustive": None, "matching": None}
 
         async def _near_matches(found: List[Tuple[KnowledgeItem, KnowledgeVersion]]):
             """Closest existing codes for requested codes that do not exist (suggestions only)."""
@@ -610,8 +612,35 @@ class RetrievalRouter:
                 # members from PostgreSQL (bounded) so the eligible items are always in the
                 # candidate set, whatever the top-K of the similarity branches returned.
                 token_groups: List[List[str]] = []
+                fam_labels = [f.label for f in eligibility_spec.families] if eligibility_spec is not None else []
+                used_index = False
+                if fam_labels:
+                    # Indexed, exhaustive path: every hard constraint evaluated by PostgreSQL over the
+                    # WHOLE catalogue (O(log n + k)); no fixed candidate window to fall out of.
+                    from app.services.knowledge_search_index import is_available as _idx_ok
+                    if await _idx_ok(db, tenant_id):
+                        from app.core.config import get_retrieval_budget
+                        from app.services.retrieval_router.verifier import price_order as _po
+                        rng = plan.range_semantics if (plan.range_semantics and plan.range_semantics.field == "price") else None
+                        idx_items, exhaustive, matching = await self._structured_retriever.fetch_indexed_candidates(
+                            db=db, tenant_id=tenant_id, families=fam_labels,
+                            roles=[r.value for r in (eligibility_spec.wanted_roles or [])] or None,
+                            nominal=eligibility_spec.nominal,
+                            price_order=_po(getattr(plan.comparison, "ranking_criterion", None)),
+                            price_min=rng.min_value if rng else None, price_max=rng.max_value if rng else None,
+                            top_n=result_count, budget=get_retrieval_budget().index_candidate_budget, as_of=as_of)
+                        index_search.update(used=True, exhaustive=exhaustive, matching=matching)
+                        used_index = True
+                        have = {it.id for it, _ in structured_results}
+                        for it, ver in idx_items:
+                            if it.id not in have:
+                                structured_results.append((it, ver))
+                                have.add(it.id)
+                            if structured_origin.get(it.id, ("generic", 0.0))[0] == "generic":
+                                structured_origin[it.id] = ("family", 0.0)
                 if eligibility_spec is not None:
-                    token_groups += [sorted(f.tokens) for f in eligibility_spec.families]
+                    if not used_index:
+                        token_groups += [sorted(f.tokens) for f in eligibility_spec.families]
                     # "parts for model X": every record that names X (its parts / accessories)
                     token_groups += [[m.lower()] for m in eligibility_spec.target_models]
                 if token_groups:
@@ -917,6 +946,8 @@ class RetrievalRouter:
             eligibility_spec is not None and (eligibility_spec.families or eligibility_spec.nominal
                                               or eligibility_spec.exact_keys or plan.focus_entity_ids))
         result = RetrievalResult(
+            search_exhaustive=index_search["exhaustive"],
+            candidates_matching=index_search["matching"],
             price_ranking_unscoped=unscoped,
             schema_version="1.0",
             status=retrieval_status,

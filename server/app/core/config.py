@@ -12,6 +12,8 @@ Architectural Rules:
 from functools import lru_cache
 from typing import List, Literal
 from pydantic import Field, computed_field, model_validator
+import functools
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -263,6 +265,22 @@ class EmailProviderSettings(BaseAppConfig):
         default="http://localhost:8000/api/v1/auth/microsoft/callback",
         alias="MICROSOFT_REDIRECT_URI",
     )
+
+
+class RetrievalBudgetSettings(BaseAppConfig):
+    """Bounded progressive retrieval (indexed search projection). All values are per (sub-)query."""
+
+    # Max index rows examined for a family / constraint query before declaring the search
+    # "not exhaustive" (the reply then never claims the business lacks the item).
+    index_candidate_budget: int = Field(default=2000, alias="RETRIEVAL_INDEX_BUDGET", ge=50, le=50000)
+    # Tenants with more active items than this use the GIN full-text prefilter for keyword search.
+    lexical_prefilter_threshold: int = Field(default=20000, alias="RETRIEVAL_LEXICAL_PREFILTER_THRESHOLD", ge=0)
+    lexical_prefilter_limit: int = Field(default=1500, alias="RETRIEVAL_LEXICAL_PREFILTER_LIMIT", ge=50, le=20000)
+
+
+@functools.lru_cache(maxsize=1)
+def get_retrieval_budget() -> "RetrievalBudgetSettings":
+    return RetrievalBudgetSettings()
 
 
 class LlmSettings(BaseAppConfig):

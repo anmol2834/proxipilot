@@ -742,6 +742,10 @@ class KnowledgeImportWorker(BaseWorker):
                 invalidate_tenant_vocabulary(event.tenant_id)
                 invalidate_business_taxonomy(event.tenant_id)
                 invalidate_configured_categories(event.tenant_id)
+                from app.services.knowledge_search_index import schedule_rebuild
+                schedule_rebuild(event.tenant_id)   # indexed retrieval projection (background)
+                from app.services.context_engine import invalidate_catalogue_overview
+                invalidate_catalogue_overview(event.tenant_id)
             except Exception:  # noqa: BLE001
                 pass
             logger.info("Import job pipeline completed successfully", job_id=job_id, final_status=final_status.value)

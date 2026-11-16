@@ -298,6 +298,8 @@ class MinimalEvidencePackage(BaseModel):
     # 'cheapest / most expensive' was ranked over candidates NOT resolved to a product family or size,
     # so no catalogue-wide superlative may be claimed (the reply must stay scoped / ask).
     price_ranking_unscoped: bool = False
+    # More catalogue items matched than the search budget allowed: never claim an item does not exist.
+    search_incomplete: bool = False
 
     # Budget & Observability
     budget_metrics: PackageBudgetMetrics = Field(default_factory=PackageBudgetMetrics)

@@ -218,6 +218,12 @@ async def lifespan(app: FastAPI):
             gmail_poll_task = asyncio.create_task(gmail_fallback_poller.run_forever(float(_poll_s)))
             worker_tasks.append(gmail_poll_task)
         recovery_task = asyncio.create_task(_periodic_job_recovery())
+        # Redis Streams health (length / pending / lag / stuck) -> Prometheus + warnings.
+        from app.core import stream_monitor
+        worker_tasks.append(asyncio.create_task(stream_monitor.run_forever()))
+        # Outbound delivery reconciliation (DELIVERY_UNKNOWN / SEND_ATTEMPTED / FAILED_RETRYABLE).
+        from app.services.reply_planner.delivery_reconciler import delivery_reconciler
+        worker_tasks.append(asyncio.create_task(delivery_reconciler.run_forever()))
 
     except Exception as worker_init_err:
         logger.warning("Failed to start embedded workers", error=str(worker_init_err))

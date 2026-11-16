@@ -538,6 +538,7 @@ class GmailClient:
         in_reply_to_header: Optional[str] = None,
         references_header: Optional[str] = None,
         auto_submitted: bool = False,
+        outbound_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Send an email message via Gmail v1 REST API.
 
@@ -558,6 +559,10 @@ class GmailClient:
             msg["In-Reply-To"] = in_reply_to_header
         if references_header:
             msg["References"] = references_header
+        if outbound_id:
+            # Correlation id for delivery reconciliation: when a send times out we look for a SENT
+            # message carrying this header in the thread before ever retrying (no duplicates).
+            msg["X-ProxiPilot-Outbound-Id"] = outbound_id
         if auto_submitted:
             # RFC 3834: mark machine-sent replies so other automated responders (including another
             # tenant's ProxiPilot, or out-of-office rules) never answer them -> no reply loops.
@@ -621,6 +626,28 @@ class GmailClient:
             to_email=to_email,
         )
         return cast(Dict[str, Any], res_json)
+
+
+    async def find_sent_by_outbound_id(
+        self, access_token: str, thread_id: str, outbound_id: str,
+    ) -> Optional[str]:
+        """Gmail message id of the SENT message carrying X-ProxiPilot-Outbound-Id == outbound_id in
+        `thread_id`, or None if Gmail has no such message. One metadata call (no bodies).
+        Raises GmailApiException when Gmail cannot be asked (caller keeps the outcome unknown)."""
+        resp = await self._execute_with_retry(
+            "GET", f"{self.BASE_URL}/threads/{thread_id}", access_token,
+            params={"format": "metadata", "metadataHeaders": "X-ProxiPilot-Outbound-Id"}, max_retries=2)
+        if resp.status_code == 404:
+            return None
+        if resp.status_code != 200:
+            raise GmailApiException(f"Thread lookup failed (HTTP {resp.status_code})", status_code=resp.status_code)
+        for m in (resp.json() or {}).get("messages", []) or []:
+            if "SENT" not in (m.get("labelIds") or []):
+                continue
+            for h in ((m.get("payload") or {}).get("headers") or []):
+                if (h.get("name") or "").lower() == "x-proxipilot-outbound-id" and (h.get("value") or "").strip() == outbound_id:
+                    return str(m.get("id"))
+        return None
 
 
 # Shared singleton instance

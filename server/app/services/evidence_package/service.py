@@ -167,6 +167,7 @@ class MinimalEvidencePackageService:
             active_selection_title=((plan.active_selection or {}).get("title") if plan else None),
             unknown_identifiers=unknown_identifier_report(plan, fusion_result),
             price_ranking_unscoped=bool(getattr(fusion_result, "price_ranking_unscoped", False)),
+            search_incomplete=bool(getattr(fusion_result, "search_incomplete", False)),
             novelty_verified=is_cont,
             budget_metrics=budget_metrics,
             warnings=list(fusion_result.warnings),

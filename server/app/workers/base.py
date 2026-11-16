@@ -201,9 +201,10 @@ class BaseWorker(ABC):
                 # Windows event loop fallback for signals
                 pass
 
-        active_tasks = set()
+        active_tasks: set = set()
         _err_backoff = 0.0
         _initialized = False
+        _recovered = False
 
         while not self._stop_event.is_set():
             if not _initialized:
@@ -224,11 +225,34 @@ class BaseWorker(ABC):
                 # Clean up completed tasks
                 active_tasks = {t for t in active_tasks if not t.done()}
 
+                # Backpressure: claim only as many messages as there are free processing slots.
+                # Claiming more parks them in memory without a PEL keepalive, so after the
+                # XAUTOCLAIM idle window they were reclaimed and processed twice under a burst.
+                free = self.concurrency - len(active_tasks)
+                if free <= 0:
+                    await asyncio.wait(active_tasks, return_when=asyncio.FIRST_COMPLETED)
+                    continue
+
+                if not _recovered:
+                    # Crash / restart recovery: this consumer's own unacknowledged entries first.
+                    _recovered = True
+                    own = await event_bus.read_own_pending(
+                        self.stream_name, self.group_name, self.consumer_name, count=free)
+                    if own:
+                        logger.info("Recovering unacknowledged events after restart",
+                                    worker=self.worker_name, count=len(own))
+                        for message_id, event in own:
+                            task = asyncio.create_task(self._handle_message(message_id, event))
+                            active_tasks.add(task)
+                        if len(own) >= free:
+                            _recovered = False   # more may remain; continue recovery next loop
+                        continue
+
                 events = await event_bus.read_events(
                     stream_name=self.stream_name,
                     group_name=self.group_name,
                     consumer_name=self.consumer_name,
-                    count=self.concurrency,
+                    count=free,
                     block_ms=1000,
                 )
 

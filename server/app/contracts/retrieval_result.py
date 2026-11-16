@@ -209,4 +209,8 @@ class RetrievalResult(BaseModel):
     # 'cheapest / most expensive' was ranked over candidates NOT resolved to a product family or size,
     # so no catalogue-wide superlative may be claimed (the reply must stay scoped / ask).
     price_ranking_unscoped: bool = False
+    # Indexed progressive retrieval: True = every catalogue item matching the hard constraints was
+    # considered; False = more matches than the search budget (never claim the item does not exist).
+    search_exhaustive: Optional[bool] = None
+    candidates_matching: Optional[int] = None
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
