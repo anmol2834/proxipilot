@@ -55,6 +55,16 @@ AUTHORITY_WEIGHTS: Dict[str, float] = {
 }
 
 
+def price_order(criterion: Optional[str]) -> Optional[str]:
+    """'asc' / 'desc' when a ranking criterion asks for price ordering (free-text tolerant)."""
+    c = (criterion or "").lower()
+    if not c or not any(w in c for w in ("price", "cheap", "afford", "cost", "expens", "budget")):
+        return None
+    if any(w in c for w in ("desc", "high", "expens", "max", "premium", "costliest")):
+        return "desc"
+    return "asc"
+
+
 class CandidateVerificationResult:
     """Internal container for evaluated evidence."""
 
@@ -63,10 +73,14 @@ class CandidateVerificationResult:
         evidence_item: RetrievedEvidenceItem,
         is_hard_constraint_satisfied: bool,
         composite_rank_score: float,
+        size_unverified: bool = False,
     ):
         self.evidence_item = evidence_item
         self.is_hard_constraint_satisfied = is_hard_constraint_satisfied
         self.composite_rank_score = composite_rank_score
+        # The customer stated a size and this record states none: it may still fit, but it must not
+        # outrank items that verifiably match (e.g. when ordering by price).
+        self.size_unverified = size_unverified
 
 
 class FactVerifier:
@@ -159,6 +173,11 @@ class FactVerifier:
         # requested — the eligibility layer checks compatibility with X instead.
         if eligibility_spec is not None and getattr(eligibility_spec, "target_models", None):
             requested_skus -= {m.upper().strip() for m in eligibility_spec.target_models}
+        if requested_skus and eligibility_spec is not None:
+            # The router adds the closest EXISTING codes for requested codes that do not exist to the
+            # spec's exact keys; they pass this gate as labelled suggestions (near_match_for), never
+            # as the requested code itself.
+            requested_skus |= {k.upper().strip() for k in (getattr(eligibility_spec, "suggestion_keys", None) or set())}
 
         # Pre-fetch all missing semantic candidates in a single batch query
         missing_ids = [mid for mid, c in merged_candidates.items() if c["item"] is None or c["version"] is None]
@@ -418,6 +437,9 @@ class FactVerifier:
                     evidence_item=evidence_item,
                     is_hard_constraint_satisfied=is_valid,
                     composite_rank_score=composite_score,
+                    size_unverified=bool(
+                        elig is not None and getattr(eligibility_spec, "nominal", None)
+                        and not any("_matches_" in x for x in elig.satisfied)),
                 )
             )
 
@@ -427,6 +449,24 @@ class FactVerifier:
         # Only retain candidates satisfying hard constraints
         valid_candidates = [c for c in evaluated_candidates if c.is_hard_constraint_satisfied]
         valid_candidates.sort(key=lambda c: c.composite_rank_score, reverse=True)
+        order = price_order(getattr(plan.comparison, "ranking_criterion", None))
+        if order:
+            # "cheapest / most expensive": every eligible item competes on price (relevance only
+            # breaks ties); items without a real price go last. Truncation happens after this.
+            def _price(c):
+                p = getattr(getattr(c.evidence_item, "pricing", None), "calculated_total", None)
+                return float(p) if p not in (None, "") and float(p) > 0 else None
+            scoped = eligibility_spec is not None and bool(
+                eligibility_spec.families or getattr(eligibility_spec, "nominal", None) or eligibility_spec.exact_keys)
+            # Not resolved to a product family / size: price only decides among the most RELEVANT
+            # candidates, so a cheap but unrelated item never wins "cheapest <thing>".
+            pool_size = len(valid_candidates) if scoped else max(5, plan.requested_result_count.final_count or 5)
+            head, tail = valid_candidates[:pool_size], valid_candidates[pool_size:]
+            priced = [c for c in head if _price(c) is not None]
+            unpriced = [c for c in head if _price(c) is None]
+            priced.sort(key=lambda c: (c.size_unverified, _price(c) if order == "asc" else -_price(c),
+                                       -c.composite_rank_score))
+            valid_candidates = priced + unpriced + tail
 
         # Determine target count limit (from plan's requested count or max safe limit 20)
         target_count = plan.requested_result_count.final_count or 5

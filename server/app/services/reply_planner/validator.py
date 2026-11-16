@@ -55,6 +55,38 @@ _PLACEHOLDER_SLOT = re.compile(
 _MASKED_NUMBER = re.compile(r"(?<![A-Za-z0-9])X{2,}(?:[,.]X{2,})+(?![A-Za-z0-9])")
 
 
+# Code-like tokens: letters AND digits (>= 2 each), optional dash segments. Excludes number+unit
+# forms ("30LTR", "800ML", "1800W") which are specifications, not identifiers.
+_CODE_TOKEN = re.compile(r"(?<![A-Za-z0-9-])[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*(?![A-Za-z0-9-])")
+_NUMBER_UNIT = re.compile(r"^\d+(?:\.\d+)?[A-Za-z]{1,4}$")
+
+
+def _looks_like_code(tok: str) -> bool:
+    letters = sum(ch.isalpha() for ch in tok)
+    digits = sum(ch.isdigit() for ch in tok)
+    return letters >= 2 and digits >= 2 and len(tok) >= 5 and not _NUMBER_UNIT.match(tok) and tok.upper() == tok
+
+
+def _ungrounded_codes(body: str, package: Any) -> List[str]:
+    """Codes in the draft that appear nowhere in the packaged evidence (pure, unit-tested)."""
+    allowed_parts: List[str] = []
+    for req in getattr(package, "requirements", None) or []:
+        for f in getattr(req, "facts", None) or []:
+            allowed_parts += [str(getattr(f, "external_identity_key", "") or ""), str(getattr(f, "entity_title", "") or ""),
+                              str(getattr(f, "typed_value", "") or ""), str(getattr(f, "statement", "") or "")]
+        for ex in getattr(req, "supporting_excerpts", None) or []:
+            allowed_parts.append(str(getattr(ex, "text", "") or getattr(ex, "excerpt", "") or ""))
+    for unk in getattr(package, "unknown_identifiers", None) or []:
+        allowed_parts.append(str(unk.get("requested") or ""))
+        allowed_parts += [str(x) for x in unk.get("suggestions") or []]
+    allowed = " ".join(allowed_parts).upper()
+    out: List[str] = []
+    for tok in _CODE_TOKEN.findall(body or ""):
+        if _looks_like_code(tok) and tok.upper() not in allowed and tok not in out:
+            out.append(tok)
+    return out
+
+
 def _placeholders_in(text: str) -> List[str]:
     found: List[str] = []
     for rx in (_PLACEHOLDER_MONEY, _PLACEHOLDER_SLOT, _MASKED_NUMBER):
@@ -172,6 +204,16 @@ class DeterministicReplyValidator:
                 issue_code="PLACEHOLDER_CONTENT",
                 severity=ValidationIssueSeverity.CRITICAL,
                 description=f"Draft contains placeholder '{ph}' instead of a verified value; use the evidence value or say it is not available.",
+            ))
+
+        # 4c. Identifier grounding: every product / service code in the reply must exist in the
+        # packaged evidence (or be the code the customer asked about). A wrong code is as harmful
+        # as a wrong price.
+        for code in _ungrounded_codes(draft.body_text or "", package):
+            issues.append(ValidationIssue(
+                issue_code="UNVERIFIED_IDENTIFIER",
+                severity=ValidationIssueSeverity.CRITICAL,
+                description=f"Draft mentions code '{code}' that is not in the verified evidence; use only codes from the evidence.",
             ))
 
         # 5. HTML Safety & Sanitization

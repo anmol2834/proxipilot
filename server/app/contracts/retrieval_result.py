@@ -148,6 +148,9 @@ class RetrievedEvidenceItem(BaseModel):
     unmet_constraints: List[str] = Field(default_factory=list)
     # Requirement(s) this item was retrieved for (multi-requirement plans). Empty = whole plan.
     requirement_ids: List[str] = Field(default_factory=list)
+    # Set when this item is NOT the requested identifier but the closest existing one to it
+    # (the requested code does not exist). Never present it as the requested code.
+    near_match_for: Optional[str] = None
 
 
 class CoverageAssessment(BaseModel):
@@ -203,4 +206,7 @@ class RetrievalResult(BaseModel):
     verification: VerificationAssessment = Field(default_factory=VerificationAssessment)
     follow_up: FollowUpActions = Field(default_factory=FollowUpActions)
     warnings: List[str] = Field(default_factory=list)
+    # 'cheapest / most expensive' was ranked over candidates NOT resolved to a product family or size,
+    # so no catalogue-wide superlative may be claimed (the reply must stay scoped / ask).
+    price_ranking_unscoped: bool = False
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())

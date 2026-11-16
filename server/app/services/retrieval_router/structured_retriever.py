@@ -16,6 +16,7 @@ All queries enforce:
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
@@ -126,6 +127,39 @@ class StructuredRetriever:
                 matched.append((v.knowledge_item, v))
 
         return matched
+
+    async def fetch_near_keys(
+        self,
+        db: AsyncSession,
+        tenant_id: str,
+        key: str,
+        limit: int = 3,
+        max_distance: int = 2,
+        as_of: Optional[datetime] = None,
+    ) -> List[Tuple[KnowledgeItem, KnowledgeVersion]]:
+        """Closest EXISTING identifiers to a code that does not exist (a typo or a wrong digit):
+        same leading letter prefix, edit distance <= max_distance, nearest first. Business-agnostic:
+        it only compares the tenant's own codes. The caller must present these as suggestions,
+        never as the requested code."""
+        code = (key or "").strip().upper()
+        prefix = re.match(r"[A-Z]+", code)
+        if not code or not prefix or len(prefix.group(0)) < 2 or len(code) < 4:
+            return []
+        from sqlalchemy import text as _text
+
+        rows = (await db.execute(_text("""
+            SELECT upper(external_identity_key) AS k FROM knowledge_items
+            WHERE tenant_id = :t AND is_active AND upper(external_identity_key) LIKE :p
+            LIMIT 2000"""), {"t": tenant_id, "p": prefix.group(0) + "%"})).scalars().all()
+        scored = sorted(
+            ((d, k) for k in set(rows) if k != code and (d := _edit_distance(code, k)) <= max_distance),
+            key=lambda dk: (dk[0], _numeric_gap(code, dk[1]), dk[1]),
+        )[:limit]
+        if not scored:
+            return []
+        found = await self.fetch_by_exact_keys(db=db, tenant_id=tenant_id, keys=[k for _d, k in scored], as_of=as_of)
+        order = {k: i for i, (_d, k) in enumerate(scored)}
+        return sorted(found, key=lambda iv: order.get((iv[0].external_identity_key or "").upper(), 99))
 
     async def fetch_by_category_and_range(
         self,
@@ -372,3 +406,22 @@ class StructuredRetriever:
 
 
 structured_retriever = StructuredRetriever()
+
+
+def _edit_distance(a: str, b: str) -> int:
+    """Levenshtein distance (codes are short; O(len(a)*len(b)))."""
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
+def _numeric_gap(a: str, b: str) -> int:
+    """|n(a) - n(b)| for the first digit runs (DSDR0016 is nearer DSDR0015 than DSDR0061)."""
+    na, nb = re.search(r"\d+", a), re.search(r"\d+", b)
+    if not na or not nb:
+        return 10**9
+    return abs(int(na.group(0)) - int(nb.group(0)))

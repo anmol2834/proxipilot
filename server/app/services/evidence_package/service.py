@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Optional
+from typing import Any, Dict, List, Optional
 import uuid
 
 from app.contracts.evidence_fusion import VerifiedEvidenceResult
@@ -36,6 +36,35 @@ from app.services.context_resolver import ContextEnvelope
 from app.services.evidence_package.minimizer import EvidenceMinimizer
 from app.services.evidence_package.selector import EvidenceSelector
 from app.services.evidence_package.validator import PackageConsistencyValidator
+
+
+def unknown_identifier_report(plan: Optional[RequirementPlan], fusion_result: VerifiedEvidenceResult) -> List[Dict[str, Any]]:
+    """Codes the customer typed that match no record, with the closest existing codes found for
+    them. Deterministic: built from the plan's identifiers and the verified candidates."""
+    if plan is None:
+        return []
+    requested: List[str] = []
+    for e in plan.entities:
+        if (e.entity_type or "").lower() in ("sku", "service_code", "product_code", "model_number"):
+            code = (e.canonical_value or e.original_text or "").strip().upper()
+            if code and code not in requested:
+                requested.append(code)
+    if not requested:
+        return []
+    cands = [c for g in fusion_result.requirements for c in g.verified_candidates]
+    found = {(c.external_identity_key or "").upper() for c in cands if not getattr(c, "near_match_for", None)}
+    report: List[Dict[str, Any]] = []
+    for code in requested:
+        if code in found:
+            continue
+        sugg: List[str] = []
+        seen = set()
+        for c in cands:
+            if (getattr(c, "near_match_for", None) or "").upper() == code and c.entity_id not in seen:
+                seen.add(c.entity_id)
+                sugg.append(f"{c.external_identity_key} - {c.title}")
+        report.append({"requested": code, "suggestions": sugg[:3]})
+    return report
 
 
 class MinimalEvidencePackageService:
@@ -136,6 +165,8 @@ class MinimalEvidencePackageService:
             continuation_type=cont_type,
             previously_presented_entity_ids=excl_ids,
             active_selection_title=((plan.active_selection or {}).get("title") if plan else None),
+            unknown_identifiers=unknown_identifier_report(plan, fusion_result),
+            price_ranking_unscoped=bool(getattr(fusion_result, "price_ranking_unscoped", False)),
             novelty_verified=is_cont,
             budget_metrics=budget_metrics,
             warnings=list(fusion_result.warnings),

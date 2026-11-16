@@ -537,6 +537,7 @@ class GmailClient:
         thread_id: Optional[str] = None,
         in_reply_to_header: Optional[str] = None,
         references_header: Optional[str] = None,
+        auto_submitted: bool = False,
     ) -> Dict[str, Any]:
         """Send an email message via Gmail v1 REST API.
 
@@ -557,6 +558,11 @@ class GmailClient:
             msg["In-Reply-To"] = in_reply_to_header
         if references_header:
             msg["References"] = references_header
+        if auto_submitted:
+            # RFC 3834: mark machine-sent replies so other automated responders (including another
+            # tenant's ProxiPilot, or out-of-office rules) never answer them -> no reply loops.
+            msg["Auto-Submitted"] = "auto-replied"
+            msg["X-Auto-Response-Suppress"] = "All"
 
         # Attach text part
         msg.attach(MIMEText(body_text, "plain", "utf-8"))

@@ -137,11 +137,18 @@ class RequirementPlannerService:
         # Layer B: OpenAI Structured Intent Planning (Fast Path or LLM)
         # ---------------------------------------------------------------------
         taxonomy = await taxonomy_task
+        try:
+            presented = await presented_task
+        except Exception:  # noqa: BLE001
+            presented = []
+        prior_selection = current_selection(envelope, presented)
         proposal, is_fast_path, planner_metrics = await self.planner.plan_intent(
             envelope=envelope,
             preprocessed=preprocessed,
             catalogue=catalogue,
             taxonomy=taxonomy,
+            presented=presented,
+            selected=prior_selection.item if prior_selection else None,
         )
 
         metadata = PlanMetadata(
@@ -167,14 +174,11 @@ class RequirementPlannerService:
         # ---------------------------------------------------------------------
         # Layer D: Conversation selection state (deterministic, from thread evidence)
         # ---------------------------------------------------------------------
-        try:
-            presented = await presented_task
-        except Exception:  # noqa: BLE001
-            presented = []
         # AI #1 semantic expansions (translation + HyDE concepts + keywords), sanitised and
         # matched to the requirements they describe. Retrieval aids only.
         plan = apply_semantic_expansions(plan, proposal)
-        plan = apply_selection_state(plan, envelope, presented)
+        plan = apply_selection_state(plan, envelope, presented, proposal)
+        plan = apply_result_breadth(plan, proposal)
 
         total_duration_ms = (time.perf_counter() - start_t) * 1000.0
         logger.info(
@@ -244,33 +248,110 @@ requirement_planner_service = RequirementPlannerService()
 
 
 _ALTERNATIVE_INTENTS = (IntentType.MORE_OPTIONS, IntentType.DIFFERENT_OPTIONS)
+# Catalogue-wide questions: an earlier choice must never narrow them to one item.
+_DISCOVERY_INTENTS = (IntentType.CATALOGUE_REQUEST, IntentType.PRODUCT_DISCOVERY, IntentType.RECOMMENDATION,
+                      IntentType.PRODUCT_COMPARISON, IntentType.SERVICE_COMPARISON)
+_EXACT_ID_TYPES = ("sku", "service_code", "product_code", "model_number")
+_SCOPES = ("new_request", "selected_item", "listed_items", "none")
 
 
-def apply_selection_state(plan: RequirementPlan, envelope: ContextEnvelope, presented) -> RequirementPlan:
-    """Resolve the customer's active selection from the thread and make the plan honour it.
-
-    - A message that names an already-presented item is a SELECTION, never "more options": it must
-      not exclude that item and must not rediscover the catalogue.
-    - Follow-ups (order, quantity, discount, warranty...) keep the selection.
-    - Asking for alternatives without naming an item clears it (normal discovery continues).
-    """
-    from app.services.conversation_selection import customer_texts, resolve_selection, selection_summary
+def current_selection(envelope: ContextEnvelope, presented):
+    """The item the customer chose so far (time-aware: only items shown before each message)."""
+    from app.services.conversation_selection import customer_messages_with_times, resolve_selection
 
     if not presented:
-        return plan
+        return None
+    msgs = customer_messages_with_times(envelope)
+    return resolve_selection([t for t, _ in msgs], presented, message_times=[a for _, a in msgs])
+
+
+def apply_selection_state(plan: RequirementPlan, envelope: ContextEnvelope, presented,
+                          proposal: Any = None) -> RequirementPlan:
+    """Decide which already-shown items (if any) the current message is about, and make the plan
+    honour it. AI #1 classifies the reference (``reference_scope``); deterministic rules enforce it
+    and override it where the evidence is unambiguous:
+
+    - a code typed in THIS message that we never showed is a new subject (no earlier focus applies);
+    - listed_items ("codes of these"): retrieve exactly the items of our most recent list (or the
+      codes AI #1 resolved from that list), never exclude them;
+    - selected_item: one chosen item, kept through follow-ups (order, quantity, discount);
+    - new_request / catalogue-wide questions: no focus, normal retrieval;
+    - asking for alternatives without naming an item clears the selection.
+    """
+    from app.services.conversation_selection import (
+        customer_messages_with_times,
+        latest_presented_list,
+        refers_to_listed_items,
+        resolve_selection,
+        selection_summary,
+    )
+
+    scope = str(getattr(proposal, "reference_scope", "none") or "none").strip().lower()
+    scope = scope if scope in _SCOPES else "none"
+    if not presented:
+        return plan.model_copy(update={"reference_scope": scope})
+
+    by_key = {(it.external_key or "").strip().upper(): it for it in presented if it.external_key}
+    resolved_codes = [c.strip().upper() for c in (getattr(proposal, "referenced_item_codes", None) or [])
+                      if isinstance(c, str) and c.strip().upper() in by_key]
+    typed = {(e.canonical_value or e.original_text or "").strip().upper() for e in plan.entities
+             if (e.entity_type or "").lower() in _EXACT_ID_TYPES and (e.canonical_value or e.original_text)}
+    typed.discard("")
+    if typed and not typed <= set(by_key):
+        scope = "new_request"   # names a code we never showed: a new subject, whatever came before
+    elif (not typed and plan.intent not in _ALTERNATIVE_INTENTS
+          and refers_to_listed_items(getattr(envelope.current_message, "body_text", "") or "")):
+        scope = "listed_items"  # "codes / prices of these": the items of our last reply
+
+    msgs = customer_messages_with_times(envelope)
     wants_alternatives = plan.intent in _ALTERNATIVE_INTENTS
-    sel = resolve_selection(customer_texts(envelope), presented, current_requests_alternatives=wants_alternatives)
+    sel = resolve_selection([t for t, _ in msgs], presented, current_requests_alternatives=wants_alternatives,
+                            message_times=[a for _, a in msgs])
+
+    base: Dict[str, Any] = {"reference_scope": scope}
+    if scope == "new_request" or (
+            plan.intent in _DISCOVERY_INTENTS and scope != "listed_items" and not (sel and sel.named_in_current)):
+        logger.info("Conversation reference: new request (no earlier focus)", plan_id=plan.plan_id,
+                    thread_id=plan.thread_id, intent=plan.intent.value, scope=scope)
+        return plan.model_copy(update={**base, "active_selection": None, "focus_entity_ids": [], "focus_keys": []})
+
+    if scope == "listed_items":
+        items = [by_key[c] for c in resolved_codes] or latest_presented_list(presented)
+        update: Dict[str, Any] = {**base, "active_selection": None, "excluded_entity_ids": [],
+                                  "focus_entity_ids": [it.entity_id for it in items],
+                                  "focus_keys": [it.external_key for it in items if it.external_key]}
+        if wants_alternatives:
+            update.update({"intent": IntentType.PRODUCT_LOOKUP, "is_continuation": False, "continuation_type": None})
+        logger.info("Conversation reference: listed items", plan_id=plan.plan_id, thread_id=plan.thread_id,
+                    items=len(items), original_intent=plan.intent.value)
+        return plan.model_copy(update=update)
+
+    if scope == "selected_item" and len(resolved_codes) == 1:
+        from app.services.conversation_selection import Selection
+
+        item = by_key[resolved_codes[0]]
+        sel = Selection(item=item, message_index=len(msgs) - 1, named_in_current=sel is None or sel.item != item)
     if sel is None:
-        return plan
-    update: Dict[str, Any] = {
-        "active_selection": selection_summary(sel),
-        "focus_entity_ids": [sel.item.entity_id],
-        "excluded_entity_ids": [],
-    }
+        return plan.model_copy(update=base)
+    update = {**base, "active_selection": selection_summary(sel), "focus_entity_ids": [sel.item.entity_id],
+              "focus_keys": [sel.item.external_key] if sel.item.external_key else [], "excluded_entity_ids": []}
     if wants_alternatives and sel.named_in_current:
         # "Okay, I want <presented item>" was misread as a continuation request.
         update.update({"intent": IntentType.PRODUCT_LOOKUP, "is_continuation": False, "continuation_type": None})
     logger.info("Conversation selection resolved", plan_id=plan.plan_id, thread_id=plan.thread_id,
                 selected=sel.item.title[:80], named_in_current=sel.named_in_current,
-                original_intent=plan.intent.value)
+                original_intent=plan.intent.value, scope=scope)
     return plan.model_copy(update=update)
+
+
+def apply_result_breadth(plan: RequirementPlan, proposal: Any = None) -> RequirementPlan:
+    """'All <kind>' must list every match (up to the server safety limit), not the default sample."""
+    if not getattr(proposal, "wants_all_matching", False) or plan.requested_result_count.explicit_count:
+        return plan
+    limit = plan.requested_result_count.max_safe_limit
+    reqs = [r.model_copy(update={"requested_count": limit})
+            if (r.category or "products_services") == "products_services" else r for r in plan.requirements]
+    return plan.model_copy(update={
+        "requested_result_count": plan.requested_result_count.model_copy(update={"final_count": limit}),
+        "requirements": reqs,
+    })

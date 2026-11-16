@@ -271,6 +271,10 @@ class RequirementPlan(BaseModel):
     # entities instead of rediscovering the catalogue.
     active_selection: Optional[Dict[str, Optional[str]]] = Field(default=None)
     focus_entity_ids: List[str] = Field(default_factory=list)
+    focus_keys: List[str] = Field(default_factory=list, description="Exact codes of the focused items")
+    # What the current message refers to (AI #1 decision, enforced deterministically):
+    # new_request | selected_item | listed_items | none
+    reference_scope: str = Field(default="none")
 
     # Validation & Evidence
     validation_status: ValidationStatus = ValidationStatus.READY_FOR_RETRIEVAL
@@ -322,6 +326,9 @@ class PlannerProposalDTO(BaseModel):
     clarification_needed: bool = Field(default=False)
     clarification_reason: Optional[str] = Field(default=None)
     semantic_search_query: str = Field(description="Distilled search query for vector retrieval")
+    reference_scope: str = Field(default="none", description="new_request | selected_item | listed_items | none")
+    referenced_item_codes: List[str] = Field(default_factory=list)
+    wants_all_matching: bool = Field(default=False)
     search_requirements: List[Dict[str, Any]] = Field(
         default_factory=list,
         description="Per-need expansion: original_text, translated_standard_term, search_concepts, keywords",

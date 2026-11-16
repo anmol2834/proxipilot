@@ -75,6 +75,23 @@ def _intent_alias(raw_intent: str, text: str) -> "IntentType | None":
         return IntentType.CATALOGUE_REQUEST
     return None
 
+IDENTIFIER_ENTITY_TYPES = frozenset({"sku", "service_code", "product_code", "model_number"})
+_NUMBER_UNIT_RE = re.compile(r"^[0-9]+(?:[.,][0-9]+)?[\s\-_]?[a-z]{1,6}$", re.IGNORECASE)
+
+
+def looks_like_identifier(value: Optional[str]) -> bool:
+    """A real code: one token (dashes / slashes allowed), letters AND digits or a long digit run,
+    and not a quantity with a unit ("30L", "30 liters", "800ml")."""
+    v = (value or "").strip()
+    if not v or len(v) > 40 or len(v.split()) > 1:
+        return False
+    if _NUMBER_UNIT_RE.match(v):
+        return False
+    has_digit = any(ch.isdigit() for ch in v)
+    has_alpha = any(ch.isalpha() for ch in v)
+    return has_digit and (has_alpha or len(v) >= 5)
+
+
 class DeterministicPlanValidator:
     """Enterprise deterministic validator and policy engine for requirement plans."""
 
@@ -158,6 +175,11 @@ class DeterministicPlanValidator:
                 res_status = EntityResolutionStatus(raw_res)
             except ValueError:
                 res_status = EntityResolutionStatus.UNRESOLVED
+
+            if str(e_type).lower() in IDENTIFIER_ENTITY_TYPES and not looks_like_identifier(canon):
+                # The model tagged a phrase ("product code", "30 liters") as an identifier. As an
+                # exact key it would hard-reject every real candidate; keep it only as a descriptor.
+                e_type = "descriptor"
 
             validated_entities.append(
                 PlannedEntity(
@@ -331,7 +353,7 @@ class DeterministicPlanValidator:
             requested=comp_req,
             target_entities=_cmp_targets if comp_req else [],
             criteria=comp_criteria if comp_req else [],
-            ranking_criterion=proposal.ranking_criterion if comp_req else None,
+            ranking_criterion=proposal.ranking_criterion or None,
         )
 
         # ---------------------------------------------------------------------

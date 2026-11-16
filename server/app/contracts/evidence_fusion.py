@@ -147,6 +147,7 @@ class VerifiedCandidate(BaseModel):
     unmet_constraints: List[str] = Field(default_factory=list)
     # Requirement(s) this candidate was retrieved for; empty = retrieved for the whole plan.
     requirement_ids: List[str] = Field(default_factory=list)
+    near_match_for: Optional[str] = None
 
 
 class RequirementEvidenceGroup(BaseModel):
@@ -257,6 +258,9 @@ class VerifiedEvidenceResult(BaseModel):
     
     # Diagnostics & Observability
     warnings: List[str] = Field(default_factory=list)
+    # 'cheapest / most expensive' was ranked over candidates NOT resolved to a product family or size,
+    # so no catalogue-wide superlative may be claimed (the reply must stay scoped / ask).
+    price_ranking_unscoped: bool = False
     fusion_duration_ms: float = 0.0
     rechecks_performed: int = 0
     duplicates_removed: int = 0

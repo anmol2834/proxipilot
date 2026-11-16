@@ -295,6 +295,7 @@ class OutboundEmailDeliveryService:
                     thread_id=thread.external_thread_id,
                     in_reply_to_header=in_reply_to,
                     references_header=references,
+                    auto_submitted=True,   # automatic AI reply (human-approved sends are not marked)
                 )
             except Exception as send_err:
                 logger.error(

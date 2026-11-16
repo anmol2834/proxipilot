@@ -292,6 +292,12 @@ class MinimalEvidencePackage(BaseModel):
     novelty_verified: bool = Field(default=False)
     # Item the customer selected earlier in the conversation (title), if any.
     active_selection_title: Optional[str] = None
+    # Requested identifiers that do not exist, with the closest existing codes offered as
+    # suggestions: [{"requested": "X", "suggestions": ["code - title", ...]}]
+    unknown_identifiers: List[Dict[str, Any]] = Field(default_factory=list)
+    # 'cheapest / most expensive' was ranked over candidates NOT resolved to a product family or size,
+    # so no catalogue-wide superlative may be claimed (the reply must stay scoped / ask).
+    price_ranking_unscoped: bool = False
 
     # Budget & Observability
     budget_metrics: PackageBudgetMetrics = Field(default_factory=PackageBudgetMetrics)

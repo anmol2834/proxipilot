@@ -23,7 +23,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence
+from datetime import datetime, timezone
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from sqlalchemy import text
 
@@ -43,6 +44,8 @@ class PresentedItem:
     entity_id: str
     external_key: Optional[str]
     title: str
+    presented_at: Optional[datetime] = None      # when our reply showed it
+    outbound_message_id: Optional[str] = None    # which reply showed it (one list per reply)
 
 
 @dataclass(frozen=True)
@@ -90,13 +93,42 @@ def match_presented_item(message: str, items: Sequence[PresentedItem]) -> Option
     return None
 
 
+def _as_dt(v) -> Optional[datetime]:
+    if v is None or isinstance(v, datetime):
+        return v if (v is None or v.tzinfo) else v.replace(tzinfo=timezone.utc)
+    try:
+        d = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def _sort_dt(v) -> datetime:
+    return _as_dt(v) or _EPOCH
+
+
 def resolve_selection(customer_messages: Sequence[str], items: Sequence[PresentedItem],
-                      current_requests_alternatives: bool = False) -> Optional[Selection]:
-    """Active selection across the conversation (oldest -> newest customer message)."""
+                      current_requests_alternatives: bool = False,
+                      message_times: Optional[Sequence[object]] = None) -> Optional[Selection]:
+    """Active selection across the conversation (oldest -> newest customer message).
+
+    A message can only select an item that had already been shown when it was written: the
+    customer's opening request ("all 30 litre minibars") is the question, not a choice among
+    answers that did not exist yet. ``message_times`` (same order as the messages; None for the
+    current message = now) enables that check.
+    """
     active: Optional[Selection] = None
     last = len(customer_messages) - 1
     for i, msg in enumerate(customer_messages):
-        hit = match_presented_item(msg, items)
+        visible = items
+        if message_times is not None and i < len(message_times):
+            at = _as_dt(message_times[i])
+            if at is not None:
+                visible = [it for it in items if it.presented_at is None or _sort_dt(it.presented_at) <= at]
+        hit = match_presented_item(msg, visible)
         if hit is not None:
             active = Selection(item=hit, message_index=i, named_in_current=(i == last))
     if current_requests_alternatives and (active is None or not active.named_in_current):
@@ -108,7 +140,8 @@ async def load_presented_items(db, tenant_id: str, thread_id: str, limit: int = 
     """Items already sent to the customer in this thread (tenant-scoped), newest first."""
     try:
         rows = (await db.execute(text("""
-            SELECT DISTINCT ON (entity_id) entity_id, external_identity_key, entity_title, created_at
+            SELECT DISTINCT ON (entity_id) entity_id, external_identity_key, entity_title, created_at,
+                   outbound_message_id
             FROM thread_presented_entities
             WHERE tenant_id = :t AND thread_id = :th AND coalesce(entity_title, '') <> ''
             ORDER BY entity_id, created_at DESC"""), {"t": tenant_id, "th": thread_id})).all()
@@ -116,20 +149,52 @@ async def load_presented_items(db, tenant_id: str, thread_id: str, limit: int = 
         logger.warning("selection: presented items unavailable", error=f"{type(exc).__name__}: {str(exc)[:160]}")
         return []
     rows = sorted(rows, key=lambda r: r.created_at or 0, reverse=True)[:limit]
-    return [PresentedItem(entity_id=r.entity_id, external_key=r.external_identity_key, title=r.entity_title)
+    return [PresentedItem(entity_id=r.entity_id, external_key=r.external_identity_key, title=r.entity_title,
+                          presented_at=r.created_at, outbound_message_id=r.outbound_message_id)
             for r in rows]
+
+
+# Plural back-references to what we just listed (English + common Hinglish function words; language,
+# not business vocabulary). Used as a deterministic safety net under AI #1's reference_scope.
+_BACK_REFERENCE = re.compile(
+    r"\b(these|those|them|the above|above (?:items|products|models|services|ones|options)|all of (?:them|these|those)"
+    r"|each of (?:them|these)|ye sab|yeh sab|ye sabhi|yeh sabhi|in sab|in sabhi|inke|inka|inki|unke|unka|unki)\b",
+    re.IGNORECASE,
+)
+
+
+def refers_to_listed_items(message: str) -> bool:
+    """True when the message points back at the items of our last reply ("codes of these")."""
+    return bool(_BACK_REFERENCE.search(message or ""))
+
+
+def latest_presented_list(items: Sequence[PresentedItem]) -> List[PresentedItem]:
+    """The items shown in our most recent reply that listed anything (what "these" refers to)."""
+    dated = [it for it in items if it.presented_at is not None]
+    if not dated:
+        return list(items)
+    newest = max(dated, key=lambda it: _sort_dt(it.presented_at))
+    if newest.outbound_message_id:
+        return [it for it in items if it.outbound_message_id == newest.outbound_message_id]
+    return [it for it in dated if _sort_dt(it.presented_at) == _sort_dt(newest.presented_at)]
 
 
 def customer_texts(envelope) -> List[str]:
     """Customer-written text of the thread, oldest first, current message last (quotes stripped)."""
+    return [t for t, _at in customer_messages_with_times(envelope)]
+
+
+def customer_messages_with_times(envelope) -> List[Tuple[str, Optional[str]]]:
+    """(text, sent_at) of the customer's messages, oldest first; the current message last with
+    sent_at None (it is answered now, after everything already presented)."""
     from app.services.feedback_memory import strip_quoted
 
-    msgs: List[str] = []
+    msgs: List[Tuple[str, Optional[str]]] = []
     for m in sorted(getattr(envelope, "relevant_previous_messages", None) or [], key=lambda m: m.sent_at or ""):
         if (m.direction or "").lower() == "inbound":
-            msgs.append(strip_quoted(m.body_text or "") or "")
+            msgs.append((strip_quoted(m.body_text or "") or "", m.sent_at))
     cur = getattr(envelope, "current_message", None)
-    msgs.append(strip_quoted(getattr(cur, "body_text", "") or "") or "")
+    msgs.append((strip_quoted(getattr(cur, "body_text", "") or "") or "", None))
     return msgs
 
 

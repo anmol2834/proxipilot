@@ -115,6 +115,13 @@ class TargetEntityMatcher:
             title_upper = cand.title.upper().strip()
 
             matched_target: Optional[str] = None
+            near_for = (getattr(cand, "near_match_for", None) or "").upper().strip()
+            if requested_targets_set and near_for and near_for in requested_targets_set:
+                # Closest existing code for a requested code that does not exist: kept as a labelled
+                # suggestion under its own key (it never satisfies / verifies the requested target).
+                cand.satisfied_constraints.append(f"near_code_suggestion_for_{near_for}")
+                target_candidate_map.setdefault(f"near:{cand.entity_id}", cand)
+                continue
             if requested_targets_set:
                 # Check exact key match
                 if ext_key and ext_key in requested_targets_set:

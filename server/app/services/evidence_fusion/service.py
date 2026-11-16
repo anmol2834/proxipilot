@@ -170,6 +170,7 @@ class EvidenceFusionService:
         if ctx_group is not None and ctx_overall is not None and not all_candidates:
             duration_ms = (time.perf_counter() - start_time) * 1000.0
             result = VerifiedEvidenceResult(
+                price_ranking_unscoped=bool(getattr(retrieval_result, "price_ranking_unscoped", False)),
                 schema_version="1.0",
                 fusion_id=f"fus_{uuid.uuid4().hex[:12]}",
                 verifier_version="1.0.0",
@@ -212,6 +213,10 @@ class EvidenceFusionService:
         # 3. Requirement-Aware Group Decomposition
         # ---------------------------------------------------------------------
         group_defs = self._grouper.decompose_requirements(plan=plan, envelope=envelope)
+        from app.services.retrieval_router.verifier import price_order as _price_order
+        _order = _price_order(getattr(plan.comparison, "ranking_criterion", None)) if plan else None
+        for _g in group_defs:
+            _g.price_order = _order   # 'cheapest / most expensive' survives into each group
 
         requirement_evidence_groups: List[RequirementEvidenceGroup] = []
         all_verified_facts: List[VerifiedFact] = []
@@ -314,6 +319,7 @@ class EvidenceFusionService:
 
         # Construct final versioned VerifiedEvidenceResult
         result = VerifiedEvidenceResult(
+            price_ranking_unscoped=bool(getattr(retrieval_result, "price_ranking_unscoped", False)),
             schema_version="1.0",
             fusion_id=f"fus_{uuid.uuid4().hex[:12]}",
             verifier_version="1.0.0",

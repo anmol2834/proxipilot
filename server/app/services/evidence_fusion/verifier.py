@@ -204,6 +204,20 @@ class EvidenceFactVerifier:
 
         # Sort verified candidates by composite score descending
         verified_candidates.sort(key=lambda c: c.composite_score, reverse=True)
+        order = getattr(group_def, "price_order", None) if group_def is not None else None
+        if order:
+            # "cheapest / most expensive": price decides, relevance only breaks ties (retrieval
+            # already filtered to eligible items); unpriced items go last.
+            def _p(c):
+                v = getattr(c.pricing, "calculated_total", None) if c.pricing else None
+                return float(v) if v not in (None, "") and float(v) > 0 else None
+            priced = sorted([c for c in verified_candidates if _p(c) is not None],
+                            key=lambda c: (_p(c) if order == "asc" else -_p(c), -c.composite_score))
+            verified_candidates = priced + [c for c in verified_candidates if _p(c) is None]
+
+        # Closest-code suggestions (requested code does not exist) are kept apart from the count.
+        suggestions = [c for c in verified_candidates if getattr(c, "near_match_for", None)][:3]
+        verified_candidates = [c for c in verified_candidates if not getattr(c, "near_match_for", None)]
 
         # Respect explicit count limit (if specified)
         target_limit = group.requested_count
@@ -211,6 +225,7 @@ class EvidenceFactVerifier:
             # For comparison with explicit targets, keep all verified targets!
             if group.requirement_type != RequirementType.COMPARISON:
                 verified_candidates = verified_candidates[:target_limit]
+        verified_candidates = verified_candidates + suggestions
 
         return verified_candidates, verified_facts, conflicts, warnings
 

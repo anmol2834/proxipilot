@@ -86,6 +86,8 @@ _REL_RE = re.compile(
     r"([A-Z0-9][A-Z0-9\-/]{2,})", re.IGNORECASE)
 _MODEL_CODE_RE = re.compile(r"\b(?=[A-Z0-9\-/]*\d)(?=[A-Z0-9\-/]*[A-Z])[A-Z0-9][A-Z0-9\-/]{3,}\b")
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
+# "30-LITER", "40LTR", "800-ML", "0NLY" (a typo of "only") are quantities / words, not model codes.
+_QUANTITY_LIKE_RE = re.compile(r"^[0-9]+(?:[.,][0-9]+)?[\s\-_/]?[A-Z]{1,6}$", re.IGNORECASE)
 
 
 def singular(tok: str) -> str:
@@ -277,6 +279,15 @@ class MinConstraint:
 
 
 @dataclass
+class NominalConstraint:
+    """A size the customer asked for ("30 liter") or ruled out ("not 40 liter"), same kind."""
+    kind: str                     # volume | weight | power
+    wanted: List[float]           # acceptable nominal values (base unit)
+    excluded: List[float]         # values the customer explicitly ruled out
+    original: str
+
+
+@dataclass
 class RequestSpec:
     wanted_roles: Optional[Set[ProductRole]]          # None = no role gate
     families: List[FamilyEntry]                       # resolved from tenant vocabulary (hard)
@@ -286,10 +297,14 @@ class RequestSpec:
     min_constraints: List[MinConstraint]              # hard: >= value of same kind
     exact_keys: Set[str]
     request_text: str = ""
+    nominal: List[NominalConstraint] = field(default_factory=list)   # hard: same-kind size must match
+    # closest EXISTING codes offered for a requested code that does not exist (labelled suggestions)
+    suggestion_keys: Set[str] = field(default_factory=set)
 
     @property
     def active(self) -> bool:
-        return bool(self.wanted_roles or self.families or self.target_models or self.length_mm or self.min_constraints)
+        return bool(self.wanted_roles or self.families or self.target_models or self.length_mm
+                    or self.min_constraints or self.nominal)
 
 
 _SELLABLE_INTENTS = {
@@ -317,7 +332,8 @@ def build_request_spec(plan: Any, vocab: Optional[TenantVocabulary]) -> RequestS
     exact = {e.canonical_value.upper().strip() for e in getattr(plan, "entities", None) or []
              if getattr(e, "entity_type", "") in ("sku", "service_code", "product_code", "model_number")
              and getattr(e, "canonical_value", None)}
-    codes = {m.group(0).upper() for m in _MODEL_CODE_RE.finditer(text.upper())}
+    codes = {m.group(0).upper() for m in _MODEL_CODE_RE.finditer(text.upper())
+             if not _QUANTITY_LIKE_RE.match(m.group(0))}
     exact |= codes
 
     # requested role
@@ -352,18 +368,21 @@ def build_request_spec(plan: Any, vocab: Optional[TenantVocabulary]) -> RequestS
     # requested family (tenant vocabulary, token containment, most specific wins)
     families: List[FamilyEntry] = []
     if vocab:
-        matched = [f for f in vocab.families if f.tokens and f.tokens <= req_tokens]
+        req_compounds = req_tokens | _adjacent_compounds(text)
+        matched = [f for f in vocab.families
+                   if f.tokens and (f.tokens <= req_tokens or _family_compound(f.label) in req_compounds)]
         # drop a family whose tokens are a strict subset of another matched family
         families = [f for f in matched if not any(f.tokens < g.tokens for g in matched)]
     fam_tokens: Set[str] = set().union(*(f.tokens for f in families)) if families else set()
 
     qs = parse_quantities(text)
+    nominal = _nominal_constraints(text, qs)
     length = next((q for q in qs if q.kind == "length"), None)
     mins = [MinConstraint(kind=q.kind, hint=q.context, value=q.value, original=q.original)
             for q in qs if q.kind in ("data_size",) and q.context]
     return RequestSpec(wanted_roles=wanted, families=families, family_tokens=fam_tokens,
                        target_models=target_models, length_mm=length, min_constraints=mins,
-                       exact_keys=exact, request_text=text)
+                       exact_keys=exact, request_text=text, nominal=nominal)
 
 
 # ---------------------------------------------------------------------------
@@ -446,6 +465,25 @@ def evaluate(canonical: Optional[Dict[str, Any]], title: Optional[str], external
             else:
                 el.satisfied.append(f"{c.hint}_{best:g}_meets_{c.value:g}")
 
+    # nominal sizes ("30 liter", not "40 liter"): a record stating a different size of the same kind
+    # is not what was asked for; a record that states no size stays, flagged unverified.
+    if spec.nominal and el.eligible:
+        hay = f"{title or ''} {_attr_text(cd)}"
+        found = parse_quantities(hay)
+        for nc in spec.nominal:
+            vals = [q.value for q in found if q.kind == nc.kind]
+            if not vals:
+                el.notes.append(f"{nc.original} not stated in the catalogue record; unverified")
+                continue
+            if any(_close(v, x) for v in vals for x in nc.excluded):
+                el.eligible = False
+                el.unmet.append(f"{nc.kind}_excluded_by_customer")
+            elif nc.wanted and not any(_close(v, w) for v in vals for w in nc.wanted):
+                el.eligible = False
+                el.unmet.append(f"{nc.kind}_{vals[0]:g}_not_requested")
+            else:
+                el.satisfied.append(f"{nc.kind}_matches_{nc.original.replace(' ', '')}")
+
     # length: soft preference with an explicit fit note — never a hard filter
     if spec.length_mm is not None and el.eligible:
         pl = primary_length_mm(title or "") or primary_length_mm(_attr_text(cd))
@@ -457,3 +495,59 @@ def evaluate(canonical: Optional[Dict[str, Any]], title: Optional[str], external
         else:
             el.notes.append(f"size for the requested {spec.length_mm.original} is not stated; confirm before ordering")
     return el
+
+
+# ---------------------------------------------------------------------------
+# Helpers: compound family names and nominal size constraints
+# ---------------------------------------------------------------------------
+
+_NOMINAL_KINDS = ("volume", "weight", "power")
+# Negation around a quantity, within its own clause. English negates before the quantity
+# ("do not send any 40 liter"); Hindi / Hinglish after it ("40 liter nahi", "40 liter wala mat bhejo").
+_CLAUSE_BREAK = re.compile(r"[,.;!?]|\b(?:and|but|aur|lekin|par)\b", re.IGNORECASE)
+_NEGATION_BEFORE = re.compile(
+    r"\b(?:no|not|don'?t|do not|never|except|excluding|exclude|without|other than|instead of)\b",
+    re.IGNORECASE,
+)
+_NEGATION_AFTER = re.compile(r"^\W*(?:\w+\W+)?(?:nahi|nahin|nahi chahiye|mat|not)\b", re.IGNORECASE)
+
+
+def _close(a: float, b: float) -> bool:
+    return abs(a - b) <= max(1e-9, 0.02 * max(abs(a), abs(b)))
+
+
+def _family_compound(label: str) -> str:
+    """'Mini Bar' -> 'minibar' (singular), so 'minibars' in a request names the family."""
+    return singular("".join(_TOKEN_RE.findall((label or "").lower())))
+
+
+def _adjacent_compounds(text: str) -> Set[str]:
+    """Adjacent request words joined ('mini bar' -> 'minibar'), for one-word family names."""
+    words = _TOKEN_RE.findall((text or "").lower())
+    return {singular(a + b) for a, b in zip(words, words[1:]) if a.isalpha() and b.isalpha()}
+
+
+def _nominal_constraints(text: str, qs: List[Quantity]) -> List[NominalConstraint]:
+    """Requested / ruled-out sizes per kind ('30 liter only, not 40 liter')."""
+    by_kind: Dict[str, NominalConstraint] = {}
+    low = text or ""
+    for q in qs:
+        if q.kind not in _NOMINAL_KINDS:
+            continue
+        idx = low.lower().find(q.original.lower())
+        before = low[max(0, idx - 60):idx] if idx >= 0 else ""
+        breaks = list(_CLAUSE_BREAK.finditer(before))
+        if breaks:
+            before = before[breaks[-1].end():]
+        after = low[idx + len(q.original):idx + len(q.original) + 30] if idx >= 0 else ""
+        negated = bool(_NEGATION_BEFORE.search(before) or _NEGATION_AFTER.search(after))
+        c = by_kind.setdefault(q.kind, NominalConstraint(kind=q.kind, wanted=[], excluded=[], original=q.original))
+        target = c.excluded if negated else c.wanted
+        if not any(_close(q.value, v) for v in target):
+            target.append(q.value)
+    # a value both wanted and excluded (repeated in different clauses) counts as excluded
+    for c in by_kind.values():
+        c.wanted = [w for w in c.wanted if not any(_close(w, x) for x in c.excluded)]
+        if c.wanted:
+            c.original = " / ".join(f"{w:g}" for w in c.wanted)
+    return [c for c in by_kind.values() if c.wanted or c.excluded]

@@ -362,7 +362,8 @@ class ReplyDrafter:
             "Minimal Evidence Package.\n\n"
             "STRICT RULES:\n"
             "1. NO INTERNAL IDENTIFIERS IN CUSTOMER TEXT:\n"
-            "   - NEVER include internal system identifiers (such as '(Fact: ...)', '(Signal: ...)', 'FactID', 'SignalID', 'fct_...', 'sig_...', or internal SKU codes alone like 'HA-001') in customer-facing body_text or body_html.\n"
+            "   - NEVER include internal system identifiers (such as '(Fact: ...)', '(Signal: ...)', 'FactID', 'SignalID', 'fct_...', 'sig_...', 'ki_...', 'kv_...') in customer-facing body_text or body_html.\n"
+            "   - Catalogue product / service codes (the [Code: ...] values) ARE customer-facing: ALWAYS give each item's code when the customer asks for codes or refers to items by code, and write it exactly as in the evidence. Never write a code that is not in the evidence.\n"
             "   - Fact IDs and Signal IDs belong EXCLUSIVELY in the JSON 'claims' metadata array for backend audit verification.\n"
             "   - The body_text and body_html MUST read as 100% natural, human-written executive correspondence.\n"
             "2. NO INTERNAL DATABASE SCHEMA DISCLOSURES:\n"
@@ -460,6 +461,25 @@ class ReplyDrafter:
             f"BOOKING_CONFIRMED: {package.action_context.booking_confirmed}",
             f"STRATEGY: {package.action_context.safe_response_strategy}",
         ]
+
+        if getattr(package, "price_ranking_unscoped", False):
+            prompt_parts.append(
+                "PRICE RANKING SCOPE: the customer asked for the cheapest / most expensive item, but the request "
+                "did not identify a specific product type, so the evidence is only a sample of the catalogue. Do NOT "
+                "claim any item is the cheapest / most affordable / most expensive in the catalogue. Present the "
+                "options as examples with their prices and ask which type of product they want."
+            )
+
+        for unk in package.unknown_identifiers or []:
+            sugg = "; ".join(unk.get("suggestions") or [])
+            prompt_parts.append(
+                f"REQUESTED CODE NOT IN CATALOGUE: {unk.get('requested')} does not exist in this business's "
+                "catalogue. Say so plainly. "
+                + (f"Closest existing codes (offer them ONLY as 'did you mean' suggestions, each with its OWN "
+                   f"verified name and price from the evidence; never attribute their details to "
+                   f"{unk.get('requested')}): {sugg}. " if sugg else "No similar code exists; ask the customer "
+                   "to re-check the code or describe the product. ")
+            )
 
         if package.active_selection_title and not package.is_continuation:
             prompt_parts.append(

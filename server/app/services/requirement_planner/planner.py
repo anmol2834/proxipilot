@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 import json
 import random
 import time
-from typing import Any, Dict, List, Optional, Tuple, cast
+from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
 
 import httpx
 from openai import AsyncOpenAI
@@ -158,6 +158,24 @@ OPENAI_PLANNER_JSON_SCHEMA: Dict[str, Any] = {
                 "items": {"type": "string"},
                 "description": "Retriever guidance hints (e.g. exact_sku, semantic_filter)",
             },
+            "reference_scope": {
+                "type": "string",
+                "enum": ["new_request", "selected_item", "listed_items", "none"],
+                "description": (
+                    "What the current message is about: new_request = something not yet discussed or a "
+                    "catalogue-wide question; selected_item = a follow-up on ONE item already chosen; "
+                    "listed_items = the items our last reply listed ('these', 'them', 'above'); none = no item"
+                ),
+            },
+            "referenced_item_codes": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Codes (from the shown-items list ONLY) the message refers to; empty when none",
+            },
+            "wants_all_matching": {
+                "type": "boolean",
+                "description": "True when the customer asks for ALL items of a kind (every matching item, not a sample)",
+            },
             "search_requirements": {
                 "type": "array",
                 "description": (
@@ -214,12 +232,35 @@ OPENAI_PLANNER_JSON_SCHEMA: Dict[str, Any] = {
             "clarification_reason",
             "semantic_search_query",
             "retrieval_hints",
+            "reference_scope",
+            "referenced_item_codes",
+            "wants_all_matching",
             "search_requirements",
             "confidence",
         ],
         "additionalProperties": False,
     },
 }
+
+
+CONVERSATION_REFERENCE_INSTRUCTIONS = (
+    "CONVERSATION REFERENCE (fields 'reference_scope', 'referenced_item_codes', 'wants_all_matching'):\n"
+    "Decide what the CURRENT message is about, using the shown-items list in the user prompt:\n"
+    "  * listed_items: it asks about the items we already listed ('these', 'them', 'the above', 'all of "
+    "these', 'ye sab', 'inka code') - e.g. their codes, prices or details. Put every referenced code in "
+    "referenced_item_codes (all of our most recent list when it says 'these/all of them'; only the "
+    "matching ones when it narrows them, e.g. 'the ones in size X'). This is NOT more_options: never exclude them.\n"
+    "  * selected_item: a follow-up about ONE item the customer already chose (ordering, quantity, "
+    "discount, warranty, delivery of it). Put its code in referenced_item_codes.\n"
+    "  * new_request: it names a code or product not in the list, asks a catalogue-wide question "
+    "(cheapest / most affordable / all X / which products do you have), or changes the subject. "
+    "Earlier choices must NOT restrict it.\n"
+    "  * none: greetings, thanks, or no item involved.\n"
+    "Only use codes that appear in the shown-items list; never invent a code.\n"
+    "ranking_criterion: 'price_asc' when the customer wants the cheapest / lowest-priced / most affordable item(s), 'price_desc' for the most expensive / premium; otherwise null.\n"
+    "wants_all_matching: true when the customer wants ALL items that match (e.g. 'prices of all "
+    "<kind> in size X', 'every model you have'), so the reply lists every match instead of a sample.\n"
+)
 
 
 SEMANTIC_EXPANSION_INSTRUCTIONS = (
@@ -283,6 +324,8 @@ class OpenAIStructuredPlanner:
         preprocessed: PreprocessedEmail,
         catalogue: RetrievalCapabilityCatalogue,
         taxonomy: Optional[BusinessTaxonomy] = None,
+        presented: Optional[Sequence[Any]] = None,
+        selected: Optional[Any] = None,
     ) -> Tuple[PlannerProposalDTO, bool, Dict[str, Any]]:
         """Interpret customer intent and produce a structured proposal.
 
@@ -314,6 +357,8 @@ class OpenAIStructuredPlanner:
             preprocessed=preprocessed,
             catalogue=catalogue,
             taxonomy=taxonomy,
+            presented=presented,
+            selected=selected,
         )
         duration_ms = (time.perf_counter() - start_t) * 1000.0
         metrics["planner_duration_ms"] = duration_ms
@@ -487,6 +532,8 @@ class OpenAIStructuredPlanner:
         preprocessed: PreprocessedEmail,
         catalogue: RetrievalCapabilityCatalogue,
         taxonomy: Optional[BusinessTaxonomy] = None,
+        presented: Optional[Sequence[Any]] = None,
+        selected: Optional[Any] = None,
     ) -> Tuple[PlannerProposalDTO, Dict[str, Any]]:
         """Invoke OpenAI API with strict JSON schema and exponential backoff with jitter."""
         client = self._get_client()
@@ -501,7 +548,7 @@ class OpenAIStructuredPlanner:
             }
 
         system_prompt = self._build_system_prompt(catalogue, taxonomy)
-        user_prompt = self._build_user_prompt(envelope, preprocessed)
+        user_prompt = self._build_user_prompt(envelope, preprocessed, presented=presented, selected=selected)
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -603,13 +650,21 @@ class OpenAIStructuredPlanner:
             "  * Inherit the active product/service category and constraints from previous conversation.\n"
             "  * Do NOT classify continuation requests as 'unknown'.\n"
             "  * Do NOT set 'clarification_needed: true' for standard continuation requests.\n"
+            "  * A question ABOUT the items already listed (their codes, prices, details) is NOT a continuation request.\n"
             "  * The system automatically excludes previously presented options to retrieve distinct new alternatives.\n\n"
+            f"{CONVERSATION_REFERENCE_INSTRUCTIONS}\n"
             f"{SEMANTIC_EXPANSION_INSTRUCTIONS}\n"
             f"{business_context}"
             f"{compact_catalogue}\n"
         )
 
-    def _build_user_prompt(self, envelope: ContextEnvelope, preprocessed: PreprocessedEmail) -> str:
+    def _build_user_prompt(
+        self,
+        envelope: ContextEnvelope,
+        preprocessed: PreprocessedEmail,
+        presented: Optional[Sequence[Any]] = None,
+        selected: Optional[Any] = None,
+    ) -> str:
         """Construct bounded user prompt incorporating current message and recent thread context."""
         curr_msg = envelope.current_message
         lines: List[str] = [
@@ -622,9 +677,24 @@ class OpenAIStructuredPlanner:
             "",
         ]
 
-        if envelope.previously_presented_entity_ids:
-            lines.append("=== Previously Presented Options in this Conversation (To Exclude) ===")
-            lines.append(f"Items already sent to customer: {', '.join(envelope.previously_presented_entity_ids[:25])}")
+        if presented:
+            from app.services.conversation_selection import latest_presented_list
+
+            latest = latest_presented_list(presented)
+            latest_ids = {it.entity_id for it in latest}
+            earlier = [it for it in presented if it.entity_id not in latest_ids]
+            lines.append("=== Items shown to the customer in our replies (for reference resolution) ===")
+            lines.append("Our most recent list:")
+            lines.extend(f"- {it.external_key or '(no code)'}: {it.title}" for it in latest[:25])
+            if earlier:
+                lines.append("Shown earlier:")
+                lines.extend(f"- {it.external_key or '(no code)'}: {it.title}" for it in earlier[:20])
+            if selected is not None:
+                lines.append(f"Item the customer chose earlier: {selected.external_key or ''} {selected.title}")
+            lines.append("")
+        elif envelope.previously_presented_entity_ids:
+            lines.append("=== Items already sent to the customer ===")
+            lines.append(f"{', '.join(envelope.previously_presented_entity_ids[:25])}")
             lines.append("")
 
         if envelope.relevant_previous_messages:

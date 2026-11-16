@@ -225,3 +225,38 @@ def test_role_word_only_restricts_to_roles_the_tenant_has():
     # Unknown roles (empty set) never rule anything out: previous behaviour.
     unknown = TenantVocabulary(families=[], brand_tokens=frozenset())
     assert ProductRole.PART in build_request_spec(_plan("spare parts for my hand dryer"), unknown).wanted_roles
+
+
+# ---------------------------------------------------------------------------
+# QA 2026-11-16: compound family names and nominal size constraints (generic; synthetic data)
+# ---------------------------------------------------------------------------
+
+def test_compound_word_names_a_two_word_family():
+    vocab = _vocab("Ice Box", "Wall Clock", "Bucket")
+    spec = build_request_spec(_plan("price of all icebox units"), vocab)
+    assert [f.label for f in spec.families] == ["Ice Box"]
+    # and the reverse: two request words naming a one-word family
+    spec2 = build_request_spec(_plan("need a wall clock"), _vocab("Wallclock", "Bucket"))
+    assert [f.label for f in spec2.families] == ["Wallclock"]
+
+
+def test_requested_size_is_hard_and_negated_size_excluded():
+    vocab = _vocab("Ice Box")
+    spec = build_request_spec(_plan("cheapest 30 liter ice box only, do not send any 40 liter model"), vocab)
+    ok = evaluate(*_row("Ice Box Glass Door 30 LTR", "Ice Box", "Finish Goods"), None, spec)
+    other = evaluate(*_row("Ice Box Solid Door 40 LTR", "Ice Box", "Finish Goods"), None, spec)
+    unstated = evaluate(*_row("Ice Box Classic", "Ice Box", "Finish Goods"), None, spec)
+    assert ok.eligible and not other.eligible and unstated.eligible
+    assert any("unverified" in n for n in unstated.notes)
+
+
+def test_hinglish_post_negation():
+    spec = build_request_spec(_plan("40 liter wala nahi chahiye, 30 liter dikhao"), _vocab("Ice Box"))
+    (c,) = spec.nominal
+    assert c.wanted == [30000.0] and c.excluded == [40000.0]
+
+
+def test_sizes_never_gate_a_request_without_sizes():
+    spec = build_request_spec(_plan("ice box price"), _vocab("Ice Box"))
+    assert spec.nominal == []
+    assert evaluate(*_row("Ice Box Solid Door 40 LTR", "Ice Box", "Finish Goods"), None, spec).eligible

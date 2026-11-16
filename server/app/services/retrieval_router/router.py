@@ -164,15 +164,18 @@ class RetrievalRouter:
         from app.contracts.requirement_plan import PlannedEntity
 
         sel = plan.active_selection or {}
-        key = (sel.get("external_key") or "").strip()
         title = (sel.get("title") or "").strip()
+        keys = [k.strip() for k in (plan.focus_keys or [sel.get("external_key") or ""]) if k and k.strip()]
         focus = set(plan.focus_entity_ids)
+        count = max(len(focus), 1)
         sub = plan.model_copy(update={
             "intent": IntentType.PRODUCT_LOOKUP,
             "query_text": title or plan.query_text,
-            "entities": [PlannedEntity(entity_type="sku", original_text=key, canonical_value=key)] if key else [],
+            "entities": [PlannedEntity(entity_type="sku", original_text=k, canonical_value=k) for k in keys],
             "filters": [], "range_semantics": None, "requirements": [], "excluded_entity_ids": [],
-            "focus_entity_ids": [], "semantic_expansions": [],
+            "focus_entity_ids": [], "focus_keys": [], "semantic_expansions": [],
+            "requested_result_count": plan.requested_result_count.model_copy(
+                update={"final_count": max(count, plan.requested_result_count.final_count or 1)}),
         })
         async with db_manager.session_factory() as f_db:
             res = await self._execute_single(f_db, tenant_id, sub, envelope, as_of)
@@ -194,8 +197,8 @@ class RetrievalRouter:
             results += [i for i in extra.results if i.entity_id not in seen
                         and any(cat_of.get(rid) == i.category for rid in (i.requirement_ids or []))]
             warnings += [w for w in extra.warnings if w not in warnings]
-        logger.info("Focused retrieval for selected item", tenant_id=tenant_id, plan_id=plan.plan_id,
-                    selected=title[:80], other_requirements=len(other), results=len(results))
+        logger.info("Focused retrieval for selected item(s)", tenant_id=tenant_id, plan_id=plan.plan_id,
+                    selected=title[:80], focus=len(focus), other_requirements=len(other), results=len(results))
         return res.model_copy(update={
             "status": RetrievalStatus.SUCCESS, "results": results, "warnings": warnings,
             "plan_reference": res.plan_reference.model_copy(update={"plan_id": plan.plan_id}),
@@ -410,6 +413,39 @@ class RetrievalRouter:
                 eligibility_spec = None
         # item_id -> (origin, relevance) for structured candidates (see verifier)
         structured_origin: Dict[str, Tuple[str, float]] = {}
+        # item_id -> requested code it approximates (the requested code itself does not exist)
+        near_for: Dict[str, str] = {}
+
+        async def _near_matches(found: List[Tuple[KnowledgeItem, KnowledgeVersion]]):
+            """Closest existing codes for requested codes that do not exist (suggestions only)."""
+            fetch = getattr(self._structured_retriever, "fetch_near_keys", None)
+            if fetch is None:
+                return []
+            have = {(it.external_identity_key or "").upper() for it, _v in found}
+            seen_ids = {it.id for it, _v in found}
+            extra: List[Tuple[KnowledgeItem, KnowledgeVersion]] = []
+            for missing in [k for k in exact_keys if k not in have]:
+                try:
+                    near = await fetch(db=db, tenant_id=tenant_id, key=missing, as_of=as_of)
+                except Exception as err:  # noqa: BLE001 - suggestions are optional
+                    logger.warning("Near-code lookup failed", key=missing, error=str(err)[:160])
+                    continue
+                for it, ver in near:
+                    if it.id in seen_ids:
+                        continue
+                    seen_ids.add(it.id)
+                    extra.append((it, ver))
+                    near_for[it.id] = missing
+                    structured_origin[it.id] = ("near_key", 0.5)
+                    if eligibility_spec is not None:
+                        # a suggestion must not be filtered out by the role / family gates
+                        eligibility_spec.exact_keys.add((it.external_identity_key or "").upper())
+                        eligibility_spec.suggestion_keys.add((it.external_identity_key or "").upper())
+            if extra:
+                logger.info("Requested code(s) not found; suggesting closest existing codes",
+                            tenant_id=tenant_id, missing=[k for k in exact_keys if k not in have],
+                            suggestions=[it.external_identity_key for it, _v in extra])
+            return extra
         result_count = plan.requested_result_count.final_count or 5
         # Wider candidate pool when eligibility filtering will remove ineligible items.
         candidate_pool = max(result_count * 4, 20) if eligibility_spec is not None and eligibility_spec.active else result_count
@@ -476,6 +512,11 @@ class RetrievalRouter:
                                 seen_keys.add(k)
                                 merged_results.append((it, ver))
                                 structured_origin[it.id] = ("exact_key", 1.0)
+                        for it, ver in await _near_matches(exact_items):
+                            k = f"{it.id}_{ver.id}"
+                            if k not in seen_keys:
+                                seen_keys.add(k)
+                                merged_results.append((it, ver))
 
                     # 3. Fetch each distinct category represented in requirements
                     categories_to_fetch = set()
@@ -539,6 +580,7 @@ class RetrievalRouter:
                     has_more_structured = False
                     for it, _ in structured_results:
                         structured_origin[it.id] = ("exact_key", 1.0)
+                    structured_results = list(structured_results) + await _near_matches(structured_results)
                 else:
                     # Category listing with no relevance ordering. Only authoritative when
                     # the customer constrained it (filters / price range); otherwise it is
@@ -782,11 +824,19 @@ class RetrievalRouter:
         # ---------------------------------------------------------------------
         # 4. Authoritative Verification, Fact Checking & Ranking
         # ---------------------------------------------------------------------
+        verify_plan = plan
+        if near_for:
+            # room for the requested items plus up to 3 closest-code suggestions per missing code
+            need = len(exact_keys) + len(near_for)
+            if need > (plan.requested_result_count.final_count or 0):
+                verify_plan = plan.model_copy(update={"requested_result_count": plan.requested_result_count.model_copy(
+                    update={"final_count": min(need, plan.requested_result_count.max_safe_limit)})})
+
         async def _verify(verify_db):
             return await self._verifier.verify_and_rank(
                 db=verify_db,
                 tenant_id=tenant_id,
-                plan=plan,
+                plan=verify_plan,
                 structured_candidates=structured_results,
                 semantic_candidates=semantic_results,
                 has_more_structured=has_more_structured,
@@ -824,6 +874,13 @@ class RetrievalRouter:
             retrieval_status,
             warnings,
         ) = verified
+        if near_for:
+            final_evidence = [i.model_copy(update={"near_match_for": near_for[i.entity_id]})
+                              if i.entity_id in near_for else i for i in final_evidence]
+            missing_codes = sorted(set(near_for.values()))
+            warnings = list(warnings) + [
+                f"Requested code {c} does not exist in the catalogue; closest existing codes are suggestions only."
+                for c in missing_codes]
 
         total_duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
 
@@ -855,7 +912,12 @@ class RetrievalRouter:
             context_revision=plan.context_revision,
         )
 
+        from app.services.retrieval_router.verifier import price_order as _price_order
+        unscoped = bool(_price_order(getattr(plan.comparison, "ranking_criterion", None))) and not (
+            eligibility_spec is not None and (eligibility_spec.families or eligibility_spec.nominal
+                                              or eligibility_spec.exact_keys or plan.focus_entity_ids))
         result = RetrievalResult(
+            price_ranking_unscoped=unscoped,
             schema_version="1.0",
             status=retrieval_status,
             plan_reference=plan_ref,
