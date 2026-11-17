@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { Conversation } from "@/types/inbox.types";
+import { copilotService, draftRevision, type CopilotResult } from "@/services/copilot.service";
 import {
   IconSparkles,
   IconX,
@@ -15,6 +16,10 @@ import {
   IconChevronUp,
   IconArrowUp,
   IconTrash,
+  IconArrowBackUp,
+  IconAlertTriangle,
+  IconDatabase,
+  IconPlayerStop,
 } from "@tabler/icons-react";
 
 export interface IsolatedAiPromptBoxProps {
@@ -31,7 +36,18 @@ interface ChatMessage {
   content: string;
   timestamp: string;
   applied?: boolean;
+  /** Backend result for assistant messages (absent for errors / cancellations). */
+  result?: CopilotResult;
+  error?: boolean;
 }
+
+const OPERATION_LABEL: Record<string, string> = {
+  WRITING_ONLY: "Writing only",
+  EVIDENCE_REUSE: "Reused conversation facts",
+  NEW_RETRIEVAL: "Knowledge search",
+  MIXED: "Writing + knowledge",
+  CLARIFY: "Needs clarification",
+};
 
 interface PresetAction {
   id: string;
@@ -53,6 +69,10 @@ export function IsolatedAiPromptBox({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [showOriginalDraft, setShowOriginalDraft] = useState(false);
   const [appliedToast, setAppliedToast] = useState(false);
+  const [conflictId, setConflictId] = useState<string | null>(null);
+  // Editor texts replaced by Copilot applies (most recent last) for Undo.
+  const [undoStack, setUndoStack] = useState<string[]>([]);
+  const abortRef = useRef<AbortController | null>(null);
 
   const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -87,12 +107,16 @@ export function IsolatedAiPromptBox({
 
   // Reset chat feed when active conversation switches
   useEffect(() => {
+    abortRef.current?.abort();
     setMessages([]);
     setCustomPrompt("");
     setAppliedToast(false);
+    setConflictId(null);
+    setUndoStack([]);
   }, [conversation?.id]);
 
-  const recipientName = conversation?.sender?.name || "Customer";
+  // Cancel an in-flight request when the panel unmounts.
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   const presetActions: PresetAction[] = [
     {
@@ -121,65 +145,75 @@ export function IsolatedAiPromptBox({
     },
   ];
 
-  const triggerGeneration = (promptText: string, presetId?: string) => {
-    const userMsgId = `user-${Date.now()}`;
-    const newMessages: ChatMessage[] = [
-      ...messages,
-      {
-        id: userMsgId,
-        role: "user",
-        content: promptText,
-        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      },
-    ];
-    setMessages(newMessages);
+  const now = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+  const triggerGeneration = async (promptText: string) => {
+    if (!conversation || isGenerating) return;
+    const instruction = promptText.trim();
+    if (!instruction) return;
+    const baseDraft = currentDraft;
+    const history = messages
+      .filter((m) => m.role === "user")
+      .slice(-5)
+      .map((m) => ({ instruction: m.content, applied: false }));
+    setMessages((prev) => [...prev, { id: `user-${Date.now()}`, role: "user", content: instruction, timestamp: now() }]);
     setCustomPrompt("");
+    setConflictId(null);
     setIsGenerating(true);
-
-    setTimeout(() => {
-      let resultText = "";
-      const baseGreeting = `Hi ${recipientName.split(" ")[0] || recipientName},`;
-      const signOff = `\n\nBest regards,\nDolphy Support Team`;
-
-      const lower = promptText.toLowerCase();
-
-      if (presetId === "concise" || lower.includes("concise") || lower.includes("short")) {
-        resultText = `${baseGreeting}\n\nThank you for reaching out. It looks like the PO wasn't attached to your email. Could you please re-attach it and confirm the product specifications for code DSDR0099 so we can provide exact pricing right away?${signOff}`;
-      } else if (presetId === "missing_po" || lower.includes("po") || lower.includes("attach")) {
-        resultText = `${baseGreeting}\n\nWe received your request regarding product code DSDR0099. However, the purchase order (PO) mentioned was not attached to your message.\n\nCould you kindly re-send the attachment? Additionally, please verify the product code or share brief specifications so we can ensure you receive the accurate catalogue pricing and stock availability.${signOff}`;
-      } else if (presetId === "warm" || lower.includes("warm") || lower.includes("friendly")) {
-        resultText = `${baseGreeting}\n\nThanks so much for reaching out to us! We are very glad to assist you.\n\nIt seems the PO did not come through with your email. If you could kindly attach it here and let us know what specific features you need for product DSDR0099, we'll gladly prepare the best available pricing for you right away.${signOff}`;
-      } else if (presetId === "professional" || lower.includes("professional") || lower.includes("formal")) {
-        resultText = `${baseGreeting}\n\nThank you for contacting us regarding your product requirements.\n\nPlease note that the purchase order referenced in your inquiry was not attached. Furthermore, we would appreciate it if you could verify the product code DSDR0099 against your specifications so we may provide the formal quotation accordingly.\n\nWe look forward to your response.${signOff}`;
-      } else {
-        resultText = `${baseGreeting}\n\nThank you for your message. Per your note (${promptText.trim()}):\n\nPlease note the purchase order appears to be missing from the attachment list. Kindly re-attach the document along with the required specifications for DSDR0099, and our team will immediately issue an updated quotation.${signOff}`;
-      }
-
-      const asstMsgId = `asst-${Date.now()}`;
+    const ac = new AbortController();
+    abortRef.current = ac;
+    try {
+      const res = await copilotService.refine(
+        conversation.id,
+        { instruction, draft_text: baseDraft, draft_revision: draftRevision(baseDraft), history },
+        ac.signal
+      );
+      const content = res.operation === "CLARIFY" ? res.clarification_question || "" : res.proposal;
+      setMessages((prev) => [
+        ...prev,
+        { id: `asst-${res.request_id}`, role: "assistant", content, timestamp: now(), result: res },
+      ]);
+    } catch (err) {
+      const cancelled = ac.signal.aborted;
+      const detail = err instanceof Error && err.message ? err.message : "Copilot could not complete this request.";
       setMessages((prev) => [
         ...prev,
         {
-          id: asstMsgId,
+          id: `err-${Date.now()}`,
           role: "assistant",
-          content: resultText,
-          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          content: cancelled ? "Cancelled. Your draft is unchanged." : `${detail} Your draft is unchanged.`,
+          timestamp: now(),
+          error: true,
         },
       ]);
+    } finally {
+      if (abortRef.current === ac) abortRef.current = null;
       setIsGenerating(false);
-    }, 850);
+    }
   };
+
+  const handleCancel = () => abortRef.current?.abort();
 
   const handleRunPreset = (preset: PresetAction) => {
     if (isGenerating) return;
-    triggerGeneration(preset.prompt, preset.id);
+    void triggerGeneration(preset.prompt);
   };
 
   const handleRunCustomPrompt = () => {
     if (!customPrompt.trim() || isGenerating) return;
-    triggerGeneration(customPrompt);
+    void triggerGeneration(customPrompt);
   };
 
-  const handleApplyMessage = (msgId: string, content: string) => {
+  const handleApplyMessage = (msgId: string, content: string, force = false) => {
+    const msg = messages.find((m) => m.id === msgId);
+    if (!msg?.result || !msg.result.apply_allowed || !content.trim()) return;
+    // Optimistic concurrency: never replace editor text that changed after the proposal was requested.
+    if (!force && draftRevision(currentDraft) !== msg.result.base_draft_revision) {
+      setConflictId(msgId);
+      return;
+    }
+    setConflictId(null);
+    setUndoStack((prev) => [...prev, currentDraft].slice(-10));
     onApplyDraft(content);
     setMessages((prev) =>
       prev.map((m) => (m.id === msgId ? { ...m, applied: true } : m))
@@ -196,9 +230,24 @@ export function IsolatedAiPromptBox({
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  const handleUndo = () => {
+    if (!undoStack.length) return;
+    const previous = undoStack[undoStack.length - 1];
+    setUndoStack(undoStack.slice(0, -1));
+    onApplyDraft(previous);
+  };
+
+  const instructionBefore = (msgId: string) => {
+    const idx = messages.findIndex((m) => m.id === msgId);
+    for (let i = idx - 1; i >= 0; i--) if (messages[i].role === "user") return messages[i].content;
+    return "";
+  };
+
   const handleClearChat = () => {
+    abortRef.current?.abort();
     setMessages([]);
     setCustomPrompt("");
+    setConflictId(null);
   };
 
   return (
@@ -272,6 +321,30 @@ export function IsolatedAiPromptBox({
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {undoStack.length > 0 && (
+            <button
+              onClick={handleUndo}
+              title="Undo the last Copilot change to the editor"
+              aria-label="Undo last applied change"
+              style={{
+                height: 28,
+                padding: "0 8px",
+                borderRadius: 6,
+                border: "1px solid #E2E8F0",
+                background: "#FFFFFF",
+                color: "#334155",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+                fontSize: 11.5,
+                fontFamily: "inherit",
+              }}
+            >
+              <IconArrowBackUp size={14} />
+              <span>Undo</span>
+            </button>
+          )}
           {messages.length > 0 && (
             <button
               onClick={handleClearChat}
@@ -368,9 +441,9 @@ export function IsolatedAiPromptBox({
             >
               <IconCheck size={11} color="#FFFFFF" stroke={3} />
             </div>
-            <span>Applied to reply editor draft!</span>
+            <span>Applied to the reply editor</span>
           </div>
-          <span style={{ fontSize: 10.5, color: "#94A3B8" }}>Ready to send</span>
+          <span style={{ fontSize: 10.5, color: "#94A3B8" }}>Review, then Send</span>
         </div>
       )}
 
@@ -492,7 +565,8 @@ export function IsolatedAiPromptBox({
               How can I refine this email?
             </h3>
             <p style={{ fontSize: 12, color: "#64748B", maxWidth: 280, margin: 0, lineHeight: 1.5 }}>
-              Choose a quick preset below or type a custom instruction to rephrase, condense, or polish your reply.
+              Choose a preset or type an instruction. Wording changes never search your knowledge base; prices,
+              specs and other facts are checked against it before they reach your draft.
             </p>
           </div>
         )}
@@ -531,8 +605,156 @@ export function IsolatedAiPromptBox({
               >
                 {msg.content}
 
+                {/* Evidence, gaps and validation (assistant results only) */}
+                {!isUser && msg.result && (
+                  <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6, whiteSpace: "normal" }}>
+                    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, fontSize: 10.5 }}>
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 4,
+                          padding: "1px 7px",
+                          borderRadius: 10,
+                          background: "#EEF2FF",
+                          color: "#4338CA",
+                          fontWeight: 600,
+                        }}
+                      >
+                        <IconDatabase size={11} />
+                        {OPERATION_LABEL[msg.result.operation] ?? msg.result.operation}
+                      </span>
+                      {msg.result.evidence_status && <span style={{ color: "#64748B" }}>{msg.result.evidence_status}</span>}
+                    </div>
+                    {msg.result.facts_used.length > 0 && (
+                      <div style={{ fontSize: 11, color: "#475569" }}>
+                        <span style={{ fontWeight: 600 }}>Verified facts used: </span>
+                        {msg.result.facts_used
+                          .slice(0, 6)
+                          .map((f) => [f.entity_code, f.attribute, f.value].filter(Boolean).join(" "))
+                          .join(" · ")}
+                        {msg.result.facts_used.length > 6 ? " · +" + (msg.result.facts_used.length - 6) + " more" : ""}
+                      </div>
+                    )}
+                    {msg.result.unresolved.length > 0 && (
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "#92400E",
+                          background: "#FFFBEB",
+                          border: "1px solid #FDE68A",
+                          borderRadius: 6,
+                          padding: "5px 8px",
+                        }}
+                      >
+                        <span style={{ fontWeight: 600 }}>Not confirmed by your knowledge base: </span>
+                        {msg.result.unresolved.slice(0, 4).join("; ")}
+                      </div>
+                    )}
+                    {msg.result.issues.length > 0 && (
+                      <div
+                        role="alert"
+                        style={{
+                          fontSize: 11,
+                          color: "#991B1B",
+                          background: "#FEF2F2",
+                          border: "1px solid #FECACA",
+                          borderRadius: 6,
+                          padding: "5px 8px",
+                          display: "flex",
+                          gap: 6,
+                        }}
+                      >
+                        <IconAlertTriangle size={13} style={{ flexShrink: 0, marginTop: 1 }} />
+                        <span>Cannot be applied as is. {msg.result.issues.map((i) => i.detail).join(" ")}</span>
+                      </div>
+                    )}
+                    {conflictId === msg.id && (
+                      <div
+                        role="alert"
+                        style={{
+                          fontSize: 11,
+                          color: "#1E3A8A",
+                          background: "#EFF6FF",
+                          border: "1px solid #BFDBFE",
+                          borderRadius: 6,
+                          padding: "6px 8px",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 6,
+                        }}
+                      >
+                        <span>
+                          The editor changed after this suggestion was generated. Applying it would replace your newer
+                          edits.
+                        </span>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button
+                            onClick={() => void triggerGeneration(instructionBefore(msg.id))}
+                            disabled={isGenerating}
+                            style={{
+                              fontSize: 11,
+                              padding: "3px 8px",
+                              borderRadius: 5,
+                              border: "1px solid #93C5FD",
+                              background: "#FFFFFF",
+                              color: "#1D4ED8",
+                              cursor: "pointer",
+                              fontFamily: "inherit",
+                            }}
+                          >
+                            Regenerate from current draft
+                          </button>
+                          <button
+                            onClick={() => handleApplyMessage(msg.id, msg.content, true)}
+                            style={{
+                              fontSize: 11,
+                              padding: "3px 8px",
+                              borderRadius: 5,
+                              border: "1px solid #CBD5E1",
+                              background: "#FFFFFF",
+                              color: "#334155",
+                              cursor: "pointer",
+                              fontFamily: "inherit",
+                            }}
+                          >
+                            Replace anyway
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Retry for errors / clarification questions */}
+                {!isUser && (msg.error || msg.result?.operation === "CLARIFY") && (
+                  <div style={{ marginTop: 8 }}>
+                    <button
+                      onClick={() => void triggerGeneration(instructionBefore(msg.id))}
+                      disabled={isGenerating}
+                      style={{
+                        background: "transparent",
+                        border: "none",
+                        cursor: "pointer",
+                        color: "#64748B",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 4,
+                        fontSize: 11,
+                        fontWeight: 500,
+                        padding: "3px 6px",
+                        borderRadius: 4,
+                        fontFamily: "inherit",
+                      }}
+                    >
+                      <IconRotateClockwise size={12} />
+                      <span>Retry</span>
+                    </button>
+                  </div>
+                )}
+
                 {/* Assistant Action Bar */}
-                {!isUser && (
+                {!isUser && msg.result && msg.result.operation !== "CLARIFY" && (
                   <div
                     style={{
                       display: "flex",
@@ -568,7 +790,8 @@ export function IsolatedAiPromptBox({
                       </button>
 
                       <button
-                        onClick={() => triggerGeneration(msg.content)}
+                        onClick={() => void triggerGeneration(instructionBefore(msg.id))}
+                        disabled={isGenerating}
                         style={{
                           background: "transparent",
                           border: "none",
@@ -592,6 +815,12 @@ export function IsolatedAiPromptBox({
 
                     <button
                       onClick={() => handleApplyMessage(msg.id, msg.content)}
+                      disabled={!msg.result.apply_allowed || msg.applied}
+                      title={
+                        msg.result.apply_allowed
+                          ? "Replace the editor text with this version"
+                          : "Contains unverified facts: edit manually or regenerate"
+                      }
                       style={{
                         display: "flex",
                         alignItems: "center",
@@ -600,19 +829,19 @@ export function IsolatedAiPromptBox({
                         fontSize: 11.5,
                         fontWeight: 600,
                         color: "#FFFFFF",
-                        background: msg.applied ? "#059669" : "#2563EB",
+                        background: msg.applied ? "#059669" : msg.result.apply_allowed ? "#2563EB" : "#94A3B8",
                         border: "none",
                         borderRadius: 6,
-                        cursor: "pointer",
+                        cursor: msg.result.apply_allowed && !msg.applied ? "pointer" : "not-allowed",
                         boxShadow: "0 1px 3px rgba(37,99,235,0.25)",
                         fontFamily: "inherit",
                         transition: "all 0.12s",
                       }}
                       onMouseEnter={(e) => {
-                        if (!msg.applied) e.currentTarget.style.background = "#1D4ED8";
+                        if (!msg.applied && msg.result?.apply_allowed) e.currentTarget.style.background = "#1D4ED8";
                       }}
                       onMouseLeave={(e) => {
-                        if (!msg.applied) e.currentTarget.style.background = "#2563EB";
+                        if (!msg.applied && msg.result?.apply_allowed) e.currentTarget.style.background = "#2563EB";
                       }}
                     >
                       <IconCheck size={13} stroke={2.5} />
@@ -651,7 +880,29 @@ export function IsolatedAiPromptBox({
                 animation: "spin 0.7s linear infinite",
               }}
             />
-            <span>Refining reply with AI...</span>
+            <span>Working on your reply…</span>
+            <button
+              onClick={handleCancel}
+              title="Cancel"
+              aria-label="Cancel generation"
+              style={{
+                marginLeft: 4,
+                display: "flex",
+                alignItems: "center",
+                gap: 3,
+                border: "1px solid #DDD6FE",
+                background: "#FFFFFF",
+                color: "#6D28D9",
+                borderRadius: 6,
+                padding: "2px 6px",
+                fontSize: 11,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              <IconPlayerStop size={11} />
+              Cancel
+            </button>
           </div>
         )}
 

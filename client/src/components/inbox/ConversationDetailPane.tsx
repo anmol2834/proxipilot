@@ -39,6 +39,8 @@ interface ConversationDetailPaneProps {
   isAiPromptOpen?: boolean;
   onToggleAiPrompt?: () => void;
   injectedDraftText?: string | null;
+  /** Changes on every injection so a repeated text (e.g. Undo) is still applied. */
+  injectedDraftNonce?: number;
   onDraftTextChange?: (text: string) => void;
 }
 
@@ -160,6 +162,7 @@ export function ConversationDetailPane({
   isAiPromptOpen = false,
   onToggleAiPrompt,
   injectedDraftText,
+  injectedDraftNonce,
   onDraftTextChange,
 }: ConversationDetailPaneProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -178,7 +181,7 @@ export function ConversationDetailPane({
       setReplyText(injectedDraftText);
       setIsReplyOpen(true);
     }
-  }, [injectedDraftText]);
+  }, [injectedDraftText, injectedDraftNonce]);
 
   // AI draft for this conversation: when one exists it is pre-filled in the reply box (already
   // open), so the user only reviews and clicks Send. Without a draft only the Reply button shows.

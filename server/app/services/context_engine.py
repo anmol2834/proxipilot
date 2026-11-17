@@ -507,6 +507,9 @@ async def catalogue_overview(tenant_id: str, terms: Sequence[str] = ()) -> Optio
 def invalidate_catalogue_overview(tenant_id: str) -> None:
     """Called when the tenant's knowledge changes: the next email sees fresh counts."""
     _OVERVIEW_BASE.pop(tenant_id, None)
+    # Copilot exact-identity cache: a new catalogue revision makes every cached search a miss.
+    from app.services.reply_copilot.evidence import bump_catalogue_revision
+    bump_catalogue_revision(tenant_id)
 
 
 

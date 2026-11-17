@@ -462,9 +462,15 @@ class DeterministicReplyValidator:
                     except Exception:
                         pass
 
-        # Also extract prices from explicit discovery range constraints (e.g. ₹1,000–₹2,500)
-        # to allow describing the requested range
-        range_bounds: Set[Decimal] = {Decimal("1000"), Decimal("2500"), Decimal("1000.00"), Decimal("2500.00")}
+        # The customer's own budget figures (e.g. "between 1000 and 2500") may be echoed back
+        # ("within your ₹2,500 budget"). They come from this package's requirements - never constants.
+        range_bounds: Set[Decimal] = set()
+        for req in package.requirements:
+            for n in _numbers_in(getattr(req, "description", "") or ""):
+                try:
+                    range_bounds.add(Decimal(n))
+                except Exception:
+                    pass
 
         # Extract all numbers preceded or followed by currency indicators
         extracted_price_strings = self.PRICE_EXTRACTION_REGEX.findall(draft.body_text)
@@ -594,13 +600,12 @@ class DeterministicReplyValidator:
                     disposition = RequirementDisposition.LIMITATION_DISCLOSED
                     disclosed_signals_count += 1
             elif "discovery" in req_desc or "between" in req_desc or "discovery" in req_intent:
-                if any(w in full_text_lower for w in ["package", "service", "option", "price", "range", "2500", "1000"]):
+                if any(w in full_text_lower for w in ["package", "service", "option", "price", "range"]):
                     addressed = True
                     disposition = RequirementDisposition.ANSWERED
             elif "comparison" in req_desc or "comparison" in req_intent:
-                if any(e.lower() in full_text_lower for e in (req.target_entities or req.verified_targets)) or (
-                    "washing machine" in full_text_lower and "microwave" in full_text_lower
-                ):
+                targets = [e.lower() for e in (req.target_entities or req.verified_targets) if e]
+                if targets and all(t in full_text_lower for t in targets):
                     addressed = True
                     disposition = RequirementDisposition.ANSWERED
             elif req.facts:

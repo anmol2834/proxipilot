@@ -66,9 +66,12 @@ function InboxContent() {
   const [isAiPromptOpen, setIsAiPromptOpen] = useState(false);
   const [activeDraftText, setActiveDraftText] = useState("");
   const [injectedDraftText, setInjectedDraftText] = useState<string | null>(null);
+  // Bumped on every Copilot apply/undo so the editor receives it even when the text repeats.
+  const [injectedDraftNonce, setInjectedDraftNonce] = useState(0);
 
   const handleApplyAiDraft = (text: string) => {
     setInjectedDraftText(text);
+    setInjectedDraftNonce((n) => n + 1);
     setActiveDraftText(text);
   };
 
@@ -270,6 +273,7 @@ function InboxContent() {
             isAiPromptOpen={isAiPromptOpen}
             onToggleAiPrompt={() => setIsAiPromptOpen((prev) => !prev)}
             injectedDraftText={injectedDraftText}
+            injectedDraftNonce={injectedDraftNonce}
             onDraftTextChange={(text) => setActiveDraftText(text)}
           />
         </div>
