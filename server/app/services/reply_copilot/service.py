@@ -73,6 +73,21 @@ _SEARCH = re.compile(r"\b(find|search|look\s*up|check|suggest|recommend|show|lis
                      re.IGNORECASE)
 
 
+# A note for the copilot itself ("tell my agent ...", "note that ...", "remember ...", "FYI ...").
+_NOTE = re.compile(r"^\s*(please\s+)?(note|remember|keep in mind|fyi|for your info\w*|just so you know|"
+                   r"tell (my|the|our)?\s*(agent|copilot|assistant|ai|bot)|tell you|let you know|i (can|will|am|have)|"
+                   r"we (can|will|are|have))\b", re.IGNORECASE)
+# Words that ask to change the email (then it is a draft, not a note).
+_EDIT = re.compile(r"\b(improve|rewrite|re-write|draft|reply|write|edit|change|update|add|include|mention|insert|"
+                   r"remove|shorten|expand|polish|rephrase|tell (the|this|our)?\s*customer|tell (him|her|them)|"
+                   r"email|mail|message)\b", re.IGNORECASE)
+
+
+def is_note_for_copilot(instruction: str) -> bool:
+    """True for information/authorization given to the copilot without asking to change the email."""
+    return bool(_NOTE.search(instruction)) and not _EDIT.search(instruction)
+
+
 def refers_to_context(instruction: str) -> bool:
     return bool(decision_mod.codes_in(instruction) or _REFERS.search(instruction))
 
@@ -198,6 +213,16 @@ class ReplyCopilotService:
             metrics["decided_by"] = decision.decided_by
             decision = decision.model_copy(update={
                 "fact_requests": [scoped_request(r, req.instruction) for r in decision.fact_requests]})
+            # A pure note for the copilot never rewrites the email: answer it in the chat (with lookups).
+            if is_note_for_copilot(req.instruction) and decision.operation in (
+                    CopilotOperation.MIXED, CopilotOperation.NEW_RETRIEVAL, CopilotOperation.EVIDENCE_REUSE,
+                    CopilotOperation.WRITING_ONLY):
+                if decision.fact_requests:
+                    decision = decision.model_copy(update={"operation": CopilotOperation.ANSWER})
+                else:
+                    decision = decision.model_copy(update={"operation": CopilotOperation.CHAT,
+                                                           "reply": "Noted. I'll keep that in mind for this reply."})
+                metrics["note_for_copilot"] = True
             use_spec = bool(spec_task and len(decision.fact_requests) == 1
                             and not decision.fact_requests[0].entity_codes)
             if spec_task and not use_spec:

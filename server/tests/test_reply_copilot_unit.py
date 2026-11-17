@@ -614,3 +614,28 @@ def test_ai1_note_about_discount_becomes_product_lookup():
                                                 "about_context_items": False}]})
     assert d.fact_requests[0].request == "What is the price of the paper dispensers?"
     assert d.fact_requests[0].attributes == ["price"]
+
+
+@pytest.mark.parametrize("text,is_note", [
+    ("tell my agent that i can give discount on paper dispenser", True),
+    ("note that I can give 10% on hand dryers", True),
+    ("fyi we are closed on sunday", True),
+    ("improve the message and tell my agent that i can give discount on paper dispenser", False),
+    ("tell the customer we can give a discount", False),
+    ("what is the price of the hand dryer?", False),
+])
+def test_note_for_copilot_detection(text, is_note):
+    assert svc_mod.is_note_for_copilot(text) is is_note
+
+
+def test_pure_note_is_answered_in_chat_not_drafted(monkeypatch):
+    d = CopilotDecision(operation=CopilotOperation.MIXED, decided_by="llm", writing_goal="mention discount",
+                        fact_requests=[FactRequest(request="What is the price of the paper dispenser?", attributes=["price"])])
+    ev = EvidenceSet(facts=[_fact("DPDR0021", "price", "890.00")])
+    s, calls = _service(monkeypatch, d, [_out("should not draft")], resolve_result=(ev, {"level": "L3_retrieval"}))
+    _with_answer(s, [{"answer": "Noted. Paper dispensers: DPDR0021 ₹890.", "used_fact_ids": ["DPDR0021:price"],
+                      "unresolved": []}])
+    res = asyncio.run(s.refine("t1", "th1", CopilotRequest(
+        instruction="tell my agent that i can give discount on paper dispenser", draft_text=DRAFT)))
+    assert res.operation == CopilotOperation.ANSWER and "DPDR0021" in res.message and res.proposal == ""
+    assert calls["compose"] == 0 and res.metrics["note_for_copilot"]
