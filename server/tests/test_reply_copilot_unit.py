@@ -594,3 +594,23 @@ def test_employee_authorized_discount_is_allowed_customer_demand_is_not():
     assert composer.validate_proposal(text, "", EvidenceSet(), "customer: give me 10% off",
                                       employee_text="tell the customer we can give 10% discount") == []
     assert {i.code for i in composer.validate_proposal(text, "", EvidenceSet(), "customer: give me 10% off")} == {"UNVERIFIED_DISCOUNT"}
+
+
+@pytest.mark.parametrize("q,attrs,want", [
+    ("What discount can we offer on paper dispensers?", ["discount"], ("What is the price of the paper dispensers?", ["price"])),
+    ("Is there any offer for the hand dryer?", [], ("What is the price of the hand dryer?", ["price"])),
+    ("What is the price of the paper dispenser?", ["price"], ("What is the price of the paper dispenser?", ["price"])),
+    ("Warranty of HA-001", ["warranty"], ("Warranty of HA-001", ["warranty"])),
+])
+def test_requests_about_granted_things_search_the_product(q, attrs, want):
+    assert decision.product_centric(q, attrs) == want
+
+
+def test_ai1_note_about_discount_becomes_product_lookup():
+    d = decision._validated({"operation": "MIXED", "writing_goal": "improve; do not tell the customer",
+                             "clarification_question": None, "reply": None,
+                             "fact_requests": [{"request": "What discount can we offer on paper dispensers?",
+                                                "attributes": ["discount"], "entity_codes": [],
+                                                "about_context_items": False}]})
+    assert d.fact_requests[0].request == "What is the price of the paper dispensers?"
+    assert d.fact_requests[0].attributes == ["price"]

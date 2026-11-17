@@ -145,6 +145,9 @@ fact_requests: at most 3. "request" is a standalone question as the customer wou
 product/code it concerns (resolve "this product" / "the second one" using CONTEXT ITEMS). attributes = the fields
 needed (e.g. "price", "warranty"). entity_codes = exact codes from the draft, the instruction or CONTEXT ITEMS.
 about_context_items = true when the request concerns items already in the conversation.
+A fact request always asks about the PRODUCT itself (its price / details), never about something the employee is
+granting: "I can give a discount on paper dispensers" -> request "What is the price of the paper dispenser?",
+attributes ["price"]. The catalogue holds products, not the employee's discounts or decisions.
 "Find / suggest / search / show <product type>" is a NEW search: name the product type exactly as the employee
 wrote it (e.g. "hand dispenser" stays "hand dispenser", never swapped for a similar item in the conversation),
 include any size, material or budget given, and do NOT attach CONTEXT ITEMS codes unless the instruction refers to
@@ -160,6 +163,26 @@ def _clip(s: str, n: int) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+# The employee grants these; the catalogue does not hold them. A request phrased around them
+# ("What discount can we offer on paper dispensers?") would search for discounts instead of the product.
+_GRANT_WORDS = re.compile(r"\b(discounts?|offers?|schemes?|deals?|concessions?|rebates?|free\s+shipping)\b", re.IGNORECASE)
+_GRANT_TARGET = re.compile(
+    r"\b(?:discounts?|offers?|schemes?|deals?|concessions?|rebates?)\b.*?\b(?:on|for)\s+(?:the\s+|our\s+|a\s+|an\s+)?"
+    r"(?P<product>[^?.!,;]+)", re.IGNORECASE)
+
+
+def product_centric(q: str, attrs: List[str]) -> Tuple[str, List[str]]:
+    """Turn a request about something the employee grants into a request about the product (pure)."""
+    clean_attrs = [a for a in attrs if not _GRANT_WORDS.search(a)]
+    if not _GRANT_WORDS.search(q):
+        return q, clean_attrs if clean_attrs or not attrs else ["price"]
+    m = _GRANT_TARGET.search(q)
+    if m and m.group("product").strip():
+        product = m.group("product").strip()
+        return f"What is the price of the {product}?", (clean_attrs or ["price"])
+    return q, (clean_attrs or ["price"])
+
+
 def _validated(data: Dict[str, Any]) -> CopilotDecision:
     try:
         op = CopilotOperation(str(data.get("operation") or ""))
@@ -173,6 +196,7 @@ def _validated(data: Dict[str, Any]) -> CopilotDecision:
         if not q:
             continue
         attrs = [_clip(str(a), 40).lower() for a in (r.get("attributes") or [])[:8] if str(a).strip()]
+        q, attrs = product_centric(q, attrs)
         codes = [str(c).strip().upper() for c in (r.get("entity_codes") or [])[:10]
                  if _SAFE_CODE.match(str(c).strip())]
         reqs.append(FactRequest(request=q, attributes=attrs, entity_codes=codes,
