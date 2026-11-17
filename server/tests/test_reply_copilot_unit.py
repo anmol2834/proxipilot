@@ -443,3 +443,47 @@ def test_false_absence_claim_in_draft_is_checked_and_corrected(monkeypatch):
     res = asyncio.run(s.refine("t1", "th1", CopilotRequest(instruction="make it professional", draft_text=draft)))
     assert calls["ctx"] == 1 and res.metrics["corrected_absence_claims"] == ["DSDR0099"]
     assert res.operation == CopilotOperation.MIXED and res.apply_allowed and res.metrics["retrieval_calls"] == 0
+
+
+def test_new_search_does_not_reuse_thread_items():
+    r = FactRequest(request="price of hand dispenser", attributes=["price"], entity_codes=["DSDR0099"],
+                    about_context_items=True)
+    scoped = svc_mod.scoped_request(r, "find the hand dispenser and it's price and then draft the mail")
+    assert scoped.entity_codes == [] and not scoped.about_context_items
+    kept = svc_mod.scoped_request(r, "add the price of this dispenser")
+    assert kept.entity_codes == ["DSDR0099"] and kept.about_context_items
+    assert svc_mod.scoped_request(r, "add the warranty of DSDR0099").entity_codes == ["DSDR0099"]
+
+
+def test_search_instruction_overlaps_retrieval_with_decision(monkeypatch):
+    order = []
+    d = CopilotDecision(operation=CopilotOperation.NEW_RETRIEVAL, decided_by="llm",
+                        fact_requests=[FactRequest(request="price of hand dispenser", attributes=["price"])])
+    s, calls = _service(monkeypatch, d, [_out("Hi, our hand dispenser HA-001 is Rs. 1,499.")],
+                        resolve_result=(EvidenceSet(facts=[_fact("HA-001", "price", "1499.00")]), {"level": "L3_retrieval"}))
+    orig_decide = s._decide
+
+    async def slow_decide(*a, **k):
+        order.append("decide-start")
+        await asyncio.sleep(0.05)
+        order.append("decide-end:" + str(len(calls["resolve"])))
+        return await orig_decide(*a, **k)
+    s._decide = slow_decide
+    res = asyncio.run(s.refine("t1", "th1", CopilotRequest(instruction="find the hand dispenser and its price",
+                                                           draft_text=DRAFT)))
+    assert order == ["decide-start", "decide-end:1"]          # retrieval already ran during the decision
+    assert res.metrics["speculative"] == "used" and len(calls["resolve"]) == 1 and res.apply_allowed
+
+
+def test_speculation_is_discarded_when_decision_is_writing_only(monkeypatch):
+    d = CopilotDecision(operation=CopilotOperation.WRITING_ONLY, decided_by="llm")
+    s, calls = _service(monkeypatch, d, [_out("Dear Asha,\n\nThe HA-001 deep cleaning service is Rs. 1,499.\n\nRegards,\nSupport")])
+    res = asyncio.run(s.refine("t1", "th1", CopilotRequest(instruction="check the price wording and make it formal", draft_text=DRAFT)))
+    assert res.metrics.get("speculative") == "discarded" and res.operation == CopilotOperation.WRITING_ONLY
+
+
+def test_pure_wording_never_starts_speculation(monkeypatch):
+    d = CopilotDecision(operation=CopilotOperation.WRITING_ONLY, decided_by="rules")
+    s, calls = _service(monkeypatch, d, [_out("Dear Asha, the HA-001 service is Rs. 1,499. Regards, Support")])
+    res = asyncio.run(s.refine("t1", "th1", CopilotRequest(instruction="check the tone and make it formal", draft_text=DRAFT)))
+    assert "speculative" not in res.metrics and calls["resolve"] == []

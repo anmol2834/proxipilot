@@ -21,6 +21,8 @@ still holds the draft revision the proposal was based on.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import re
 import time
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
@@ -61,6 +63,27 @@ def merge_evidence(parts: List[EvidenceSet]) -> EvidenceSet:
 
 
 MAX_VERBATIM_TURNS = 6
+
+# The instruction points at items already in the conversation ("this one", "the same", a code).
+_REFERS = re.compile(r"\b(this|that|these|those|same|above|selected|previous|mentioned|aforesaid|said)\b",
+                     re.IGNORECASE)
+# The instruction asks to look something up: worth starting retrieval while AI #1 is still deciding.
+_SEARCH = re.compile(r"\b(find|search|look\s*up|check|suggest|recommend|show|list|options?|alternatives?|cheapest|"
+                     r"lowest|most expensive|price of|prices? for|which|available|availability|compare|best|similar)\b",
+                     re.IGNORECASE)
+
+
+def refers_to_context(instruction: str) -> bool:
+    return bool(decision_mod.codes_in(instruction) or _REFERS.search(instruction))
+
+
+def scoped_request(r: FactRequest, instruction: str) -> FactRequest:
+    """A request may reuse thread items only when the instruction refers to them; a new search
+    ("find the hand dispenser") must not be answered with an item that merely appears in the thread."""
+    if refers_to_context(instruction):
+        return r
+    named = set(decision_mod.codes_in(instruction))
+    return r.model_copy(update={"entity_codes": [c for c in r.entity_codes if c in named], "about_context_items": False})
 
 
 def session_context(req: CopilotRequest) -> str:
@@ -150,6 +173,15 @@ class ReplyCopilotService:
             titles = {(c or "").upper(): t or "" for _, c, t in snap.presented if c}
             metrics["context_ms"] = round((time.perf_counter() - t0) * 1000, 1)
 
+            # ---- speculative retrieval: a search-type instruction ("find X and its price") almost always
+            # needs one primary search; start it now so it overlaps the decision call. Discarded if the
+            # decision says otherwise (only costs one planner call in that case).
+            spec_task: Optional[asyncio.Task] = None
+            if (decision_mod.rule_decision(req.instruction, req.draft_text) is None and _SEARCH.search(req.instruction)
+                    and not refers_to_context(req.instruction)):
+                spec_req = FactRequest(request=req.instruction[:400], entity_codes=decision_mod.codes_in(req.instruction)[:10])
+                spec_task = asyncio.create_task(self._resolve_one(tenant_id, snap, spec_req, {}))
+
             # ---- AI #1
             decision, dm = await self._decide(req.instruction, req.draft_text, customer_msg,
                                               [(c, titles.get(c, "")) for c in ctx_codes],
@@ -157,6 +189,15 @@ class ReplyCopilotService:
             metrics.update(dm)
             metrics["llm_calls"] += dm.get("decision_llm_calls", 0)
             metrics["decided_by"] = decision.decided_by
+            decision = decision.model_copy(update={
+                "fact_requests": [scoped_request(r, req.instruction) for r in decision.fact_requests]})
+            use_spec = bool(spec_task and len(decision.fact_requests) == 1
+                            and not decision.fact_requests[0].entity_codes)
+            if spec_task and not use_spec:
+                spec_task.cancel()
+                with contextlib.suppress(BaseException):
+                    await spec_task
+                metrics["speculative"] = "discarded"
             if decision.operation == CopilotOperation.CLARIFY:
                 return self._finish(rid, thread_id, decision.operation, req, metrics, t0,
                                     clarification=decision.clarification_question or "Could you say a bit more about what to change?")
@@ -171,8 +212,12 @@ class ReplyCopilotService:
                     ctx_facts, _missing = await self._context_records(
                         db, tenant_id, wanted, [p[0] for p in snap.presented])
                 t1 = time.perf_counter()
-                results = await asyncio.gather(*[self._resolve_one(tenant_id, snap, r, ctx_facts)
-                                                 for r in decision.fact_requests])
+                if use_spec and spec_task is not None:
+                    results = [await spec_task]
+                    metrics["speculative"] = "used"
+                else:
+                    results = await asyncio.gather(*[self._resolve_one(tenant_id, snap, r, ctx_facts)
+                                                     for r in decision.fact_requests])
                 metrics["evidence_ms"] = round((time.perf_counter() - t1) * 1000, 1)
                 ev = merge_evidence([e for e, _ in results])
                 for _, m in results:

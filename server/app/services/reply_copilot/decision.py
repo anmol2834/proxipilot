@@ -118,6 +118,10 @@ fact_requests: at most 3. "request" is a standalone question as the customer wou
 product/code it concerns (resolve "this product" / "the second one" using CONTEXT ITEMS). attributes = the fields
 needed (e.g. "price", "warranty"). entity_codes = exact codes from the draft, the instruction or CONTEXT ITEMS.
 about_context_items = true when the request concerns items already in the conversation.
+"Find / suggest / search / show <product type>" is a NEW search: name the product type exactly as the employee
+wrote it (e.g. "hand dispenser" stays "hand dispenser", never swapped for a similar item in the conversation),
+include any size, material or budget given, and do NOT attach CONTEXT ITEMS codes unless the instruction refers to
+those items ("this", "same", a code).
 If the draft is empty and the employee asks to write/answer the reply, create fact_requests for what the customer
 asked in CUSTOMER MESSAGE.
 

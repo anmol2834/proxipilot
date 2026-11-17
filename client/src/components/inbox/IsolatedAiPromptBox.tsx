@@ -25,7 +25,6 @@ import {
   IconTrash,
   IconArrowBackUp,
   IconAlertTriangle,
-  IconDatabase,
   IconPlayerStop,
 } from "@tabler/icons-react";
 
@@ -49,14 +48,6 @@ interface ChatMessage {
   /** Which text this suggestion refined: the editor, or the previous (unapplied) suggestion. */
   basedOn?: DraftSource;
 }
-
-const OPERATION_LABEL: Record<string, string> = {
-  WRITING_ONLY: "Writing only",
-  EVIDENCE_REUSE: "Reused conversation facts",
-  NEW_RETRIEVAL: "Knowledge search",
-  MIXED: "Writing + knowledge",
-  CLARIFY: "Needs clarification",
-};
 
 interface PresetAction {
   id: string;
@@ -647,61 +638,9 @@ export function IsolatedAiPromptBox({
               >
                 {msg.content}
 
-                {/* Evidence, gaps and validation (assistant results only) */}
-                {!isUser && msg.result && (
+                {/* Only what blocks a safe Apply is shown: unverified facts, or newer editor edits. */}
+                {!isUser && msg.result && (msg.result.issues.length > 0 || conflictId === msg.id) && (
                   <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6, whiteSpace: "normal" }}>
-                    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, fontSize: 10.5 }}>
-                      <span
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 4,
-                          padding: "1px 7px",
-                          borderRadius: 10,
-                          background: "#EEF2FF",
-                          color: "#4338CA",
-                          fontWeight: 600,
-                        }}
-                      >
-                        <IconDatabase size={11} />
-                        {OPERATION_LABEL[msg.result.operation] ?? msg.result.operation}
-                      </span>
-                      {msg.result.evidence_status && <span style={{ color: "#64748B" }}>{msg.result.evidence_status}</span>}
-                      {msg.basedOn === "proposal" && (
-                        <span style={{ color: "#64748B" }}>· refined the previous suggestion</span>
-                      )}
-                    </div>
-                    {msg.result.changes_summary && (
-                      <div style={{ fontSize: 11, color: "#475569" }}>
-                        <span style={{ fontWeight: 600 }}>Changed: </span>
-                        {msg.result.changes_summary}
-                      </div>
-                    )}
-                    {msg.result.facts_used.length > 0 && (
-                      <div style={{ fontSize: 11, color: "#475569" }}>
-                        <span style={{ fontWeight: 600 }}>Verified facts used: </span>
-                        {msg.result.facts_used
-                          .slice(0, 6)
-                          .map((f) => [f.entity_code, f.attribute, f.value].filter(Boolean).join(" "))
-                          .join(" · ")}
-                        {msg.result.facts_used.length > 6 ? " · +" + (msg.result.facts_used.length - 6) + " more" : ""}
-                      </div>
-                    )}
-                    {msg.result.unresolved.length > 0 && (
-                      <div
-                        style={{
-                          fontSize: 11,
-                          color: "#92400E",
-                          background: "#FFFBEB",
-                          border: "1px solid #FDE68A",
-                          borderRadius: 6,
-                          padding: "5px 8px",
-                        }}
-                      >
-                        <span style={{ fontWeight: 600 }}>Not confirmed by your knowledge base: </span>
-                        {msg.result.unresolved.slice(0, 4).join("; ")}
-                      </div>
-                    )}
                     {msg.result.issues.length > 0 && (
                       <div
                         role="alert"
