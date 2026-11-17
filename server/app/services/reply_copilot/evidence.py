@@ -330,7 +330,9 @@ async def retrieve(tenant_id: str, snap: ThreadSnapshot, req: FactRequest) -> Tu
     cur_id = f"copilot_{uuid.uuid4().hex[:12]}"
     customer = (snap.latest_inbound or {}).get("from_email") or "customer"
     cur = ContextMessage(id=cur_id, external_message_id=cur_id, direction="inbound", from_email=customer,
-                         subject=snap.subject, body_text=req.request, sent_at=now)
+                         # No thread subject: the planner extracts codes from the subject, so an old subject
+                         # ("price of DSDR0099") would turn every new Copilot search into that one code.
+                         subject=None, body_text=req.request, sent_at=now)
     env = ContextEnvelope(tenant_id=tenant_id, integration_account_id=snap.integration_account_id,
                           provider_thread_id=snap.provider_thread_id, thread_id=snap.thread_id,
                           current_message_id=cur_id, context_revision=snap.context_revision, current_message=cur,

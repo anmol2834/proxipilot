@@ -487,3 +487,20 @@ def test_pure_wording_never_starts_speculation(monkeypatch):
     s, calls = _service(monkeypatch, d, [_out("Dear Asha, the HA-001 service is Rs. 1,499. Regards, Support")])
     res = asyncio.run(s.refine("t1", "th1", CopilotRequest(instruction="check the tone and make it formal", draft_text=DRAFT)))
     assert "speculative" not in res.metrics and calls["resolve"] == []
+
+
+def test_copilot_search_does_not_inherit_the_thread_subject(monkeypatch):
+    from app.services import requirement_planner, retrieval_router, evidence_fusion, evidence_package
+    seen = {}
+
+    async def plan(envelope, dispatch_event=False):
+        seen["subject"] = envelope.current_message.subject
+        seen["body"] = envelope.current_message.body_text
+        raise RuntimeError("stop after planning")
+    monkeypatch.setattr(requirement_planner.requirement_planner_service, "plan_requirements", plan)
+    snap = _snap()
+    snap.subject = "I want the price od DSDR0099"
+    with pytest.raises(RuntimeError):
+        asyncio.run(evidence.retrieve("t1", snap, FactRequest(request="cheapest SS soap dispenser")))
+    assert seen == {"subject": None, "body": "cheapest SS soap dispenser"}
+    assert retrieval_router and evidence_fusion and evidence_package
