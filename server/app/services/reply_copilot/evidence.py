@@ -35,7 +35,7 @@ from sqlalchemy import text
 from app.core.logging import logger
 from app.services.reply_copilot.contracts import CopilotFact, EvidenceSet, EvidenceSource, FactRequest
 
-CACHE_VERSION = "cpv1"
+CACHE_VERSION = "cpv2"   # bump whenever retrieval semantics change (old entries become misses)
 CACHE_TTL_S = 600
 MAX_CONTEXT_ITEMS = 12
 MAX_FIELDS_PER_ITEM = 30
