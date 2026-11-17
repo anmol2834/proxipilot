@@ -59,15 +59,33 @@ def codes_in(text: str) -> List[str]:
     return out
 
 
+_GREETING = re.compile(
+    r"^\s*(h+i+|h+e+l+o+|hey+|hiya|namaste|namaskar|good\s+(morning|afternoon|evening|night)|how\s+are\s+you|"
+    r"what'?s\s+up|sup|yo)\b[\s!.,?]*(there|copilot|buddy|bro)?[\s!.,?]*$", re.IGNORECASE)
+_THANKS = re.compile(r"^\s*(thanks?( you)?|thx|ty|great|nice|cool|ok(ay)?|perfect|got it|awesome|done)[\s!.,?]*$",
+                     re.IGNORECASE)
+
+GREETING_REPLY = ("Hi! How can I help with this reply? I can improve or rewrite the draft, change its tone, "
+                  "or look up products, prices and specifications for it.")
+THANKS_REPLY = "You're welcome! Tell me if you'd like any other change to the reply."
+
+
 def rule_decision(instruction: str, draft_text: str) -> Optional[CopilotDecision]:
-    """Deterministic decision when the instruction is unambiguous; None means "ask AI #1"."""
+    """Deterministic decision when the instruction is unambiguous; None means "ask AI #1".
+
+    Only two shapes are decided without a model: small talk (instant reply, no draft) and a pure
+    wording instruction on an existing draft. Anything else - questions, notes, product mentions,
+    unclear text - goes to AI #1, so a message is never turned into a draft by default."""
     text = instruction.strip()
-    has_draft = bool(draft_text.strip())
-    if not has_draft:
-        return None                      # composing from nothing needs the customer's requirements
-    if codes_in(text) or _FACTS.search(text):
-        return None                      # may need facts: let AI #1 decide (it may still be writing-only)
-    return CopilotDecision(operation=CopilotOperation.WRITING_ONLY, writing_goal=text, decided_by="rules")
+    if _GREETING.match(text):
+        return CopilotDecision(operation=CopilotOperation.CHAT, reply=GREETING_REPLY, decided_by="rules")
+    if _THANKS.match(text):
+        return CopilotDecision(operation=CopilotOperation.CHAT, reply=THANKS_REPLY, decided_by="rules")
+    if not draft_text.strip() or codes_in(text) or _FACTS.search(text) or "?" in text:
+        return None
+    if _WRITING.search(text):
+        return CopilotDecision(operation=CopilotOperation.WRITING_ONLY, writing_goal=text, decided_by="rules")
+    return None
 
 
 _DECISION_SCHEMA: Dict[str, Any] = {
@@ -76,7 +94,7 @@ _DECISION_SCHEMA: Dict[str, Any] = {
     "schema": {
         "type": "object",
         "additionalProperties": False,
-        "required": ["operation", "writing_goal", "fact_requests", "clarification_question"],
+        "required": ["operation", "writing_goal", "fact_requests", "clarification_question", "reply"],
         "properties": {
             "operation": {"type": "string", "enum": [o.value for o in CopilotOperation]},
             "writing_goal": {"type": "string"},
@@ -95,24 +113,33 @@ _DECISION_SCHEMA: Dict[str, Any] = {
                 },
             },
             "clarification_question": {"type": ["string", "null"]},
+            "reply": {"type": ["string", "null"]},
         },
     },
 }
 
-_SYSTEM = """You are the decision step of an email reply copilot used by a business employee.
-The employee gives you a private INSTRUCTION about the reply they are writing to a customer.
-Decide what the instruction needs. You never write the email.
+_SYSTEM = """You are the decision step of an email reply copilot used by a business employee. The employee types a
+private INSTRUCTION in the copilot chat. Understand what they want BEFORE anything is written or searched.
+You never write the email yourself.
 
-operation:
-- WRITING_ONLY: only wording changes (tone, length, grammar, translation, order, clarity). Facts already in the
-  draft are kept as they are. Use this even when the instruction mentions prices/specs only to keep or move them.
-  Also WRITING_ONLY when the instruction itself tells you WHAT to say ("tell them we received the PO", "say we will
-  call tomorrow", "mention our office is closed on Sunday"): the employee is the source; nothing is looked up.
-  Never create fact requests for the customer's original questions unless the instruction asks to answer or add them.
-- EVIDENCE_REUSE / NEW_RETRIEVAL / MIXED: the reply needs business information that is NOT already in the draft
-  (a price, specification, warranty, availability, delivery, contact, alternatives, policy...). Put each piece in
-  fact_requests. Pick MIXED when there is also a wording change.
-- CLARIFY: the instruction cannot be understood. Put a short question in clarification_question.
+operation (pick exactly one):
+- CHAT: greetings, thanks, small talk, or questions about the copilot itself ("hi", "what can you do?").
+  Put a short, friendly, helpful reply in "reply". No draft, no search.
+- ANSWER: the employee asks YOU something or tells YOU something, without asking to change the email:
+  "what is the price of the paper dispenser?", "do we have hand dryers?", "which is cheaper?",
+  "note that I can give a discount on paper dispensers", "tell my agent/you that ...". Create fact_requests for
+  every product or category named so it is looked up. The answer goes to the chat, not into the email.
+- WRITING_ONLY: only wording changes to the email (tone, length, grammar, translation, order, clarity), or the
+  employee dictates a statement for the email that names NO product ("tell them we received the PO").
+- EVIDENCE_REUSE / NEW_RETRIEVAL / MIXED: the email must change AND needs business information (price, spec,
+  warranty, availability, delivery, contact, alternatives, policy) or names a product or category. Every product
+  or category named gets a fact request, also inside dictated statements ("tell them we can discount the paper
+  dispenser" -> look up paper dispensers). MIXED = wording change + facts, or an email change + a note for you.
+- CLARIFY: the instruction cannot be understood at all. Put a short question in clarification_question.
+
+writing_goal: what must change in the EMAIL for this instruction (empty for CHAT / ANSWER). If the instruction
+also contains a note meant for the copilot (an authorization or information such as "I can give a discount on
+X"), say in writing_goal whether the customer should be told or not; default: not told unless asked.
 
 fact_requests: at most 3. "request" is a standalone question as the customer would ask the business, naming the
 product/code it concerns (resolve "this product" / "the second one" using CONTEXT ITEMS). attributes = the fields
@@ -154,9 +181,15 @@ def _validated(data: Dict[str, Any]) -> CopilotDecision:
         op = CopilotOperation.WRITING_ONLY
     if op == CopilotOperation.WRITING_ONLY:
         reqs = []
+    reply = _clip(str(data.get("reply") or ""), 600)
+    if op == CopilotOperation.ANSWER and not reqs:
+        op = CopilotOperation.CHAT                 # a note / question with nothing to look up
+    if op == CopilotOperation.CHAT:
+        reqs = []
+        reply = reply or "Noted."
     cq = data.get("clarification_question")
     return CopilotDecision(operation=op, writing_goal=_clip(str(data.get("writing_goal") or ""), 400),
-                           fact_requests=reqs, decided_by="llm",
+                           fact_requests=reqs, decided_by="llm", reply=reply if op == CopilotOperation.CHAT else None,
                            clarification_question=_clip(str(cq), 300) if cq and op == CopilotOperation.CLARIFY else None)
 
 

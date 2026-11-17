@@ -171,7 +171,10 @@ export function IsolatedAiPromptBox({
       turns.push({
         instruction: m.content,
         applied: Boolean(reply?.applied),
-        summary: reply?.result?.changes_summary || (reply?.error ? "(failed)" : null),
+        summary:
+          reply?.result?.changes_summary ||
+          (reply?.result?.message ? `answered: ${reply.result.message.slice(0, 160)}` : null) ||
+          (reply?.error ? "(failed)" : null),
       });
     });
     const { history, session_summary } = buildSessionContext(turns);
@@ -194,7 +197,8 @@ export function IsolatedAiPromptBox({
         },
         ac.signal
       );
-      const content = res.operation === "CLARIFY" ? res.clarification_question || "" : res.proposal;
+      // A draft suggestion shows the email; chat / answer / clarification show the message itself.
+      const content = res.proposal || res.message || res.clarification_question || "";
       setMessages((prev) => [
         ...prev,
         {
@@ -636,6 +640,19 @@ export function IsolatedAiPromptBox({
                     : "0 1px 3px rgba(0,0,0,0.02)",
                 }}
               >
+                {!isUser && msg.result?.proposal && msg.result.message && (
+                  <div
+                    style={{
+                      marginBottom: 10,
+                      paddingBottom: 8,
+                      borderBottom: "1px dashed #CBD5E1",
+                      color: "#334155",
+                      fontSize: 12,
+                    }}
+                  >
+                    {msg.result.message}
+                  </div>
+                )}
                 {msg.content}
 
                 {/* Only what blocks a safe Apply is shown: unverified facts, or newer editor edits. */}
@@ -744,7 +761,7 @@ export function IsolatedAiPromptBox({
                 )}
 
                 {/* Assistant Action Bar */}
-                {!isUser && msg.result && msg.result.operation !== "CLARIFY" && (
+                {!isUser && msg.result && Boolean(msg.result.proposal) && (
                   <div
                     style={{
                       display: "flex",

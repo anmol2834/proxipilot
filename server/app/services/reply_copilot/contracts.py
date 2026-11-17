@@ -18,6 +18,8 @@ class CopilotOperation(str, Enum):
     NEW_RETRIEVAL = "NEW_RETRIEVAL"        # new facts through the existing retrieval pipeline
     MIXED = "MIXED"                        # writing change + some reused and/or newly retrieved facts
     CLARIFY = "CLARIFY"                    # the instruction itself is ambiguous: ask the user
+    CHAT = "CHAT"                          # greeting / small talk / question about the copilot: reply, no draft
+    ANSWER = "ANSWER"                      # a question or note for the copilot: (search and) answer, no draft
 
 
 class EvidenceSource(str, Enum):
@@ -62,6 +64,7 @@ class CopilotDecision(BaseModel):
     writing_goal: str = ""
     fact_requests: List[FactRequest] = Field(default_factory=list, max_length=3)
     clarification_question: Optional[str] = None
+    reply: Optional[str] = None          # CHAT only: the short reply to the employee
     decided_by: str = "rules"            # rules | llm | fallback
 
 
@@ -95,6 +98,8 @@ class CopilotResult(BaseModel):
     thread_id: str
     operation: CopilotOperation
     proposal: str = ""
+    # A short message TO THE EMPLOYEE (chat answer, acknowledgement of a note). Never sent to the customer.
+    message: str = ""
     changes_summary: str = ""
     base_draft_revision: Optional[str] = None
     apply_allowed: bool = False

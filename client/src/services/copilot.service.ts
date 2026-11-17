@@ -7,7 +7,14 @@
 
 import { apiClient } from "@/lib/api/client";
 
-export type CopilotOperation = "WRITING_ONLY" | "EVIDENCE_REUSE" | "NEW_RETRIEVAL" | "MIXED" | "CLARIFY";
+export type CopilotOperation =
+  | "WRITING_ONLY"
+  | "EVIDENCE_REUSE"
+  | "NEW_RETRIEVAL"
+  | "MIXED"
+  | "CLARIFY"
+  | "CHAT"
+  | "ANSWER";
 
 export interface CopilotFact {
   fact_id: string;
@@ -31,6 +38,8 @@ export interface CopilotResult {
   thread_id: string;
   operation: CopilotOperation;
   proposal: string;
+  /** A message to the employee (chat reply / answer / note). Never part of the email. */
+  message: string;
   changes_summary: string;
   base_draft_revision: string | null;
   apply_allowed: boolean;

@@ -246,7 +246,7 @@ def _service(monkeypatch, decide_op, compose_outputs, ctx_facts=None, resolve_re
         calls["decide"] += 1
         return decide_op, {"decision_llm_calls": 0 if decide_op.decided_by == "rules" else 1}
 
-    async def compose(tenant, instruction, draft, customer, brief, ev, repair=None, session=""):
+    async def compose(tenant, instruction, draft, customer, brief, ev, repair=None, session="", goal=""):
         calls.setdefault("sessions", []).append(session)
         calls.setdefault("drafts", []).append(draft)
         out = compose_outputs[min(calls["compose"], len(compose_outputs) - 1)]
@@ -504,3 +504,93 @@ def test_copilot_search_does_not_inherit_the_thread_subject(monkeypatch):
         asyncio.run(evidence.retrieve("t1", snap, FactRequest(request="cheapest SS soap dispenser")))
     assert seen == {"subject": None, "body": "cheapest SS soap dispenser"}
     assert retrieval_router and evidence_fusion and evidence_package
+
+
+# --------------------------------------------------------------------------- chat / answer modes
+
+@pytest.mark.parametrize("text", ["hii", "Hi", "hello there", "hey!", "good morning", "how are you?"])
+def test_greetings_are_chat_not_drafts(text):
+    d = decision.rule_decision(text, DRAFT)
+    assert d is not None and d.operation == CopilotOperation.CHAT and d.reply and not d.fact_requests
+
+
+def test_thanks_is_chat():
+    d = decision.rule_decision("thanks!", DRAFT)
+    assert d is not None and d.operation == CopilotOperation.CHAT
+
+
+@pytest.mark.parametrize("text", ["the customer is my distributor", "what is our return policy?",
+                                  "tell my agent that i can give discount on paper dispenser"])
+def test_unclear_or_question_messages_go_to_ai1(text):
+    assert decision.rule_decision(text, DRAFT) is None
+
+
+def test_answer_without_lookups_becomes_chat():
+    d = decision._validated({"operation": "ANSWER", "writing_goal": "", "fact_requests": [],
+                             "clarification_question": None, "reply": "Noted, I'll keep that in mind."})
+    assert d.operation == CopilotOperation.CHAT and d.reply == "Noted, I'll keep that in mind."
+
+
+def test_chat_reply_leaves_the_draft_alone(monkeypatch):
+    d = decision.rule_decision("hii", DRAFT)
+    s, calls = _service(monkeypatch, d, [_out("should not be used")])
+    res = asyncio.run(s.refine("t1", "th1", CopilotRequest(instruction="hii", draft_text=DRAFT)))
+    assert res.operation == CopilotOperation.CHAT and res.message and res.proposal == "" and not res.apply_allowed
+    assert calls["compose"] == 0 and calls["resolve"] == [] and res.metrics["llm_calls"] == 0
+
+
+def _with_answer(s, outputs):
+    seen = []
+
+    async def answer(tenant, instruction, draft, customer, ev, session="", repair=None):
+        seen.append(ev)
+        return dict(outputs[min(len(seen) - 1, len(outputs) - 1)]), {"compose_llm_calls": 1, "compose_ms": 1.0}
+    s._answer = answer
+    return seen
+
+
+def test_answer_mode_searches_and_replies_in_chat(monkeypatch):
+    d = CopilotDecision(operation=CopilotOperation.ANSWER, decided_by="llm",
+                        fact_requests=[FactRequest(request="price of paper dispenser", attributes=["price"])])
+    ev = EvidenceSet(facts=[_fact("DPDR0001", "price", "1250.00")])
+    s, calls = _service(monkeypatch, d, [_out("unused")], resolve_result=(ev, {"level": "L3_retrieval"}))
+    seen = _with_answer(s, [{"answer": "Noted. Paper dispenser DPDR0001 is ₹1,250.", "used_fact_ids": ["DPDR0001:price"],
+                             "unresolved": []}])
+    res = asyncio.run(s.refine("t1", "th1", CopilotRequest(
+        instruction="tell my agent that i can give discount on paper dispenser", draft_text=DRAFT)))
+    assert res.operation == CopilotOperation.ANSWER and "₹1,250" in res.message and res.proposal == ""
+    assert calls["resolve"] == ["price of paper dispenser"] and calls["compose"] == 0 and seen[0].facts
+    assert [f.fact_id for f in res.facts_used] == ["DPDR0001:price"] and not res.apply_allowed
+
+
+def test_answer_never_shows_an_unverified_price(monkeypatch):
+    d = CopilotDecision(operation=CopilotOperation.ANSWER, decided_by="llm",
+                        fact_requests=[FactRequest(request="price of paper dispenser")])
+    s, _ = _service(monkeypatch, d, [_out("unused")], resolve_result=(EvidenceSet(), {"level": "L3_retrieval"}))
+    _with_answer(s, [{"answer": "It costs ₹999.", "used_fact_ids": [], "unresolved": []}] * 2)
+    res = asyncio.run(s.refine("t1", "th1", CopilotRequest(instruction="what does the paper dispenser cost?",
+                                                           draft_text=DRAFT)))
+    assert "999" not in res.message and res.metrics["repairs"] == 1
+
+
+def test_draft_note_is_kept_only_when_grounded(monkeypatch):
+    d = CopilotDecision(operation=CopilotOperation.MIXED, decided_by="llm", writing_goal="improve; do not tell customer",
+                        fact_requests=[FactRequest(request="paper dispenser price", attributes=["price"])])
+    ev = EvidenceSet(facts=[_fact("DPDR0001", "price", "1250.00")])
+    good = _out("Dear Asha,\n\nThe HA-001 deep cleaning service is Rs. 1,499.\n\nKind regards,\nSupport",
+                assistant_message="Noted - you can discount paper dispensers. DPDR0001 is ₹1,250.")
+    s, _ = _service(monkeypatch, d, [good], resolve_result=(ev, {"level": "L3_retrieval"}))
+    res = asyncio.run(s.refine("t1", "th1", CopilotRequest(instruction="improve the message and note I can discount paper dispensers",
+                                                           draft_text=DRAFT)))
+    assert res.proposal.startswith("Dear Asha") and "DPDR0001" in res.message and res.apply_allowed
+    bad = dict(good, assistant_message="Paper dispensers are ₹777.")
+    s2, _ = _service(monkeypatch, d, [bad], resolve_result=(ev, {"level": "L3_retrieval"}))
+    res2 = asyncio.run(s2.refine("t1", "th1", CopilotRequest(instruction="improve it", draft_text=DRAFT)))
+    assert res2.message == "" and res2.apply_allowed
+
+
+def test_employee_authorized_discount_is_allowed_customer_demand_is_not():
+    text = "We can offer a 10% discount on the paper dispenser."
+    assert composer.validate_proposal(text, "", EvidenceSet(), "customer: give me 10% off",
+                                      employee_text="tell the customer we can give 10% discount") == []
+    assert {i.code for i in composer.validate_proposal(text, "", EvidenceSet(), "customer: give me 10% off")} == {"UNVERIFIED_DISCOUNT"}

@@ -111,6 +111,12 @@ def absence_claim_codes(text: str) -> List[str]:
     return _unsupported_absence_claims(text, None)
 
 
+def employee_text(req: CopilotRequest) -> str:
+    """The employee's own words this session (instructions only, never customer text): they may authorize
+    statements such as a discount, which the validator then accepts."""
+    return " ".join([req.instruction] + [t.instruction for t in req.history] + [req.session_summary])
+
+
 def _norm(s: str) -> str:
     import re as _re
     return _re.sub(r"\s+", " ", (s or "").strip().lower())
@@ -141,7 +147,8 @@ def _evidence_status(op: CopilotOperation, levels: List[str], n_facts: int) -> s
 
 class ReplyCopilotService:
     def __init__(self, decide=None, compose=None, resolve=None, load_thread=None, context_records=None,
-                 session_factory=None):
+                 session_factory=None, answer=None):
+        self._answer = answer or composer_mod.answer
         self._session = session_factory or (lambda: db_manager.session_factory())
         self._decide = decide or decision_mod.decide
         self._compose = compose or composer_mod.compose
@@ -201,6 +208,11 @@ class ReplyCopilotService:
             if decision.operation == CopilotOperation.CLARIFY:
                 return self._finish(rid, thread_id, decision.operation, req, metrics, t0,
                                     clarification=decision.clarification_question or "Could you say a bit more about what to change?")
+            if decision.operation == CopilotOperation.CHAT:
+                # Small talk / a question about the copilot: reply in the chat; the draft is untouched.
+                return self._finish(rid, thread_id, decision.operation, req, metrics, t0,
+                                    message=decision.reply or "How can I help with this reply?",
+                                    status="Chat")
 
             # ---- evidence (only for fact requests)
             ev = EvidenceSet()
@@ -238,6 +250,9 @@ class ReplyCopilotService:
                     metrics["levels"].append("L1_reuse")
                     metrics["corrected_absence_claims"] = sorted(found)
 
+        if decision.operation == CopilotOperation.ANSWER:
+            return await self._answer_flow(rid, thread_id, tenant_id, req, decision, snap, customer_msg, ev, metrics, t0)
+
         op = self._final_operation(decision, metrics["levels"])
         if metrics.get("corrected_absence_claims") and op == CopilotOperation.WRITING_ONLY:
             op = CopilotOperation.MIXED
@@ -247,7 +262,7 @@ class ReplyCopilotService:
 
         # ---- AI #2 (+ one bounded extra search it may ask for)
         data, cm = await self._compose(tenant_id, req.instruction, req.draft_text, customer_msg, brief, ev,
-                                       session=session)
+                                       session=session, goal=decision.writing_goal)
         self._count(metrics, cm)
         extra = composer_mod.extra_request(data)
         if extra is not None and op != CopilotOperation.WRITING_ONLY and metrics["extra_retrievals"] < MAX_EXTRA_RETRIEVALS:
@@ -258,7 +273,7 @@ class ReplyCopilotService:
             metrics["retrieval_calls"] += 1 if m2.get("level") == "L3_retrieval" else 0
             ev = merge_evidence([ev, more])
             data, cm = await self._compose(tenant_id, req.instruction, req.draft_text, customer_msg, brief, ev,
-                                       session=session)
+                                       session=session, goal=decision.writing_goal)
             self._count(metrics, cm)
 
         proposal = str(data.get("revised_draft") or "").strip()
@@ -267,7 +282,7 @@ class ReplyCopilotService:
             metrics["repairs"] += 1
             fix = "\n".join(f"- {i.code}: {i.detail}" for i in issues)
             data2, cm = await self._compose(tenant_id, req.instruction, req.draft_text, customer_msg, brief, ev,
-                                            repair=fix, session=session)
+                                            repair=fix, session=session, goal=decision.writing_goal)
             self._count(metrics, cm)
             p2 = str(data2.get("revised_draft") or "").strip()
             issues2 = self._check(p2, req, ev, grounding)
@@ -281,14 +296,45 @@ class ReplyCopilotService:
         facts_used = [f for f in ev.facts if f.fact_id in used_ids][:40]
         unresolved = list(dict.fromkeys([str(u)[:300] for u in (data.get("unresolved") or [])] + ev.unresolved))[:10]
         metrics["rejected_evidence"] = len(data.get("rejected_evidence") or [])
-        return self._finish(rid, thread_id, op, req, metrics, t0, proposal=proposal,
+        note = str(data.get("assistant_message") or "").strip()[:1200]
+        if note and composer_mod.validate_proposal(note, req.draft_text, ev, grounding, employee_text(req)):
+            note = ""                      # a note to the employee must be as grounded as the email itself
+        return self._finish(rid, thread_id, op, req, metrics, t0, proposal=proposal, message=note,
                             summary=str(data.get("changes_summary") or "")[:300], facts_used=facts_used,
                             unresolved=unresolved, issues=issues,
                             status=_evidence_status(op, metrics["levels"], len(ev.facts)))
 
+    async def _answer_flow(self, rid: str, thread_id: str, tenant_id: str, req: CopilotRequest, decision: CopilotDecision,
+                           snap, customer_msg: str, ev: EvidenceSet, metrics: Dict[str, Any], t0: float) -> CopilotResult:
+        """ANSWER: the employee asked or told the copilot something. Answer in the chat from the
+        evidence; the draft is never touched (no proposal, nothing to apply)."""
+        session = session_context(req)
+        grounding = "\n".join([req.instruction] + [m["body_text"] or "" for m in snap.messages])
+        data, cm = await self._answer(tenant_id, req.instruction, req.draft_text, customer_msg, ev, session=session)
+        self._count(metrics, cm)
+        text = str(data.get("answer") or "").strip()
+        issues = composer_mod.validate_proposal(text, req.draft_text, ev, grounding, employee_text(req))
+        if issues and metrics["repairs"] < MAX_REPAIRS:
+            metrics["repairs"] += 1
+            fix = "\n".join(f"- {i.code}: {i.detail}" for i in issues)
+            data2, cm = await self._answer(tenant_id, req.instruction, req.draft_text, customer_msg, ev,
+                                           session=session, repair=fix)
+            self._count(metrics, cm)
+            t2 = str(data2.get("answer") or "").strip()
+            issues2 = composer_mod.validate_proposal(t2, req.draft_text, ev, grounding, employee_text(req))
+            if len(issues2) < len(issues) or not issues2:
+                data, text, issues = data2, t2, issues2
+        if issues:   # never show an unverified fact, even in the chat
+            text = "I couldn't verify that against your catalogue, so I won't quote it. Could you rephrase or name the product?"
+        used_ids = set(map(str, data.get("used_fact_ids") or []))
+        unresolved = list(dict.fromkeys([str(u)[:300] for u in (data.get("unresolved") or [])] + ev.unresolved))[:10]
+        return self._finish(rid, thread_id, CopilotOperation.ANSWER, req, metrics, t0, message=text,
+                            facts_used=[f for f in ev.facts if f.fact_id in used_ids][:40], unresolved=unresolved,
+                            status=_evidence_status(CopilotOperation.ANSWER, metrics["levels"], len(ev.facts)))
+
     @staticmethod
     def _check(proposal: str, req: CopilotRequest, ev: EvidenceSet, grounding: str) -> List[CopilotIssue]:
-        issues = composer_mod.validate_proposal(proposal, req.draft_text, ev, grounding)
+        issues = composer_mod.validate_proposal(proposal, req.draft_text, ev, grounding, employee_text(req))
         if req.draft_text.strip() and _norm(proposal) == _norm(req.draft_text):
             issues.append(CopilotIssue(code="UNCHANGED", detail="The suggestion is identical to the current draft."))
         return issues
@@ -325,11 +371,11 @@ class ReplyCopilotService:
     @staticmethod
     def _finish(rid: str, thread_id: str, op: CopilotOperation, req: CopilotRequest, metrics: Dict[str, Any],
                 t0: float, proposal: str = "", summary: str = "", facts_used=None, unresolved=None, issues=None,
-                status: str = "", clarification: Optional[str] = None) -> CopilotResult:
+                status: str = "", clarification: Optional[str] = None, message: str = "") -> CopilotResult:
         metrics["total_ms"] = round((time.perf_counter() - t0) * 1000, 1)
         issues = issues or []
         result = CopilotResult(
-            request_id=rid, thread_id=thread_id, operation=op, proposal=proposal, changes_summary=summary,
+            request_id=rid, thread_id=thread_id, operation=op, proposal=proposal, message=message, changes_summary=summary,
             base_draft_revision=req.draft_revision, apply_allowed=bool(proposal) and not issues,
             facts_used=facts_used or [], unresolved=unresolved or [], issues=issues,
             clarification_question=clarification, evidence_status=status or ("Needs clarification" if clarification else ""),
