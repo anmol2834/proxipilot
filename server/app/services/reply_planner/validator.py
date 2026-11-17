@@ -87,6 +87,27 @@ def _ungrounded_codes(body: str, package: Any) -> List[str]:
     return out
 
 
+_ABSENCE = re.compile(
+    r"(couldn[’']?t|could not|can[’']?t|cannot|unable to|did not|didn[’']?t)\s+(find|locate|see)|not\s+(in|listed in|"
+    r"part of|found in|available in)\s+(our|the)\s+(catalog\w*|records?|list|range|system)|(does not|doesn[’']?t)\s+exist|"
+    r"no\s+(such|similar|matching)\s+(code|product|item)|isn[’']?t\s+a\s+similar\s+code",
+    re.IGNORECASE)
+
+
+def _unsupported_absence_claims(body: str, package: Any) -> List[str]:
+    """Codes the draft declares missing although retrieval never confirmed them missing (pure)."""
+    confirmed_missing = {str(u.get("requested") or "").upper() for u in getattr(package, "unknown_identifiers", None) or []}
+    out: List[str] = []
+    for sentence in re.split(r"(?<=[.!?;])\s+|\n+", body or ""):
+        if not _ABSENCE.search(sentence):
+            continue
+        for tok in _CODE_TOKEN.findall(sentence):
+            up = tok.upper()
+            if _looks_like_code(up) and up not in confirmed_missing and up not in out:
+                out.append(up)
+    return out
+
+
 def _placeholders_in(text: str) -> List[str]:
     found: List[str] = []
     for rx in (_PLACEHOLDER_MONEY, _PLACEHOLDER_SLOT, _MASKED_NUMBER):
@@ -214,6 +235,18 @@ class DeterministicReplyValidator:
                 issue_code="UNVERIFIED_IDENTIFIER",
                 severity=ValidationIssueSeverity.CRITICAL,
                 description=f"Draft mentions code '{code}' that is not in the verified evidence; use only codes from the evidence.",
+            ))
+
+        # 4d. Non-existence claims: "X is not in our catalogue / couldn't find X" only when X was
+        # actually searched and confirmed missing (package.unknown_identifiers). A code that was
+        # never searched (e.g. only in an old subject line) must not be declared non-existent.
+        for code in _unsupported_absence_claims(draft.body_text or "", package):
+            issues.append(ValidationIssue(
+                issue_code="UNVERIFIED_ABSENCE_CLAIM",
+                severity=ValidationIssueSeverity.CRITICAL,
+                description=(f"Draft says '{code}' is not available / not in the catalogue, but that code was not "
+                             f"searched or is listed. Do not claim it does not exist: ask the customer to confirm what "
+                             f"they need, or say the team will check '{code}'."),
             ))
 
         # 5. HTML Safety & Sanitization

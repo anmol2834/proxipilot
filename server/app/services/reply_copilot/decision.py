@@ -106,6 +106,9 @@ Decide what the instruction needs. You never write the email.
 operation:
 - WRITING_ONLY: only wording changes (tone, length, grammar, translation, order, clarity). Facts already in the
   draft are kept as they are. Use this even when the instruction mentions prices/specs only to keep or move them.
+  Also WRITING_ONLY when the instruction itself tells you WHAT to say ("tell them we received the PO", "say we will
+  call tomorrow", "mention our office is closed on Sunday"): the employee is the source; nothing is looked up.
+  Never create fact requests for the customer's original questions unless the instruction asks to answer or add them.
 - EVIDENCE_REUSE / NEW_RETRIEVAL / MIXED: the reply needs business information that is NOT already in the draft
   (a price, specification, warranty, availability, delivery, contact, alternatives, policy...). Put each piece in
   fact_requests. Pick MIXED when there is also a wording change.

@@ -292,6 +292,26 @@ def _package_to_evidence(package: Any) -> EvidenceSet:
     return ev
 
 
+_ATTR_GAP = re.compile(r"Attribute '([^']+)'", re.IGNORECASE)
+
+
+def relevant_gaps(gaps: Sequence[str], attributes: Sequence[str]) -> List[str]:
+    """Keep only gaps about what THIS request asked for. The planner also sees the thread, so it may add
+    attributes from the customer's earlier questions ("features", "warranty") that the employee did not ask
+    about; reporting those as gaps is noise."""
+    wanted = [a.lower().replace(" ", "_") for a in attributes if a]
+    out: List[str] = []
+    for g in gaps:
+        m = _ATTR_GAP.search(g)
+        if m is None:
+            out.append(g)
+            continue
+        name = m.group(1).lower().replace(" ", "_")
+        if any(w in name or name in w for w in wanted):
+            out.append(g)
+    return out
+
+
 async def retrieve(tenant_id: str, snap: ThreadSnapshot, req: FactRequest) -> Tuple[EvidenceSet, Dict[str, Any]]:
     """Run the existing planner -> retrieval -> fusion -> package chain for one fact request."""
     from app.services.context_resolver import ContextEnvelope, ContextMessage
@@ -325,6 +345,7 @@ async def retrieve(tenant_id: str, snap: ThreadSnapshot, req: FactRequest) -> Tu
     package = await evidence_package_service.build_package(tenant_id=tenant_id, fusion_result=fusion, envelope=env,
                                                            plan=plan, dispatch_event=False)
     ev = _package_to_evidence(package)
+    ev.unresolved = relevant_gaps(ev.unresolved, req.attributes)
     if plan.clarification_required and plan.clarification_reason and not ev.facts:
         ev.unresolved.append(str(plan.clarification_reason)[:300])
     metrics = {"planner_ms": round((t1 - t0) * 1000, 1), "retrieval_ms": round((t2 - t1) * 1000, 1),

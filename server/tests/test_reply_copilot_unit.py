@@ -371,3 +371,29 @@ def test_bare_amounts_worded_as_prices_are_validated():
     bad = "HA-002 costs 899, and the total amount will be 3,000. Visit at 10 am for 2 units, 120 days warranty."
     found = [i.detail for i in composer.validate_proposal(bad, "", ev, "")]
     assert len(found) == 2 and any("899" in d for d in found) and any("3,000" in d for d in found)
+
+
+def test_proposal_cannot_call_a_listed_code_missing():
+    ev = EvidenceSet(facts=[_fact("DSDR0099", "price", "2740.0")])
+    bad = "I also couldn't find product code DSDR0099 in our catalogue. Please re-check the code."
+    assert {i.code for i in composer.validate_proposal(bad, bad, ev, "")} == {"CONTRADICTS_EVIDENCE"}
+    good = "DSDR0099 is the 304 SS Soap Dispenser 1000ML, priced at ₹2,740."
+    assert composer.validate_proposal(good, bad, ev, "") == []
+    missing = EvidenceSet(unknown_codes=[{"requested": "ZZ1234", "suggestions": []}])
+    assert composer.validate_proposal("We couldn't find ZZ1234 in our catalogue.", "", missing, "ZZ1234") == []
+
+
+def test_gaps_are_limited_to_requested_attributes():
+    gaps = ["Attribute 'availability' is not specified in authoritative knowledge records.",
+            "Attribute 'warranty' is not specified in authoritative knowledge records.",
+            "Category 'shipping' is not configured."]
+    assert evidence.relevant_gaps(gaps, ["warranty"]) == gaps[1:]
+    assert evidence.relevant_gaps(gaps, []) == gaps[2:]
+
+
+def test_pipeline_validator_rejects_unsearched_absence_claims():
+    from app.services.reply_planner.validator import _unsupported_absence_claims
+    pkg = SimpleNamespace(unknown_identifiers=[{"requested": "DSDR0016", "suggestions": ["DSDR0015"]}])
+    text = ("I also couldn't find product code DSDR0099 in our catalogue; there isn't a similar code listed.\n"
+            "We could not find DSDR0016; the closest is DSDR0015. HA-001 costs Rs. 999.")
+    assert _unsupported_absence_claims(text, pkg) == ["DSDR0099"]
