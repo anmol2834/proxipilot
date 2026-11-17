@@ -2,7 +2,14 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { Conversation } from "@/types/inbox.types";
-import { copilotService, draftRevision, type CopilotResult } from "@/services/copilot.service";
+import {
+  buildSessionContext,
+  copilotService,
+  draftRevision,
+  type CopilotResult,
+  type CopilotTurn,
+  type DraftSource,
+} from "@/services/copilot.service";
 import {
   IconSparkles,
   IconX,
@@ -39,6 +46,8 @@ interface ChatMessage {
   /** Backend result for assistant messages (absent for errors / cancellations). */
   result?: CopilotResult;
   error?: boolean;
+  /** Which text this suggestion refined: the editor, or the previous (unapplied) suggestion. */
+  basedOn?: DraftSource;
 }
 
 const OPERATION_LABEL: Record<string, string> = {
@@ -151,11 +160,30 @@ export function IsolatedAiPromptBox({
     if (!conversation || isGenerating) return;
     const instruction = promptText.trim();
     if (!instruction) return;
-    const baseDraft = currentDraft;
-    const history = messages
-      .filter((m) => m.role === "user")
-      .slice(-5)
-      .map((m) => ({ instruction: m.content, applied: false }));
+    // Working draft: keep refining the latest suggestion the user has not applied, as long as the editor
+    // is still exactly what that suggestion was based on; otherwise the editor is the source of truth.
+    const editorRevision = draftRevision(currentDraft);
+    const lastProposal = [...messages]
+      .reverse()
+      .find((m) => m.role === "assistant" && m.result && m.result.proposal && m.result.operation !== "CLARIFY");
+    const refineProposal = Boolean(
+      lastProposal && !lastProposal.applied && lastProposal.result?.base_draft_revision === editorRevision
+    );
+    const workingDraft = refineProposal && lastProposal ? lastProposal.content : currentDraft;
+    const draftSource: DraftSource = refineProposal ? "proposal" : "editor";
+
+    // Session turns: each instruction with what the Copilot changed in reply (its summary).
+    const turns: CopilotTurn[] = [];
+    messages.forEach((m, i) => {
+      if (m.role !== "user") return;
+      const reply = messages[i + 1];
+      turns.push({
+        instruction: m.content,
+        applied: Boolean(reply?.applied),
+        summary: reply?.result?.changes_summary || (reply?.error ? "(failed)" : null),
+      });
+    });
+    const { history, session_summary } = buildSessionContext(turns);
     setMessages((prev) => [...prev, { id: `user-${Date.now()}`, role: "user", content: instruction, timestamp: now() }]);
     setCustomPrompt("");
     setConflictId(null);
@@ -165,13 +193,27 @@ export function IsolatedAiPromptBox({
     try {
       const res = await copilotService.refine(
         conversation.id,
-        { instruction, draft_text: baseDraft, draft_revision: draftRevision(baseDraft), history },
+        {
+          instruction,
+          draft_text: workingDraft,
+          draft_revision: editorRevision,
+          history,
+          draft_source: draftSource,
+          session_summary,
+        },
         ac.signal
       );
       const content = res.operation === "CLARIFY" ? res.clarification_question || "" : res.proposal;
       setMessages((prev) => [
         ...prev,
-        { id: `asst-${res.request_id}`, role: "assistant", content, timestamp: now(), result: res },
+        {
+          id: `asst-${res.request_id}`,
+          role: "assistant",
+          content,
+          timestamp: now(),
+          result: res,
+          basedOn: draftSource,
+        },
       ]);
     } catch (err) {
       const cancelled = ac.signal.aborted;
@@ -625,7 +667,16 @@ export function IsolatedAiPromptBox({
                         {OPERATION_LABEL[msg.result.operation] ?? msg.result.operation}
                       </span>
                       {msg.result.evidence_status && <span style={{ color: "#64748B" }}>{msg.result.evidence_status}</span>}
+                      {msg.basedOn === "proposal" && (
+                        <span style={{ color: "#64748B" }}>· refined the previous suggestion</span>
+                      )}
                     </div>
+                    {msg.result.changes_summary && (
+                      <div style={{ fontSize: 11, color: "#475569" }}>
+                        <span style={{ fontWeight: 600 }}>Changed: </span>
+                        {msg.result.changes_summary}
+                      </div>
+                    )}
                     {msg.result.facts_used.length > 0 && (
                       <div style={{ fontSize: 11, color: "#475569" }}>
                         <span style={{ fontWeight: 600 }}>Verified facts used: </span>

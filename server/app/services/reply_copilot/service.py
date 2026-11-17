@@ -31,7 +31,7 @@ from app.services.reply_copilot import composer as composer_mod
 from app.services.reply_copilot import decision as decision_mod
 from app.services.reply_copilot import evidence as ev_mod
 from app.services.reply_copilot.contracts import (
-    CopilotDecision, CopilotFact, CopilotOperation, CopilotRequest, CopilotResult, EvidenceSet,
+    CopilotDecision, CopilotFact, CopilotIssue, CopilotOperation, CopilotRequest, CopilotResult, EvidenceSet,
     FactRequest,
 )
 
@@ -58,6 +58,39 @@ def merge_evidence(parts: List[EvidenceSet]) -> EvidenceSet:
         out.search_incomplete = out.search_incomplete or ev.search_incomplete
         out.sources_used += [s for s in ev.sources_used if s not in out.sources_used]
     return out
+
+
+MAX_VERBATIM_TURNS = 6
+
+
+def session_context(req: CopilotRequest) -> str:
+    """Bounded session memory for both AI steps (like a chat assistant's context window):
+    a compact summary of older turns + the last few turns verbatim (instruction -> what changed),
+    and where the working draft came from. Hard-capped; never includes customer content."""
+    lines: List[str] = []
+    if req.session_summary.strip():
+        lines.append("Earlier (summarised): " + req.session_summary.strip()[:1200])
+    for t in req.history[-MAX_VERBATIM_TURNS:]:
+        line = "- " + t.instruction.strip()[:300]
+        if t.summary:
+            line += " -> " + t.summary.strip()[:200]
+        if t.applied:
+            line += " [applied to the editor]"
+        lines.append(line)
+    if req.draft_source == "proposal":
+        lines.append("(The WORKING DRAFT is the copilot's previous suggestion; the employee is refining it.)")
+    return "\n".join(lines)[:2500]
+
+
+def absence_claim_codes(text: str) -> List[str]:
+    """Codes the working draft says do not exist / were not found (verified before rewriting)."""
+    from app.services.reply_planner.validator import _unsupported_absence_claims
+    return _unsupported_absence_claims(text, None)
+
+
+def _norm(s: str) -> str:
+    import re as _re
+    return _re.sub(r"\s+", " ", (s or "").strip().lower())
 
 
 def _thread_brief(snap: ev_mod.ThreadSnapshot) -> str:
@@ -120,7 +153,7 @@ class ReplyCopilotService:
             # ---- AI #1
             decision, dm = await self._decide(req.instruction, req.draft_text, customer_msg,
                                               [(c, titles.get(c, "")) for c in ctx_codes],
-                                              [h.instruction for h in req.history])
+                                              session_context(req).splitlines())
             metrics.update(dm)
             metrics["llm_calls"] += dm.get("decision_llm_calls", 0)
             metrics["decided_by"] = decision.decided_by
@@ -147,12 +180,29 @@ class ReplyCopilotService:
                     metrics["retrieval_calls"] += 1 if m.get("level") == "L3_retrieval" else 0
                     metrics.setdefault("evidence_detail", []).append({k: v for k, v in m.items() if k != "level"})
 
+            # The working draft may say "code X is not in our catalogue". Check it with an exact-code
+            # lookup (B-tree, milliseconds); if X exists, give its current record to AI #2 so the
+            # false sentence is corrected instead of polished.
+            claimed_missing = [c for c in absence_claim_codes(req.draft_text)
+                               if c not in {(f.entity_code or "").upper() for f in ev.facts}]
+            if claimed_missing:
+                found, _ = await self._context_records(db, tenant_id, claimed_missing, [])
+                if found:
+                    ev = merge_evidence([ev, EvidenceSet(facts=[f for fs in found.values() for f in fs],
+                                                         sources_used=["context_record"])])
+                    metrics["levels"].append("L1_reuse")
+                    metrics["corrected_absence_claims"] = sorted(found)
+
         op = self._final_operation(decision, metrics["levels"])
+        if metrics.get("corrected_absence_claims") and op == CopilotOperation.WRITING_ONLY:
+            op = CopilotOperation.MIXED
+        session = session_context(req)
         grounding = "\n".join([req.instruction] + [m["body_text"] or "" for m in snap.messages])
         brief = _thread_brief(snap)
 
         # ---- AI #2 (+ one bounded extra search it may ask for)
-        data, cm = await self._compose(tenant_id, req.instruction, req.draft_text, customer_msg, brief, ev)
+        data, cm = await self._compose(tenant_id, req.instruction, req.draft_text, customer_msg, brief, ev,
+                                       session=session)
         self._count(metrics, cm)
         extra = composer_mod.extra_request(data)
         if extra is not None and op != CopilotOperation.WRITING_ONLY and metrics["extra_retrievals"] < MAX_EXTRA_RETRIEVALS:
@@ -162,18 +212,20 @@ class ReplyCopilotService:
             metrics["levels"].append(m2.get("level"))
             metrics["retrieval_calls"] += 1 if m2.get("level") == "L3_retrieval" else 0
             ev = merge_evidence([ev, more])
-            data, cm = await self._compose(tenant_id, req.instruction, req.draft_text, customer_msg, brief, ev)
+            data, cm = await self._compose(tenant_id, req.instruction, req.draft_text, customer_msg, brief, ev,
+                                       session=session)
             self._count(metrics, cm)
 
         proposal = str(data.get("revised_draft") or "").strip()
-        issues = composer_mod.validate_proposal(proposal, req.draft_text, ev, grounding)
+        issues = self._check(proposal, req, ev, grounding)
         if issues and metrics["repairs"] < MAX_REPAIRS:
             metrics["repairs"] += 1
             fix = "\n".join(f"- {i.code}: {i.detail}" for i in issues)
-            data2, cm = await self._compose(tenant_id, req.instruction, req.draft_text, customer_msg, brief, ev, repair=fix)
+            data2, cm = await self._compose(tenant_id, req.instruction, req.draft_text, customer_msg, brief, ev,
+                                            repair=fix, session=session)
             self._count(metrics, cm)
             p2 = str(data2.get("revised_draft") or "").strip()
-            issues2 = composer_mod.validate_proposal(p2, req.draft_text, ev, grounding)
+            issues2 = self._check(p2, req, ev, grounding)
             if len(issues2) < len(issues) or not issues2:
                 data, proposal, issues = data2, p2, issues2
 
@@ -188,6 +240,13 @@ class ReplyCopilotService:
                             summary=str(data.get("changes_summary") or "")[:300], facts_used=facts_used,
                             unresolved=unresolved, issues=issues,
                             status=_evidence_status(op, metrics["levels"], len(ev.facts)))
+
+    @staticmethod
+    def _check(proposal: str, req: CopilotRequest, ev: EvidenceSet, grounding: str) -> List[CopilotIssue]:
+        issues = composer_mod.validate_proposal(proposal, req.draft_text, ev, grounding)
+        if req.draft_text.strip() and _norm(proposal) == _norm(req.draft_text):
+            issues.append(CopilotIssue(code="UNCHANGED", detail="The suggestion is identical to the current draft."))
+        return issues
 
     @staticmethod
     def _count(metrics: Dict[str, Any], cm: Dict[str, Any]) -> None:

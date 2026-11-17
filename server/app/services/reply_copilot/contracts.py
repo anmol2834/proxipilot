@@ -7,7 +7,7 @@ stays the editor's explicit Send action (``/feedback/drafts/{id}/send`` or ``/th
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -27,9 +27,10 @@ class EvidenceSource(str, Enum):
 
 
 class CopilotTurn(BaseModel):
-    """A previous instruction in this Copilot session (the user's own words; no customer content)."""
+    """A recent turn of this Copilot session: the employee's instruction and what the Copilot changed."""
     instruction: str = Field(max_length=2000)
     applied: bool = False
+    summary: Optional[str] = Field(default=None, max_length=400)   # changes_summary of that turn's proposal
 
 
 class CopilotRequest(BaseModel):
@@ -39,6 +40,12 @@ class CopilotRequest(BaseModel):
     # refuse to apply a proposal over newer editor content (optimistic concurrency).
     draft_revision: Optional[str] = Field(default=None, max_length=128)
     history: List[CopilotTurn] = Field(default_factory=list, max_length=8)
+    # Session context (bounded, compacted by the client like a chat assistant's context window):
+    # "proposal" = draft_text is the latest Copilot suggestion the user is still refining (not yet
+    # applied, editor unchanged); "editor" = draft_text is the editor content.
+    draft_source: Literal["editor", "proposal"] = "editor"
+    # Older turns compressed to one line each, oldest first (only when the session outgrows ``history``).
+    session_summary: str = Field(default="", max_length=1500)
 
 
 class FactRequest(BaseModel):

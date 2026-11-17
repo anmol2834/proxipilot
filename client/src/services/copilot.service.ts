@@ -45,6 +45,50 @@ export interface CopilotResult {
 export interface CopilotTurn {
   instruction: string;
   applied: boolean;
+  /** What the Copilot changed in that turn (its changes_summary): the session memory. */
+  summary?: string | null;
+}
+
+export type DraftSource = "editor" | "proposal";
+
+export interface RefineBody {
+  instruction: string;
+  draft_text: string;
+  /** Revision of the EDITOR text (used to refuse applying over newer edits). */
+  draft_revision: string;
+  history: CopilotTurn[];
+  draft_source: DraftSource;
+  session_summary: string;
+}
+
+/** Turns kept verbatim; older turns are compacted into one bounded summary line each. */
+export const VERBATIM_TURNS = 6;
+const SUMMARY_BUDGET = 1200;
+
+const clip = (s: string, n: number) => (s.length <= n ? s : `${s.slice(0, n - 1)}…`);
+
+/**
+ * Session context window (like a chat assistant's): the last VERBATIM_TURNS turns verbatim, everything
+ * older compacted to "instruction -> what changed" lines, newest kept first when the budget is exceeded.
+ * Bounded size whatever the session length, so requests never grow without limit.
+ */
+export function buildSessionContext(turns: CopilotTurn[]): { history: CopilotTurn[]; session_summary: string } {
+  const history = turns.slice(-VERBATIM_TURNS).map((t) => ({
+    instruction: clip(t.instruction, 1900),
+    applied: t.applied,
+    summary: t.summary ? clip(t.summary, 380) : null,
+  }));
+  const older = turns.slice(0, Math.max(0, turns.length - VERBATIM_TURNS));
+  const lines: string[] = [];
+  let used = 0;
+  for (let i = older.length - 1; i >= 0; i--) {
+    const t = older[i];
+    const line = `${clip(t.instruction, 120)}${t.summary ? ` -> ${clip(t.summary, 100)}` : ""}${t.applied ? " [applied]" : ""}`;
+    if (used + line.length + 2 > SUMMARY_BUDGET) break;
+    lines.unshift(line);
+    used += line.length + 2;
+  }
+  return { history, session_summary: lines.join("; ") };
 }
 
 /** Stable revision id of an editor text (FNV-1a 32-bit + length): equal text => equal revision. */
@@ -60,7 +104,7 @@ export function draftRevision(text: string): string {
 export const copilotService = {
   async refine(
     threadId: string,
-    body: { instruction: string; draft_text: string; draft_revision: string; history: CopilotTurn[] },
+    body: RefineBody,
     signal?: AbortSignal
   ) {
     return (
