@@ -15,8 +15,8 @@ export function FeatureStrip() {
       ),
     },
     {
-      title: "Multi-tenant architecture",
-      subtitle: "Built for growing businesses.",
+      title: "Tenant-Isolated Privacy",
+      subtitle: "Your data strictly segregated.",
       icon: (
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
           <ellipse cx="12" cy="5" rx="9" ry="3" stroke="#4F46E5" strokeWidth="2" />

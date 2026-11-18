@@ -1,3 +1,5 @@
+"use client";
+
 import React from "react";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
@@ -16,38 +18,39 @@ export function IntelligenceCard({
   isAnalyzing = false,
   isVerified = true,
 }: IntelligenceCardProps) {
+  // Business-focused intelligence steps (strictly avoids revealing proprietary system architecture)
   const steps = [
     {
-      id: "intent",
-      label: "Intent detected",
+      id: "inquiry",
+      label: "Inquiry Understanding",
       icon: (
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
           <circle cx="12" cy="12" r="10" stroke="#635BFF" strokeWidth="2" />
-          <circle cx="12" cy="12" r="6" stroke="#635BFF" strokeWidth="2" />
-          <circle cx="12" cy="12" r="2" fill="#635BFF" />
+          <path d="M12 16v-4M12 8h.01" stroke="#635BFF" strokeWidth="2" strokeLinecap="round" />
         </svg>
       ),
       iconBg: "rgba(99, 91, 255, 0.1)",
       valuePill: (
         <Box
           sx={{
-            backgroundColor: isAnalyzing || isVerified ? "#EEF2FF" : "#F1F5F9",
-            color: isAnalyzing || isVerified ? "#4F46E5" : "#1E293B",
+            backgroundColor: "#EEF2FF",
+            color: "#4338CA",
             fontSize: "0.6875rem",
-            fontWeight: 600,
+            fontWeight: 700,
             px: 1.25,
             py: 0.5,
             borderRadius: "6px",
-            transition: "all 200ms ease",
+            border: "1px solid rgba(99, 91, 255, 0.15)",
+            whiteSpace: "nowrap",
           }}
         >
-          {scenario.intelligence.intent}
+          {scenario.intelligence.inquiryType}
         </Box>
       ),
     },
     {
-      id: "customer",
-      label: "Customer identified",
+      id: "account",
+      label: "Account Context",
       icon: (
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
           <path
@@ -60,23 +63,24 @@ export function IntelligenceCard({
       valuePill: (
         <Box
           sx={{
-            backgroundColor: "#EEF2FF",
-            color: "#4F46E5",
+            backgroundColor: "#F0FDFA",
+            color: "#0F766E",
             fontSize: "0.6875rem",
             fontWeight: 600,
             px: 1.25,
             py: 0.5,
             borderRadius: "6px",
-            transition: "all 200ms ease",
+            border: "1px solid rgba(13, 148, 136, 0.2)",
+            whiteSpace: "nowrap",
           }}
         >
-          {scenario.intelligence.customer}
+          {scenario.intelligence.accountContext}
         </Box>
       ),
     },
     {
-      id: "requirement",
-      label: "Requirement extracted",
+      id: "specifics",
+      label: "Key Specifics",
       icon: (
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
           <path
@@ -92,35 +96,36 @@ export function IntelligenceCard({
       valuePill: (
         <Box
           sx={{
-            backgroundColor: "#EEF2FF",
-            color: "#4F46E5",
+            backgroundColor: "#EFF6FF",
+            color: "#1E40AF",
             fontSize: "0.6875rem",
             fontWeight: 600,
             px: 1.25,
             py: 0.5,
             borderRadius: "6px",
-            transition: "all 200ms ease",
+            border: "1px solid rgba(37, 99, 235, 0.15)",
+            whiteSpace: "nowrap",
           }}
         >
-          {scenario.intelligence.requirement}
+          {scenario.intelligence.keySpecifics}
         </Box>
       ),
     },
     {
-      id: "knowledge",
-      label: "Knowledge search",
+      id: "grounding",
+      label: "Business Grounding",
       icon: (
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
           <path
-            d="M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 12c0 2.21 3.582 4 8 4s8-1.79 8-4"
-            stroke="#10B981"
+            d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M4 19.5A2.5 2.5 0 0 0 6.5 22H20V2H6.5A2.5 2.5 0 0 0 4 4.5v15z"
+            stroke="#D97706"
             strokeWidth="2"
             strokeLinecap="round"
             strokeLinejoin="round"
           />
         </svg>
       ),
-      iconBg: "rgba(16, 185, 129, 0.12)",
+      iconBg: "rgba(217, 119, 6, 0.1)",
       valuePill: (
         <Box
           sx={{
@@ -131,19 +136,19 @@ export function IntelligenceCard({
             justifyContent: "flex-end",
           }}
         >
-          {scenario.intelligence.knowledgeTags.map((tag, idx) => (
+          {scenario.intelligence.knowledgeGrounded.map((tag, idx) => (
             <Box
               key={idx}
               sx={{
-                backgroundColor: "#F1F5F9",
-                color: "#334155",
+                backgroundColor: "#FFFBEB",
+                color: "#92400E",
                 fontSize: "0.6875rem",
-                fontWeight: 500,
+                fontWeight: 600,
                 px: 1,
                 py: 0.35,
                 borderRadius: "6px",
+                border: "1px solid rgba(217, 119, 6, 0.2)",
                 whiteSpace: "nowrap",
-                transition: "all 200ms ease",
               }}
             >
               {tag}
@@ -153,13 +158,16 @@ export function IntelligenceCard({
       ),
     },
     {
-      id: "evidence",
-      label: "Evidence verified",
+      id: "safety",
+      label: "Safety & Policy Check",
       icon: (
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-          <circle cx="12" cy="12" r="10" fill="#16A36A" />
           <path
-            d="M8 12.5l2.5 2.5 5.5-5.5"
+            d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"
+            fill="#16A34A"
+          />
+          <path
+            d="M9 12l2 2 4-4"
             stroke="#FFFFFF"
             strokeWidth="2"
             strokeLinecap="round"
@@ -169,35 +177,68 @@ export function IntelligenceCard({
       ),
       iconBg: "transparent",
       valuePill: (
-        <Typography
-          variant="body2"
+        <Box
           sx={{
-            color: "#111827",
-            fontWeight: 600,
-            fontSize: "0.75rem",
+            display: "flex",
+            alignItems: "center",
+            gap: 0.6,
+            color: "#166534",
+            fontWeight: 700,
+            fontSize: "0.71875rem",
+            backgroundColor: "#F0FDF4",
+            px: 1.2,
+            py: 0.4,
+            borderRadius: "6px",
+            border: "1px solid rgba(22, 163, 74, 0.2)",
           }}
         >
-          {scenario.intelligence.sourcesMatched}
-        </Typography>
+          <Box sx={{ width: 6, height: 6, borderRadius: "50%", backgroundColor: "#16A34A" }} />
+          {scenario.intelligence.policyStatus}
+        </Box>
       ),
     },
   ];
+
+  const progressPercentage = Math.min(Math.round((activeStepCount / 5) * 100), 100);
 
   return (
     <Box
       sx={{
         width: "100%",
-        maxWidth: { xs: "100%", sm: 420 },
+        maxWidth: { xs: "100%", sm: 480, lg: 495 },
         backgroundColor: "#FFFFFF",
         border: "1px solid #E2E8F0",
-        borderRadius: "20px",
-        boxShadow: "0 20px 40px -12px rgba(79, 70, 229, 0.14), 0 4px 12px -2px rgba(0, 0, 0, 0.04)",
-        p: { xs: 1.5, sm: 2.75 },
+        borderRadius: "18px",
+        boxShadow: "0 16px 40px -8px rgba(79, 70, 229, 0.12), 0 4px 12px -2px rgba(0, 0, 0, 0.04)",
+        p: { xs: 1.5, sm: 2.2 },
         position: "relative",
         zIndex: 3,
-        transition: "border-color 250ms ease, box-shadow 250ms ease",
+        overflow: "hidden",
+        transition: "all 300ms cubic-bezier(0.4, 0, 0.2, 1)",
       }}
     >
+      {/* Top Subtle Animated Progress Line */}
+      <Box
+        sx={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 3,
+          backgroundColor: "#F1F5F9",
+        }}
+      >
+        <Box
+          sx={{
+            height: "100%",
+            width: `${progressPercentage}%`,
+            background: "linear-gradient(90deg, #635BFF, #3B82F6, #10B981)",
+            transition: "width 400ms cubic-bezier(0.4, 0, 0.2, 1)",
+            boxShadow: "0 0 8px rgba(99, 91, 255, 0.6)",
+          }}
+        />
+      </Box>
+
       {/* Header */}
       <Box
         sx={{
@@ -235,8 +276,8 @@ export function IntelligenceCard({
             sx={{
               fontWeight: 700,
               fontSize: { xs: "0.875rem", sm: "0.9375rem" },
-              color: "#111827",
-              letterSpacing: "-0.01em",
+              color: "#0F172A",
+              letterSpacing: "-0.015em",
             }}
           >
             ProxiPilot Intelligence
@@ -251,10 +292,10 @@ export function IntelligenceCard({
               alignItems: "center",
               gap: 0.75,
               backgroundColor: "rgba(99, 91, 255, 0.08)",
-              border: "1px solid rgba(99, 91, 255, 0.18)",
+              border: "1px solid rgba(99, 91, 255, 0.2)",
               borderRadius: "9999px",
               px: 1.25,
-              py: 0.35,
+              py: 0.4,
             }}
           >
             <Box
@@ -263,18 +304,18 @@ export function IntelligenceCard({
                 height: 6,
                 borderRadius: "50%",
                 backgroundColor: "#635BFF",
-                animation: "analyzeBadgePulse 1.6s infinite ease-in-out",
+                animation: "analyzeBadgePulse 1.4s infinite ease-in-out",
               }}
             />
             <Typography
               variant="caption"
               sx={{
-                fontWeight: 600,
+                fontWeight: 700,
                 fontSize: "0.6875rem",
                 color: "#635BFF",
               }}
             >
-              Analyzing...
+              Analyzing Context...
             </Typography>
           </Box>
         ) : isVerified ? (
@@ -287,10 +328,10 @@ export function IntelligenceCard({
               border: "1px solid rgba(22, 163, 74, 0.25)",
               borderRadius: "9999px",
               px: 1.25,
-              py: 0.35,
+              py: 0.4,
             }}
           >
-            <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
               <path
                 d="M2.5 6.5l2.5 2.5 4.5-5"
                 stroke="#16A34A"
@@ -302,12 +343,12 @@ export function IntelligenceCard({
             <Typography
               variant="caption"
               sx={{
-                fontWeight: 600,
+                fontWeight: 700,
                 fontSize: "0.6875rem",
-                color: "#16A34A",
+                color: "#166534",
               }}
             >
-              Verified
+              Grounded &amp; Verified
             </Typography>
           </Box>
         ) : (
@@ -319,28 +360,28 @@ export function IntelligenceCard({
               backgroundColor: "#F1F5F9",
               borderRadius: "9999px",
               px: 1.25,
-              py: 0.35,
+              py: 0.4,
             }}
           >
             <Typography
               variant="caption"
               sx={{
-                fontWeight: 500,
+                fontWeight: 600,
                 fontSize: "0.6875rem",
                 color: "#64748B",
               }}
             >
-              Standby
+              Listening to Inbox
             </Typography>
           </Box>
         )}
       </Box>
 
-      {/* 5 Process Rows with progressive activation */}
+      {/* Intelligence Row List with Staggered Transition */}
       <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25 }}>
         {steps.map((step, idx) => {
-          const isCurrentStep = isAnalyzing && idx === activeStepCount - 1;
-          const isStepDone = isVerified || (isAnalyzing && idx < activeStepCount);
+          const isRowActive = idx < activeStepCount;
+          const isCurrentAnalyzing = isAnalyzing && idx === activeStepCount - 1;
 
           return (
             <Box
@@ -349,28 +390,25 @@ export function IntelligenceCard({
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "space-between",
-                flexWrap: { xs: "wrap", sm: "nowrap" },
-                p: { xs: 1, sm: 1.25 },
+                gap: 1.5,
+                p: { xs: 1, sm: 1.2 },
                 borderRadius: "10px",
-                backgroundColor: isCurrentStep
-                  ? "#EEF2FF"
-                  : isStepDone
-                  ? "#FAFAFE"
-                  : "#F8FAFC",
-                border: isCurrentStep
-                  ? "1px solid rgba(99, 91, 255, 0.45)"
-                  : isStepDone
-                  ? "1px solid rgba(99, 91, 255, 0.18)"
-                  : "1px solid #F1F5F9",
-                boxShadow: isCurrentStep
-                  ? "0 2px 8px rgba(99, 91, 255, 0.12)"
-                  : "none",
-                gap: { xs: 0.75, sm: 1.5 },
-                transition: "all 250ms ease",
-                transform: isCurrentStep ? "translateX(2px)" : "none",
+                backgroundColor: isCurrentAnalyzing
+                  ? "rgba(99, 91, 255, 0.04)"
+                  : isRowActive
+                  ? "rgba(248, 250, 252, 0.9)"
+                  : "transparent",
+                border: isCurrentAnalyzing
+                  ? "1px solid rgba(99, 91, 255, 0.25)"
+                  : "1px solid transparent",
+                opacity: isRowActive ? 1 : 0.35,
+                transform: isRowActive ? "translateX(0)" : "translateX(6px)",
+                transition: "all 300ms cubic-bezier(0.4, 0, 0.2, 1)",
+                boxShadow: isCurrentAnalyzing ? "0 2px 8px rgba(99, 91, 255, 0.08)" : "none",
               }}
             >
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1.25 }}>
+              {/* Left: Icon + Label */}
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1.25, flexShrink: 0 }}>
                 <Box
                   sx={{
                     width: 28,
@@ -382,7 +420,7 @@ export function IntelligenceCard({
                     justifyContent: "center",
                     flexShrink: 0,
                     transition: "transform 200ms ease",
-                    transform: isCurrentStep ? "scale(1.1)" : "scale(1)",
+                    transform: isCurrentAnalyzing ? "scale(1.1)" : "scale(1)",
                   }}
                 >
                   {step.icon}
@@ -390,21 +428,49 @@ export function IntelligenceCard({
                 <Typography
                   variant="body2"
                   sx={{
-                    fontWeight: isStepDone ? 600 : 500,
-                    fontSize: "0.75rem",
-                    color: isStepDone ? "#111827" : "#64748B",
+                    fontSize: { xs: "0.78125rem", sm: "0.8125rem" },
+                    fontWeight: 600,
+                    color: isRowActive ? "#1E293B" : "#94A3B8",
                     whiteSpace: "nowrap",
-                    transition: "color 200ms ease",
                   }}
                 >
                   {step.label}
                 </Typography>
               </Box>
-              <Box sx={{ flexShrink: 0, ml: { xs: "auto", sm: 0 } }}>{step.valuePill}</Box>
+
+              {/* Right: Value Pill */}
+              <Box
+                sx={{
+                  flexShrink: 0,
+                  transition: "opacity 200ms ease, transform 200ms ease",
+                  opacity: isRowActive ? 1 : 0,
+                  transform: isRowActive ? "scale(1)" : "scale(0.9)",
+                }}
+              >
+                {step.valuePill}
+              </Box>
             </Box>
           );
         })}
       </Box>
+
+      {/* Animation Keyframes */}
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `
+        @keyframes analyzeBadgePulse {
+          0%, 100% {
+            opacity: 1;
+            transform: scale(1);
+          }
+          50% {
+            opacity: 0.4;
+            transform: scale(1.3);
+          }
+        }
+      `,
+        }}
+      />
     </Box>
   );
 }

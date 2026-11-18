@@ -1,3 +1,5 @@
+"use client";
+
 import React from "react";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
@@ -24,17 +26,18 @@ export function DraftResponseCard({
     <Box
       sx={{
         width: "100%",
-        maxWidth: { xs: "100%", sm: 340 },
+        maxWidth: { xs: "100%", sm: 330, lg: 340 },
         backgroundColor: "#FFFFFF",
         border: "1px solid #E2E8F0",
         borderRadius: "18px",
-        boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.03)",
-        p: { xs: 1.75, sm: 2.25 },
+        boxShadow: "0 16px 40px -8px rgba(0, 0, 0, 0.07), 0 4px 12px -2px rgba(0, 0, 0, 0.03)",
+        p: { xs: 1.5, sm: 2 },
         display: "flex",
         flexDirection: "column",
-        gap: 2,
+        gap: 1.4,
         position: "relative",
         zIndex: 2,
+        transition: "all 300ms cubic-bezier(0.4, 0, 0.2, 1)",
       }}
     >
       {/* Header */}
@@ -42,9 +45,9 @@ export function DraftResponseCard({
         <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexShrink: 0 }}>
           <Box
             sx={{
-              width: 26,
-              height: 26,
-              borderRadius: "6px",
+              width: 28,
+              height: 28,
+              borderRadius: "8px",
               backgroundColor: "#EEF2FF",
               color: "#4F46E5",
               display: "flex",
@@ -52,7 +55,7 @@ export function DraftResponseCard({
               justifyContent: "center",
             }}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
               <path
                 d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
                 stroke="currentColor"
@@ -67,11 +70,11 @@ export function DraftResponseCard({
             sx={{
               fontWeight: 700,
               fontSize: "0.875rem",
-              color: "#111827",
+              color: "#0F172A",
               whiteSpace: "nowrap",
             }}
           >
-            Draft response
+            Draft Response
           </Typography>
         </Box>
 
@@ -82,7 +85,7 @@ export function DraftResponseCard({
                 <path
                   d="M2.5 6.5l2.5 2.5 4.5-5"
                   stroke="#15803D"
-                  strokeWidth="1.5"
+                  strokeWidth="2"
                   strokeLinecap="round"
                   strokeLinejoin="round"
                 />
@@ -91,73 +94,77 @@ export function DraftResponseCard({
             label="Ready to send"
             size="small"
             sx={{
-              height: 22,
+              height: 24,
               fontSize: "0.6875rem",
-              fontWeight: 600,
+              fontWeight: 700,
               backgroundColor: "#DCFCE7",
               color: "#15803D",
               borderRadius: "9999px",
               whiteSpace: "nowrap",
-              flexShrink: 0,
-              animation: "readyBadgeGlow 2.5s ease-in-out infinite",
-              "& .MuiChip-icon": {
-                ml: 0.75,
-                mr: -0.25,
-              },
-            }}
-          />
-        ) : isTyping ? (
-          <Chip
-            label="AI Composing..."
-            size="small"
-            sx={{
-              height: 22,
-              fontSize: "0.6875rem",
-              fontWeight: 600,
-              backgroundColor: "#EEF2FF",
-              color: "#4F46E5",
-              borderRadius: "9999px",
-              whiteSpace: "nowrap",
-              flexShrink: 0,
+              border: "1px solid rgba(22, 163, 74, 0.2)",
             }}
           />
         ) : (
           <Chip
-            label="Pending trigger"
+            label={isTyping ? "AI Drafting..." : "Awaiting Context"}
             size="small"
             sx={{
-              height: 22,
+              height: 24,
               fontSize: "0.6875rem",
-              fontWeight: 500,
-              backgroundColor: "#F1F5F9",
-              color: "#64748B",
+              fontWeight: 700,
+              backgroundColor: isTyping ? "#EEF2FF" : "#F1F5F9",
+              color: isTyping ? "#4F46E5" : "#64748B",
               borderRadius: "9999px",
               whiteSpace: "nowrap",
-              flexShrink: 0,
+              border: isTyping ? "1px solid rgba(79, 70, 229, 0.2)" : "1px solid #E2E8F0",
             }}
           />
         )}
       </Box>
 
-      {/* Email Body Content Box */}
+      {/* Recipient Details Pill */}
       <Box
         sx={{
+          display: "flex",
+          alignItems: "center",
+          gap: 1,
+          p: 1.25,
+          borderRadius: "10px",
           backgroundColor: "#F8FAFC",
           border: "1px solid #F1F5F9",
+        }}
+      >
+        <Typography variant="caption" sx={{ color: "#94A3B8", fontWeight: 600, fontSize: "0.6875rem" }}>
+          To:
+        </Typography>
+        <Typography variant="caption" sx={{ color: "#0F172A", fontWeight: 700, fontSize: "0.75rem" }}>
+          {scenario.sender}
+        </Typography>
+        <Typography variant="caption" sx={{ color: "#64748B", fontSize: "0.6875rem", ml: "auto" }}>
+          Re: {scenario.subject}
+        </Typography>
+      </Box>
+
+      {/* Message Body Box */}
+      <Box
+        sx={{
+          p: 1.75,
           borderRadius: "12px",
-          p: 2,
+          backgroundColor: "#FAF5FF",
+          border: "1px solid rgba(124, 58, 237, 0.12)",
+          minHeight: 140,
           display: "flex",
           flexDirection: "column",
-          gap: 1.25,
-          minHeight: 150,
+          position: "relative",
         }}
       >
         <Typography
           variant="body2"
           sx={{
-            fontWeight: 600,
-            fontSize: "0.75rem",
-            color: "#111827",
+            fontWeight: 700,
+            fontSize: "0.8125rem",
+            color: "#1E1B4B",
+            mb: 0.75,
           }}
         >
           {scenario.draft.greeting}
@@ -166,10 +173,11 @@ export function DraftResponseCard({
         <Typography
           variant="body2"
           sx={{
-            fontSize: "0.75rem",
-            lineHeight: 1.5,
+            fontSize: "0.8125rem",
             color: "#334155",
-            minHeight: "4.5em",
+            lineHeight: 1.6,
+            flex: 1,
+            whiteSpace: "pre-line",
           }}
         >
           {displayText}
@@ -178,106 +186,85 @@ export function DraftResponseCard({
               component="span"
               sx={{
                 display: "inline-block",
-                color: "#4F46E5",
-                fontWeight: 700,
-                ml: "2px",
-                animation: "typingCursorBlink 0.8s infinite",
+                width: "2px",
+                height: "14px",
+                backgroundColor: "#7C3AED",
+                ml: 0.5,
+                verticalAlign: "middle",
+                animation: "cursorBlink 0.8s infinite",
               }}
-            >
-              |
-            </Box>
+            />
           )}
         </Typography>
 
-        <Box sx={{ mt: "auto", pt: 1 }}>
-          {scenario.draft.signoff.split("\n").map((line, idx) => (
-            <Typography
-              key={idx}
-              variant="caption"
-              sx={{
-                display: "block",
-                fontWeight: idx === 0 ? 400 : 600,
-                color: idx === 0 ? "#64748B" : "#111827",
-                fontSize: "0.6875rem",
-              }}
-            >
-              {line}
-            </Typography>
-          ))}
-        </Box>
+        <Typography
+          variant="caption"
+          sx={{
+            fontSize: "0.75rem",
+            color: "#64748B",
+            mt: 1.5,
+            whiteSpace: "pre-line",
+            fontWeight: 500,
+          }}
+        >
+          {scenario.draft.signoff}
+        </Typography>
       </Box>
 
-      {/* Action Buttons */}
-      <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+      {/* Actions */}
+      <Box sx={{ display: "flex", gap: 1, pt: 0.5 }}>
         <Button
           fullWidth
           variant="contained"
           size="small"
           sx={{
-            backgroundColor: "#4F46E5",
+            backgroundColor: "#2563EB",
             color: "#FFFFFF",
-            fontWeight: 600,
+            fontWeight: 700,
             fontSize: "0.75rem",
             textTransform: "none",
-            py: 1,
             borderRadius: "8px",
-            boxShadow: isReady
-              ? "0 2px 8px 0 rgba(79, 70, 229, 0.3)"
-              : "none",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 0.75,
-            animation: isReady ? "sendButtonShine 3s ease-in-out infinite" : "none",
-            opacity: isReady ? 1 : 0.65,
-            "&:hover": { backgroundColor: "#4338CA" },
+            py: 1,
+            boxShadow: "0 2px 8px rgba(37, 99, 235, 0.25)",
+            "&:hover": {
+              backgroundColor: "#1D4ED8",
+            },
           }}
         >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-            <path
-              d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-          <span>Send now</span>
+          Send Now
         </Button>
-
         <Button
           fullWidth
           variant="outlined"
           size="small"
           sx={{
-            borderColor: "#E2E8F0",
-            color: "#111827",
-            backgroundColor: "#FFFFFF",
+            borderColor: "#CBD5E1",
+            color: "#334155",
             fontWeight: 600,
             fontSize: "0.75rem",
             textTransform: "none",
-            py: 1,
             borderRadius: "8px",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 0.75,
+            py: 1,
             "&:hover": {
+              borderColor: "#94A3B8",
               backgroundColor: "#F8FAFC",
-              borderColor: "#CBD5E1",
             },
           }}
         >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-            <path
-              d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M8.5 11a4 4 0 100-8 4 4 0 000 8z"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-          <span>Review</span>
+          Review &amp; Edit
         </Button>
       </Box>
+
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `
+        @keyframes cursorBlink {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0; }
+        }
+      `,
+        }}
+      />
     </Box>
   );
 }

@@ -1,190 +1,214 @@
+"use client";
+
 import React from "react";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
-import Chip from "@mui/material/Chip";
+import { PIPELINE_SCENARIOS } from "./pipelineScenarios";
 
 export interface IncomingEmailsCardProps {
   activeId?: number;
+  onSelect?: (id: number) => void;
 }
 
-export function IncomingEmailsCard({ activeId = 1 }: IncomingEmailsCardProps) {
-  const emails = [
-    {
-      id: 1,
-      sender: "Sarah Johnson",
-      time: "10:24 AM",
-      subject: "Can you send me pricing for 500 licenses?",
-      badge: "External",
-      badgeBg: "#FEF3C7",
-      badgeColor: "#92400E",
-      avatarBg: "#EEF2FF",
-      avatarColor: "#4F46E5",
-    },
-    {
-      id: 2,
-      sender: "Michael Chen",
-      time: "9:18 AM",
-      subject: "Need help with integration",
-      badge: "Support",
-      badgeBg: "#F1F5F9",
-      badgeColor: "#475569",
-      avatarBg: "#F0FDF4",
-      avatarColor: "#16A34A",
-    },
-    {
-      id: 3,
-      sender: "Priya Sharma",
-      time: "Yesterday",
-      subject: "Partnership opportunity",
-      badge: "Business",
-      badgeBg: "#F0FDF4",
-      badgeColor: "#166534",
-      avatarBg: "#FDF2F8",
-      avatarColor: "#DB2777",
-    },
-    {
-      id: 4,
-      sender: "David Miller",
-      time: "Yesterday",
-      subject: "Question about enterprise plan",
-      badge: "Sales",
-      badgeBg: "#F1F5F9",
-      badgeColor: "#475569",
-      avatarBg: "#F5F3FF",
-      avatarColor: "#7C3AED",
-    },
-  ];
-
+export function IncomingEmailsCard({ activeId = 1, onSelect }: IncomingEmailsCardProps) {
   return (
     <Box
       sx={{
         width: "100%",
-        maxWidth: { xs: "100%", sm: 330 },
+        maxWidth: { xs: "100%", sm: 300, lg: 305 },
         backgroundColor: "#FFFFFF",
         border: "1px solid #E2E8F0",
-        borderRadius: "18px",
+        borderRadius: "16px",
         boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.03)",
-        p: { xs: 1.5, sm: 2 },
+        p: { xs: 1.25, sm: 1.4 },
         display: "flex",
         flexDirection: "column",
-        gap: 1.25,
+        gap: 1,
         position: "relative",
         zIndex: 2,
       }}
     >
-      {emails.map((email) => {
+      {/* Top Card Label */}
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          px: 1,
+          py: 0.5,
+          borderBottom: "1px solid #F1F5F9",
+          mb: 0.25,
+        }}
+      >
+        <Typography
+          variant="caption"
+          sx={{
+            fontWeight: 700,
+            fontSize: "0.6875rem",
+            color: "#64748B",
+            textTransform: "uppercase",
+            letterSpacing: "0.06em",
+          }}
+        >
+          Connected Inbox
+        </Typography>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 0.6 }}>
+          <Box
+            sx={{
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              backgroundColor: "#22C55E",
+              animation: "liveDotPulse 2s infinite ease-in-out",
+            }}
+          />
+          <Typography variant="caption" sx={{ fontSize: "0.6875rem", color: "#16A34A", fontWeight: 600 }}>
+            Real-time
+          </Typography>
+        </Box>
+      </Box>
+
+      {PIPELINE_SCENARIOS.map((email) => {
         const isSelected = email.id === activeId;
         return (
           <Box
             key={email.id}
+            onClick={() => onSelect && onSelect(email.id)}
             sx={{
-              p: 1.5,
+              p: 1.4,
               borderRadius: "12px",
-              backgroundColor: isSelected ? "#F8FAFC" : "transparent",
+              backgroundColor: isSelected ? "rgba(99, 91, 255, 0.04)" : "transparent",
               border: isSelected
-                ? "1px solid rgba(79, 70, 229, 0.35)"
+                ? "1px solid rgba(99, 91, 255, 0.35)"
                 : "1px solid transparent",
               position: "relative",
-              transition: "all 250ms ease",
-              animation: isSelected ? "activeCardBreath 3.5s ease-in-out infinite" : "none",
+              cursor: "pointer",
+              transition: "all 250ms cubic-bezier(0.4, 0, 0.2, 1)",
+              boxShadow: isSelected ? "0 4px 12px -2px rgba(99, 91, 255, 0.1)" : "none",
+              transform: isSelected ? "scale(1.02)" : "scale(1)",
               "&:hover": {
-                backgroundColor: "#F8FAFC",
+                backgroundColor: isSelected ? "rgba(99, 91, 255, 0.06)" : "#F8FAFC",
+                borderColor: isSelected ? "rgba(99, 91, 255, 0.5)" : "#E2E8F0",
               },
             }}
           >
-          {/* Header: Avatar + Sender + Time */}
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1.25, mb: 0.75 }}>
-            <Box
-              sx={{
-                width: 28,
-                height: 28,
-                borderRadius: "50%",
-                backgroundColor: email.avatarBg,
-                color: email.avatarColor,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                flexShrink: 0,
-              }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
-              </svg>
-            </Box>
-            <Box sx={{ flexGrow: 1 }}>
-              <Typography
-                variant="subtitle2"
-                sx={{
-                  fontWeight: 600,
-                  fontSize: "0.8125rem",
-                  color: "#111827",
-                  lineHeight: 1.2,
-                }}
-              >
-                {email.sender}
-              </Typography>
-            </Box>
-            <Typography
-              variant="caption"
-              sx={{
-                color: "#94A3B8",
-                fontSize: "0.6875rem",
-                fontWeight: 500,
-                flexShrink: 0,
-              }}
-            >
-              {email.time}
-            </Typography>
-          </Box>
-
-          {/* Subject snippet */}
-          <Typography
-            variant="body2"
-            sx={{
-              color: "#334155",
-              fontSize: "0.75rem",
-              lineHeight: 1.4,
-              fontWeight: isSelected ? 600 : 400,
-              mb: 1,
-              display: "-webkit-box",
-              WebkitLineClamp: 2,
-              WebkitBoxOrient: "vertical",
-              overflow: "hidden",
-            }}
-          >
-            {email.subject}
-          </Typography>
-
-          {/* Tag + Indicator Dot */}
-          <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <Chip
-              label={email.badge}
-              size="small"
-              sx={{
-                height: 20,
-                fontSize: "0.65rem",
-                fontWeight: 600,
-                backgroundColor: email.badgeBg,
-                color: email.badgeColor,
-                borderRadius: "6px",
-                px: 0.5,
-              }}
-            />
-            {isSelected && (
+            {/* Header: Avatar + Sender + Time */}
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1.25, mb: 0.5 }}>
               <Box
                 sx={{
-                  width: 8,
-                  height: 8,
+                  width: 28,
+                  height: 28,
                   borderRadius: "50%",
-                  backgroundColor: "#635BFF",
-                  animation: "emailLivePulse 2s ease-in-out infinite",
+                  backgroundColor: email.avatarBg,
+                  color: email.avatarColor,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "0.75rem",
+                  fontWeight: 700,
+                  flexShrink: 0,
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.06)",
                 }}
-              />
-            )}
+              >
+                {email.sender
+                  .split(" ")
+                  .map((n) => n[0])
+                  .join("")}
+              </Box>
+
+              <Box sx={{ minWidth: 0, flex: 1 }}>
+                <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <Typography
+                    variant="subtitle2"
+                    component="div"
+                    sx={{
+                      fontWeight: isSelected ? 700 : 600,
+                      fontSize: "0.8125rem",
+                      color: isSelected ? "#0F172A" : "#334155",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {email.sender}
+                  </Typography>
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      fontSize: "0.6875rem",
+                      color: "#94A3B8",
+                      flexShrink: 0,
+                      ml: 1,
+                    }}
+                  >
+                    {email.time}
+                  </Typography>
+                </Box>
+              </Box>
+            </Box>
+
+            {/* Subject */}
+            <Typography
+              variant="body2"
+              sx={{
+                fontWeight: isSelected ? 600 : 500,
+                fontSize: "0.75rem",
+                color: isSelected ? "#1E1B4B" : "#475569",
+                lineHeight: 1.35,
+                mb: 0.5,
+                display: "-webkit-box",
+                WebkitLineClamp: 1,
+                WebkitBoxOrient: "vertical",
+                overflow: "hidden",
+              }}
+            >
+              {email.subject}
+            </Typography>
+
+            {/* Bottom: Badge + Status Dot */}
+            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <Box
+                sx={{
+                  backgroundColor: email.badgeBg,
+                  color: email.badgeColor,
+                  fontSize: "0.625rem",
+                  fontWeight: 700,
+                  px: 1,
+                  py: 0.25,
+                  borderRadius: "4px",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.04em",
+                }}
+              >
+                {email.badge}
+              </Box>
+
+              {isSelected && (
+                <Box
+                  sx={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: "50%",
+                    backgroundColor: "#635BFF",
+                    boxShadow: "0 0 8px #635BFF",
+                  }}
+                />
+              )}
+            </Box>
           </Box>
-        </Box>
-      );
-    })}
-  </Box>
-);
+        );
+      })}
+
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `
+        @keyframes liveDotPulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.4; transform: scale(1.4); }
+        }
+      `,
+        }}
+      />
+    </Box>
+  );
 }

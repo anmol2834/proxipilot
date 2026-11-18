@@ -7,8 +7,8 @@ export function TopLeftNote() {
     <Box
       sx={{
         position: "absolute",
-        top: { xs: "0px", lg: "6px" },
-        left: { lg: "16%", xl: "20%" },
+        top: { xs: "0px", lg: "0px" },
+        left: { lg: "22%", xl: "24%" },
         display: { xs: "none", lg: "flex" },
         flexDirection: "column",
         alignItems: "center",
@@ -54,8 +54,8 @@ export function TopRightNote() {
     <Box
       sx={{
         position: "absolute",
-        top: { xs: "0px", lg: "6px" },
-        right: { lg: "16%", xl: "20%" },
+        top: { xs: "0px", lg: "0px" },
+        right: { lg: "22%", xl: "24%" },
         display: { xs: "none", lg: "flex" },
         flexDirection: "column",
         alignItems: "center",

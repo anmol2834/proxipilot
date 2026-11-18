@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Box from "@mui/material/Box";
 import { ProviderStack } from "./ProviderIcons";
 import { IncomingEmailsCard } from "./IncomingEmailsCard";
@@ -11,88 +11,98 @@ import { PIPELINE_SCENARIOS } from "./pipelineScenarios";
 
 export function HeroPipelineVisual() {
   const [scenarioIndex, setScenarioIndex] = useState(0);
-  // Stage:
-  // 0: Select email in inbox
-  // 1: Signal transfers along Arrow 1 into Intelligence
-  // 2: Intelligence analyzes steps 1..5
-  // 3: Signal transfers along Arrow 2 into Draft
-  // 4: Draft response typing animation
-  // 5: Pause & show full ready state, then advance
   const [stage, setStage] = useState<number>(0);
   const [activeStepCount, setActiveStepCount] = useState<number>(0);
   const [typedBody, setTypedBody] = useState<string>("");
+  const [isPaused, setIsPaused] = useState<boolean>(false);
 
   const currentScenario = PIPELINE_SCENARIOS[scenarioIndex];
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Manual scenario selection by clicking left email items
+  const handleSelectScenario = (id: number) => {
+    const targetIndex = PIPELINE_SCENARIOS.findIndex((s) => s.id === id);
+    if (targetIndex !== -1 && targetIndex !== scenarioIndex) {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      setScenarioIndex(targetIndex);
+      setActiveStepCount(0);
+      setTypedBody("");
+      setStage(0);
+    }
+  };
 
   useEffect(() => {
-    let timer: NodeJS.Timeout;
+    if (isPaused) return;
 
     if (stage === 0) {
-      // Step 1: Incoming email is selected
-      timer = setTimeout(() => {
+      // Step 1: Active email selected, initiate flow rapidly without dead pause
+      timerRef.current = setTimeout(() => {
         setStage(1);
-      }, 1200);
+      }, 240);
     } else if (stage === 1) {
-      // Step 2: Packet travels across Arrow 1 to Intelligence
-      timer = setTimeout(() => {
+      // Step 2: Signal travels across Connector 1 to Intelligence (smooth 300ms)
+      timerRef.current = setTimeout(() => {
         setStage(2);
         setActiveStepCount(1);
-      }, 1000);
+      }, 300);
     } else if (stage === 2) {
-      // Step 3: Intelligence analyzes sequentially
+      // Step 3: Intelligence analyzes 5 steps sequentially in crisp, rhythmic cadence
       if (activeStepCount < 5) {
-        timer = setTimeout(() => {
+        timerRef.current = setTimeout(() => {
           setActiveStepCount((prev) => prev + 1);
-        }, 550);
+        }, 180);
       } else {
-        // Step 5 completed, wait a moment then pass to Draft
-        timer = setTimeout(() => {
+        // Step 5 verified, immediately transition to Draft response flow
+        timerRef.current = setTimeout(() => {
           setStage(3);
-        }, 700);
+        }, 220);
       }
     } else if (stage === 3) {
-      // Step 4: Packet travels across Arrow 2 to Draft
-      timer = setTimeout(() => {
+      // Step 4: Signal travels across Connector 2 to Draft
+      timerRef.current = setTimeout(() => {
         setStage(4);
-      }, 1000);
+      }, 300);
     } else if (stage === 4) {
-      // Step 5: Typing animation
+      // Step 5: High-speed real-time typewriter stream
       const fullText = currentScenario.draft.body;
       if (typedBody.length < fullText.length) {
-        timer = setTimeout(() => {
-          // Type chunks of 3-4 characters for a realistic, snappy typing effect
-          const nextLength = Math.min(typedBody.length + 3, fullText.length);
+        timerRef.current = setTimeout(() => {
+          const nextLength = Math.min(typedBody.length + 5, fullText.length);
           setTypedBody(fullText.slice(0, nextLength));
-        }, 35);
+        }, 16);
       } else {
-        timer = setTimeout(() => {
+        timerRef.current = setTimeout(() => {
           setStage(5);
-        }, 400);
+        }, 160);
       }
     } else if (stage === 5) {
-      // Step 6: Complete view pause, then advance to next email!
-      timer = setTimeout(() => {
+      // Step 6: Brief natural pause to admire the ready-to-send draft, then seamlessly advance to next scenario
+      timerRef.current = setTimeout(() => {
         setScenarioIndex((prev) => (prev + 1) % PIPELINE_SCENARIOS.length);
         setActiveStepCount(0);
         setTypedBody("");
         setStage(0);
-      }, 2600);
+      }, 1100);
     }
 
-    return () => clearTimeout(timer);
-  }, [stage, activeStepCount, typedBody, currentScenario, scenarioIndex]);
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [stage, activeStepCount, typedBody, currentScenario, scenarioIndex, isPaused]);
 
   return (
     <Box
+      onMouseEnter={() => setIsPaused(true)}
+      onMouseLeave={() => setIsPaused(false)}
       sx={{
         position: "relative",
         width: "100%",
-        maxWidth: 1240,
+        maxWidth: 1260,
         mx: "auto",
-        mt: 3,
+        mt: 1.5,
         mb: 2,
-        pt: { xs: 2, sm: 3, md: 7, lg: 8 },
-        pb: { xs: 3, sm: 5, md: 6 },
+        pt: { xs: 1.5, sm: 2, md: 3, lg: 4 },
+        pb: { xs: 2.5, sm: 3, md: 4 },
       }}
     >
       {/* Background Soft Glow */}
@@ -112,53 +122,17 @@ export function HeroPipelineVisual() {
             top: "35%",
             left: "50%",
             transform: "translate(-50%, -50%)",
-            width: { xs: "280px", sm: "400px", md: "520px" },
-            height: { xs: "280px", sm: "360px", md: "400px" },
+            width: { xs: "280px", sm: "400px", md: "560px" },
+            height: { xs: "280px", sm: "360px", md: "420px" },
             background:
-              "radial-gradient(circle, rgba(99, 91, 255, 0.14) 0%, rgba(79, 124, 255, 0.04) 60%, transparent 75%)",
+              "radial-gradient(circle, rgba(99, 91, 255, 0.12) 0%, rgba(59, 130, 246, 0.04) 55%, transparent 75%)",
             filter: "blur(60px)",
             borderRadius: "50%",
           }}
         />
-
-        {/* Tilted background card 1 */}
-        <Box
-          sx={{
-            position: "absolute",
-            top: 20,
-            left: -30,
-            width: 220,
-            height: 180,
-            backgroundColor: "#FFFFFF",
-            border: "1px solid #E6EAF0",
-            borderRadius: "16px",
-            opacity: 0.45,
-            transform: "rotate(-12deg) skewX(-4deg)",
-            boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.04)",
-            display: { xs: "none", xl: "block" },
-          }}
-        />
-
-        {/* Tilted background card 2 */}
-        <Box
-          sx={{
-            position: "absolute",
-            top: 25,
-            right: -25,
-            width: 240,
-            height: 190,
-            backgroundColor: "#FFFFFF",
-            border: "1px solid #E6EAF0",
-            borderRadius: "16px",
-            opacity: 0.45,
-            transform: "rotate(10deg) skewX(3deg)",
-            boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.04)",
-            display: { xs: "none", xl: "block" },
-          }}
-        />
       </Box>
 
-      {/* Handwritten Floating Annotations (Clearly visible & positioned above cards) */}
+      {/* Handwritten Floating Annotations */}
       <TopLeftNote />
       <TopRightNote />
       <BottomRightNote />
@@ -170,7 +144,7 @@ export function HeroPipelineVisual() {
           flexDirection: { xs: "column", lg: "row" },
           alignItems: "center",
           justifyContent: "center",
-          gap: { xs: 3, lg: 3 },
+          gap: { xs: 2.5, lg: 1.5, xl: 2 },
           position: "relative",
           zIndex: 2,
           width: "100%",
@@ -182,10 +156,9 @@ export function HeroPipelineVisual() {
             display: "flex",
             flexDirection: { xs: "column", sm: "row" },
             alignItems: "center",
-            gap: { xs: 2, sm: 2 },
+            gap: { xs: 1.25, sm: 1.25 },
             position: "relative",
-            width: "100%",
-            maxWidth: { xs: 360, sm: "none" },
+            flexShrink: 0,
             justifyContent: "center",
           }}
         >
@@ -196,80 +169,82 @@ export function HeroPipelineVisual() {
           <Box
             sx={{
               display: { xs: "none", sm: "block" },
-              width: 20,
-              height: 140,
+              width: 14,
+              height: 120,
               flexShrink: 0,
             }}
           >
-            <svg width="20" height="140" viewBox="0 0 20 140" fill="none">
+            <svg width="14" height="120" viewBox="0 0 14 120" fill="none">
               <path
-                d="M0 15C10 15 15 50 20 70"
+                d="M0 15C7 15 10 45 14 60"
                 stroke="#CBD5E1"
                 strokeWidth="1.5"
                 strokeDasharray="3 3"
-                style={{ animation: "connectorDashFlow 2s linear infinite" }}
+                style={{ animation: "connectorDashFlow 1.5s linear infinite" }}
               />
               <path
-                d="M0 50C8 50 15 65 20 70"
+                d="M0 45C6 45 10 55 14 60"
                 stroke="#CBD5E1"
                 strokeWidth="1.5"
                 strokeDasharray="3 3"
-                style={{ animation: "connectorDashFlow 2s linear infinite" }}
+                style={{ animation: "connectorDashFlow 1.5s linear infinite" }}
               />
               <path
-                d="M0 90C8 90 15 75 20 70"
+                d="M0 75C6 75 10 65 14 60"
                 stroke="#CBD5E1"
                 strokeWidth="1.5"
                 strokeDasharray="3 3"
-                style={{ animation: "connectorDashFlow 2s linear infinite" }}
+                style={{ animation: "connectorDashFlow 1.5s linear infinite" }}
               />
               <path
-                d="M0 125C10 125 15 90 20 70"
+                d="M0 105C7 105 10 75 14 60"
                 stroke="#CBD5E1"
                 strokeWidth="1.5"
                 strokeDasharray="3 3"
-                style={{ animation: "connectorDashFlow 2s linear infinite" }}
+                style={{ animation: "connectorDashFlow 1.5s linear infinite" }}
               />
             </svg>
           </Box>
 
-          <IncomingEmailsCard activeId={currentScenario.id} />
+          <IncomingEmailsCard activeId={currentScenario.id} onSelect={handleSelectScenario} />
         </Box>
 
-        {/* CONNECTOR 1 (Desktop): Left -> Center with 100% Centered Dot */}
+        {/* CONNECTOR 1 (Desktop): Left -> Center */}
         <Box
           sx={{
             display: { xs: "none", lg: "flex" },
             alignItems: "center",
             justifyContent: "center",
             position: "relative",
-            width: 48,
+            width: 32,
             height: 24,
             flexShrink: 0,
             zIndex: 3,
           }}
         >
-          <svg width="48" height="24" viewBox="0 0 48 24" fill="none">
+          <svg width="32" height="24" viewBox="0 0 32 24" fill="none">
             <path
-              d="M2 12H44"
-              stroke="#4F46E5"
+              d="M2 12H28"
+              stroke="#635BFF"
               strokeWidth="2"
-              strokeDasharray="4 4"
+              strokeDasharray="3 3"
               strokeLinecap="round"
               style={{
-                animation: stage === 1 ? "connectorDashFlow 0.8s linear infinite" : "none",
+                animation: stage === 1 ? "connectorDashFlow 0.4s linear infinite" : "none",
+                opacity: stage === 1 ? 1 : 0.45,
               }}
             />
             <path
-              d="M38 7L44 12L38 17"
-              stroke="#4F46E5"
+              d="M24 7L29 12L24 17"
+              stroke="#635BFF"
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
+              style={{ opacity: stage === 1 ? 1 : 0.45 }}
             />
           </svg>
 
-          {/* Centered Glowing Packet: top 50% & translateY(-50%) guarantees exact alignment on line */}
+          {/* Glowing Travelling Pulse Dot */}
           {stage === 1 && (
             <Box
               sx={{
@@ -281,14 +256,14 @@ export function HeroPipelineVisual() {
                 borderRadius: "50%",
                 backgroundColor: "#635BFF",
                 boxShadow: "0 0 10px 3px rgba(99, 91, 255, 0.9)",
-                animation: "connectorPacketTravelX 1s cubic-bezier(0.4, 0, 0.2, 1) forwards",
+                animation: "connectorPacketTravelX 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards",
                 pointerEvents: "none",
               }}
             />
           )}
         </Box>
 
-        {/* CONNECTOR 1 (Mobile): Vertical with 100% Centered Dot */}
+        {/* CONNECTOR 1 (Mobile): Vertical */}
         <Box
           sx={{
             display: { xs: "flex", lg: "none" },
@@ -296,32 +271,33 @@ export function HeroPipelineVisual() {
             justifyContent: "center",
             position: "relative",
             width: 24,
-            height: 32,
+            height: 28,
             my: -0.5,
             zIndex: 3,
           }}
         >
-          <svg width="24" height="32" viewBox="0 0 24 32" fill="none">
+          <svg width="24" height="28" viewBox="0 0 24 28" fill="none">
             <path
-              d="M12 2V26"
-              stroke="#4F46E5"
+              d="M12 2V22"
+              stroke="#635BFF"
               strokeWidth="2"
-              strokeDasharray="4 4"
+              strokeDasharray="3 3"
               strokeLinecap="round"
               style={{
-                animation: stage === 1 ? "connectorDashFlow 0.8s linear infinite" : "none",
+                animation: stage === 1 ? "connectorDashFlow 0.4s linear infinite" : "none",
+                opacity: stage === 1 ? 1 : 0.45,
               }}
             />
             <path
-              d="M7 21L12 26L17 21"
-              stroke="#4F46E5"
+              d="M7 17L12 22L17 17"
+              stroke="#635BFF"
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
+              style={{ opacity: stage === 1 ? 1 : 0.45 }}
             />
           </svg>
 
-          {/* Centered Glowing Packet (Vertical): left 50% & translateX(-50%) */}
           {stage === 1 && (
             <Box
               sx={{
@@ -333,7 +309,7 @@ export function HeroPipelineVisual() {
                 borderRadius: "50%",
                 backgroundColor: "#635BFF",
                 boxShadow: "0 0 10px 3px rgba(99, 91, 255, 0.9)",
-                animation: "connectorPacketTravelY 1s cubic-bezier(0.4, 0, 0.2, 1) forwards",
+                animation: "connectorPacketTravelY 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards",
                 pointerEvents: "none",
               }}
             />
@@ -343,8 +319,8 @@ export function HeroPipelineVisual() {
         {/* SECTION 2: Center ProxiPilot Intelligence Card */}
         <Box
           sx={{
-            width: "100%",
-            maxWidth: { xs: 360, sm: 440, lg: "none" },
+            flexShrink: 0,
+            width: { xs: "100%", sm: "auto", lg: 495 },
             display: "flex",
             justifyContent: "center",
           }}
@@ -357,40 +333,42 @@ export function HeroPipelineVisual() {
           />
         </Box>
 
-        {/* CONNECTOR 2 (Desktop): Center -> Right with 100% Centered Dot */}
+        {/* CONNECTOR 2 (Desktop): Center -> Right */}
         <Box
           sx={{
             display: { xs: "none", lg: "flex" },
             alignItems: "center",
             justifyContent: "center",
             position: "relative",
-            width: 48,
+            width: 32,
             height: 24,
             flexShrink: 0,
             zIndex: 3,
           }}
         >
-          <svg width="48" height="24" viewBox="0 0 48 24" fill="none">
+          <svg width="32" height="24" viewBox="0 0 32 24" fill="none">
             <path
-              d="M2 12H44"
-              stroke="#4F46E5"
+              d="M2 12H28"
+              stroke="#10B981"
               strokeWidth="2"
-              strokeDasharray="4 4"
+              strokeDasharray="3 3"
               strokeLinecap="round"
               style={{
-                animation: stage === 3 ? "connectorDashFlow 0.8s linear infinite" : "none",
+                animation: stage === 3 ? "connectorDashFlow 0.4s linear infinite" : "none",
+                opacity: stage === 3 ? 1 : 0.45,
               }}
             />
             <path
-              d="M38 7L44 12L38 17"
-              stroke="#4F46E5"
+              d="M24 7L29 12L24 17"
+              stroke="#10B981"
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
+              style={{ opacity: stage === 3 ? 1 : 0.45 }}
             />
           </svg>
 
-          {/* Centered Emerald Packet */}
+          {/* Glowing Emerald Pulse Dot */}
           {stage === 3 && (
             <Box
               sx={{
@@ -402,14 +380,14 @@ export function HeroPipelineVisual() {
                 borderRadius: "50%",
                 backgroundColor: "#10B981",
                 boxShadow: "0 0 10px 3px rgba(16, 185, 129, 0.9)",
-                animation: "connectorPacketTravelX 1s cubic-bezier(0.4, 0, 0.2, 1) forwards",
+                animation: "connectorPacketTravelX 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards",
                 pointerEvents: "none",
               }}
             />
           )}
         </Box>
 
-        {/* CONNECTOR 2 (Mobile): Vertical Center -> Right with 100% Centered Dot */}
+        {/* CONNECTOR 2 (Mobile): Vertical Center -> Right */}
         <Box
           sx={{
             display: { xs: "flex", lg: "none" },
@@ -417,32 +395,33 @@ export function HeroPipelineVisual() {
             justifyContent: "center",
             position: "relative",
             width: 24,
-            height: 32,
+            height: 28,
             my: -0.5,
             zIndex: 3,
           }}
         >
-          <svg width="24" height="32" viewBox="0 0 24 32" fill="none">
+          <svg width="24" height="28" viewBox="0 0 24 28" fill="none">
             <path
-              d="M12 2V26"
-              stroke="#4F46E5"
+              d="M12 2V22"
+              stroke="#10B981"
               strokeWidth="2"
-              strokeDasharray="4 4"
+              strokeDasharray="3 3"
               strokeLinecap="round"
               style={{
-                animation: stage === 3 ? "connectorDashFlow 0.8s linear infinite" : "none",
+                animation: stage === 3 ? "connectorDashFlow 0.4s linear infinite" : "none",
+                opacity: stage === 3 ? 1 : 0.45,
               }}
             />
             <path
-              d="M7 21L12 26L17 21"
-              stroke="#4F46E5"
+              d="M7 17L12 22L17 17"
+              stroke="#10B981"
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
+              style={{ opacity: stage === 3 ? 1 : 0.45 }}
             />
           </svg>
 
-          {/* Centered Emerald Packet (Vertical) */}
           {stage === 3 && (
             <Box
               sx={{
@@ -454,7 +433,7 @@ export function HeroPipelineVisual() {
                 borderRadius: "50%",
                 backgroundColor: "#10B981",
                 boxShadow: "0 0 10px 3px rgba(16, 185, 129, 0.9)",
-                animation: "connectorPacketTravelY 1s cubic-bezier(0.4, 0, 0.2, 1) forwards",
+                animation: "connectorPacketTravelY 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards",
                 pointerEvents: "none",
               }}
             />
@@ -464,8 +443,8 @@ export function HeroPipelineVisual() {
         {/* SECTION 3: Right Draft Response Card */}
         <Box
           sx={{
-            width: "100%",
-            maxWidth: { xs: 360, sm: 360, lg: "none" },
+            flexShrink: 0,
+            width: { xs: "100%", sm: "auto", lg: 340 },
             display: "flex",
             justifyContent: "center",
           }}
@@ -478,6 +457,64 @@ export function HeroPipelineVisual() {
           />
         </Box>
       </Box>
+
+      {/* Global Fluid Animation Keyframes */}
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `
+        @keyframes connectorDashFlow {
+          0% {
+            stroke-dashoffset: 12;
+          }
+          100% {
+            stroke-dashoffset: 0;
+          }
+        }
+
+        @keyframes connectorPacketTravelX {
+          0% {
+            left: 2px;
+            opacity: 0;
+            transform: translateY(-50%) scale(0.6);
+          }
+          20% {
+            opacity: 1;
+            transform: translateY(-50%) scale(1.1);
+          }
+          80% {
+            opacity: 1;
+            transform: translateY(-50%) scale(1.1);
+          }
+          100% {
+            left: 24px;
+            opacity: 0;
+            transform: translateY(-50%) scale(0.6);
+          }
+        }
+
+        @keyframes connectorPacketTravelY {
+          0% {
+            top: 2px;
+            opacity: 0;
+            transform: translateX(-50%) scale(0.6);
+          }
+          20% {
+            opacity: 1;
+            transform: translateX(-50%) scale(1.1);
+          }
+          80% {
+            opacity: 1;
+            transform: translateX(-50%) scale(1.1);
+          }
+          100% {
+            top: 20px;
+            opacity: 0;
+            transform: translateX(-50%) scale(0.6);
+          }
+        }
+      `,
+        }}
+      />
     </Box>
   );
 }
