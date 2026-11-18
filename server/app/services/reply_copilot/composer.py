@@ -57,16 +57,26 @@ UNDERSTAND BEFORE WRITING
 - The INSTRUCTION is the employee's INTENT, not text to paste. "tell them we received the PO, will follow up" means:
   write a complete, natural reply that confirms receipt, says what happens next, and still responds to what the
   customer asked (e.g. the product details / specifications they requested) - without inventing facts or dates.
-- WORKING DRAFT is the text being refined. Keep its correct, relevant content (verified product details, prices,
-  commitments) unless the instruction removes it. Remove or rewrite sentences that the instruction contradicts
-  (e.g. the draft says the PO is missing but the employee now says it was received) or that VERIFIED FACTS
-  contradict (e.g. says a code is not in the catalogue although the facts list it).
+- WORKING DRAFT is the base. When the instruction only refines it (tone, length, add/remove a detail), keep
+  its content. When the instruction sets what the email should say ("tell them we don't accept attachments",
+  "suggest DSDR0112 instead"), the email is about THAT: keep earlier points only if they still answer the
+  customer's latest message; drop side remarks such as "for reference, X costs Y" that the employee did not
+  ask for in this or a confirmed earlier instruction (e.g. "tell them we don't accept attachments" -> say that and
+  how to send the details instead; product lines from the draft go unless the instruction mentions them).
+  If you dropped something possibly useful, say so in
+  assistant_message ("I left out the DSDR0099 reference - want it back?") instead of merging it silently.
+- Remove or rewrite sentences that the instruction contradicts (e.g. the draft says the PO is missing but the
+  employee now says it was received) or that VERIFIED FACTS contradict.
 
 WRITING
 - Write like a capable human professional: clear structure, short paragraphs, warm but concise, one clear next
   step. Same language as the conversation unless asked to translate. No placeholders such as [Name] or XX.
 - Keep the greeting name and sign-off of the working draft (or the business name) unless asked to change them.
 - Never return the working draft unchanged: every instruction must produce a visibly improved version.
+- Length follows the instruction, but short is never bare: even a two-line email greets, names the product by
+  name AND code (from VERIFIED FACTS / KNOWN ITEMS), gives the one key fact asked for and a next step, and signs
+  off. "Not this short" means a natural short paragraph, not the previous long version.
+- Never write that you will "confirm the product name / details" when VERIFIED FACTS already contain them.
 - Focus on the CURRENT instruction: make exactly the change it asks for. Do not repeat a point twice, do not pad
   the email with points the customer did not ask about, and integrate new content where it belongs instead of
   appending it. Keep earlier session changes, but do not re-add content the employee removed.
@@ -77,6 +87,11 @@ BUSINESS FACTS (prices, codes, specifications, sizes, warranty, availability, de
 policies, terms)
 - Write money as customers expect it: the currency symbol used in the conversation (₹ for Indian-rupee
   businesses), thousands separators, no ".00" (e.g. ₹1,199). Never change the amount itself.
+- VERIFIED FACTS are reference data, not content to include: mention a product or fact only when the current
+  instruction asks for it, an earlier confirmed instruction asked for it, or the customer's LATEST message needs
+  it. Never add "for reference" product lines nobody asked for.
+- Whenever you mention a product code, write the product's name with it (e.g. "Automatic Soap/Sanitizer
+  Dispenser 1100ML (DSDR0112)"), taken from the facts.
 - Use ONLY values in VERIFIED FACTS or already present in the WORKING DRAFT. Never use your own knowledge, never
   estimate, never invent a discount, warranty, delivery time, date or contact.
 - Review each verified fact before using it: is it about the product/code/size/category the customer needs? If not,
@@ -356,3 +371,22 @@ async def answer(tenant_id: str, instruction: str, draft: str, customer_message:
             resp = await reply_drafter._get_client().chat.completions.create(**kwargs)
     data = json.loads(resp.choices[0].message.content or "{}")
     return data, {"compose_llm_calls": 1, "compose_ms": round((time.perf_counter() - t0) * 1000, 1)}
+
+
+def codes_missing_names(text: str, ev: EvidenceSet) -> List[str]:
+    """Codes written in the text without any distinctive word of their known product name (pure).
+    Quality check: a customer cannot act on a bare code."""
+    names: Dict[str, str] = {}
+    for f in ev.facts:
+        if f.entity_code and f.entity_title:
+            names.setdefault(f.entity_code.upper(), f.entity_title)
+    low = (text or "").lower()
+    out: List[str] = []
+    for code in codes_in(text):
+        title = names.get(code)
+        if not title:
+            continue
+        words = [w for w in re.findall(r"[a-z]{4,}", title.lower()) if w not in ("with", "from", "pack", "piece")]
+        if words and not any(w in low for w in words) and code not in out:
+            out.append(code)
+    return out

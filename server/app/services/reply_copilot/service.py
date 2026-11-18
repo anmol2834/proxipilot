@@ -88,6 +88,34 @@ def is_note_for_copilot(instruction: str) -> bool:
     return bool(_NOTE.search(instruction)) and not _EDIT.search(instruction)
 
 
+_SHORT_ANSWER_WORDS = 8
+
+
+def pending_question(req: CopilotRequest) -> Optional[Tuple[str, str]]:
+    """(instruction that led to the question, the question) when the copilot's last turn asked one."""
+    if not req.history:
+        return None
+    last = req.history[-1]
+    summary = (last.summary or "").strip()
+    prefix = "copilot replied:"
+    if summary.lower().startswith(prefix) and summary.rstrip().endswith("?"):
+        return last.instruction, summary[len(prefix):].strip()
+    return None
+
+
+def effective_instruction(req: CopilotRequest) -> Tuple[str, bool]:
+    """A short reply right after a copilot question ("yes", "use the first one", "without price") is the
+    answer to that question: merge it with the task that led to the question, so the copilot continues
+    the task instead of treating "yes" as a new request (or asking the same question again)."""
+    pq = pending_question(req)
+    text = req.instruction.strip()
+    if pq is None or len(text.split()) > _SHORT_ANSWER_WORDS:
+        return req.instruction, False
+    task, question = pq
+    return (f"{task}\n(You asked: \"{question}\" The employee answered: \"{text}\". Continue the task with that "
+            f"answer; do not ask the same question again.)"), True
+
+
 def refers_to_context(instruction: str) -> bool:
     return bool(decision_mod.codes_in(instruction) or _REFERS.search(instruction))
 
@@ -184,6 +212,10 @@ class ReplyCopilotService:
         rid = f"cop_{uuid.uuid4().hex[:12]}"
         metrics: Dict[str, Any] = {"request_id": rid, "llm_calls": 0, "retrieval_calls": 0, "extra_retrievals": 0,
                                    "repairs": 0, "levels": []}
+        effective, answered = effective_instruction(req)
+        if answered:
+            req = req.model_copy(update={"instruction": effective[:2000]})
+            metrics["answered_copilot_question"] = True
         async with self._session() as db:
             snap = await self._load_thread(db, tenant_id, thread_id)
             if snap is None:
@@ -194,6 +226,25 @@ class ReplyCopilotService:
                 + [c.upper() for _, c, _ in snap.presented if c]))
             titles = {(c or "").upper(): t or "" for _, c, t in snap.presented if c}
             metrics["context_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+
+            # ---- codes the employee typed must exist before anything is drafted: a missing code gets a
+            # question with the closest real codes (exact lookup + trigram index, milliseconds, no model).
+            known: Dict[str, List[CopilotFact]] = {}
+            draft_codes = decision_mod.codes_in(req.draft_text)
+            instr_codes = decision_mod.codes_in(req.instruction)
+            if draft_codes or instr_codes:
+                known, missing = await self._context_records(db, tenant_id, list(dict.fromkeys(instr_codes + draft_codes)), [])
+                unknown_instr = [] if answered else [c for c in instr_codes if c in missing]
+                if unknown_instr:
+                    question = await self._unknown_code_question(db, tenant_id, unknown_instr[0])
+                    metrics["unknown_codes"] = unknown_instr
+                    return self._finish(rid, thread_id, CopilotOperation.CLARIFY, req, metrics, t0,
+                                        clarification=question, message=question, status="Needs confirmation")
+            for c, fs in known.items():
+                t = next((f.entity_title for f in fs if f.entity_title), None)
+                if t:
+                    titles.setdefault(c, t)
+            ctx_codes = list(dict.fromkeys(instr_codes + ctx_codes))
 
             # ---- speculative retrieval: a search-type instruction ("find X and its price") almost always
             # needs one primary search; start it now so it overlaps the decision call. Discarded if the
@@ -240,7 +291,7 @@ class ReplyCopilotService:
                                     status="Chat")
 
             # ---- evidence (only for fact requests)
-            ev = EvidenceSet()
+            ev = EvidenceSet(facts=[f for fs in known.values() for f in fs])
             if decision.fact_requests:
                 need_ctx = any(r.entity_codes or r.about_context_items for r in decision.fact_requests)
                 ctx_facts: Dict[str, List[CopilotFact]] = {}
@@ -256,7 +307,7 @@ class ReplyCopilotService:
                     results = await asyncio.gather(*[self._resolve_one(tenant_id, snap, r, ctx_facts)
                                                      for r in decision.fact_requests])
                 metrics["evidence_ms"] = round((time.perf_counter() - t1) * 1000, 1)
-                ev = merge_evidence([e for e, _ in results])
+                ev = merge_evidence([ev] + [e for e, _ in results])
                 for _, m in results:
                     metrics["levels"].append(m.get("level"))
                     metrics["retrieval_calls"] += 1 if m.get("level") == "L3_retrieval" else 0
@@ -265,15 +316,13 @@ class ReplyCopilotService:
             # The working draft may say "code X is not in our catalogue". Check it with an exact-code
             # lookup (B-tree, milliseconds); if X exists, give its current record to AI #2 so the
             # false sentence is corrected instead of polished.
-            claimed_missing = [c for c in absence_claim_codes(req.draft_text)
-                               if c not in {(f.entity_code or "").upper() for f in ev.facts}]
-            if claimed_missing:
-                found, _ = await self._context_records(db, tenant_id, claimed_missing, [])
-                if found:
-                    ev = merge_evidence([ev, EvidenceSet(facts=[f for fs in found.values() for f in fs],
-                                                         sources_used=["context_record"])])
-                    metrics["levels"].append("L1_reuse")
-                    metrics["corrected_absence_claims"] = sorted(found)
+            # Codes in the draft were already looked up (known items); a draft sentence calling one of them
+            # missing is therefore contradicted by the catalogue and must be corrected, not polished.
+            claimed = absence_claim_codes(req.draft_text)
+            listed = {(f.entity_code or "").upper() for f in ev.facts}
+            if claimed and any(c in listed for c in claimed):
+                metrics["levels"].append("L1_reuse")
+                metrics["corrected_absence_claims"] = sorted(c for c in claimed if c in listed)
 
         if decision.operation == CopilotOperation.ANSWER:
             return await self._answer_flow(rid, thread_id, tenant_id, req, decision, snap, customer_msg, ev, metrics, t0)
@@ -303,15 +352,19 @@ class ReplyCopilotService:
 
         proposal = str(data.get("revised_draft") or "").strip()
         issues = self._check(proposal, req, ev, grounding)
-        if issues and metrics["repairs"] < MAX_REPAIRS:
+        unnamed = composer_mod.codes_missing_names(proposal, ev)      # quality: repaired, never blocks Apply
+        if (issues or unnamed) and metrics["repairs"] < MAX_REPAIRS:
             metrics["repairs"] += 1
-            fix = "\n".join(f"- {i.code}: {i.detail}" for i in issues)
+            fix = "\n".join([f"- {i.code}: {i.detail}" for i in issues]
+                            + [f"- NAME_MISSING: write the product name next to {c}." for c in unnamed])
             data2, cm = await self._compose(tenant_id, req.instruction, req.draft_text, customer_msg, brief, ev,
                                             repair=fix, session=session, goal=decision.writing_goal)
             self._count(metrics, cm)
             p2 = str(data2.get("revised_draft") or "").strip()
             issues2 = self._check(p2, req, ev, grounding)
-            if len(issues2) < len(issues) or not issues2:
+            better = len(issues2) < len(issues) or (len(issues2) == len(issues) and
+                                                     len(composer_mod.codes_missing_names(p2, ev)) < len(unnamed))
+            if better or (not issues2 and issues):
                 data, proposal, issues = data2, p2, issues2
 
         if not req.draft_text.strip() and proposal:
@@ -328,6 +381,33 @@ class ReplyCopilotService:
                             summary=str(data.get("changes_summary") or "")[:300], facts_used=facts_used,
                             unresolved=unresolved, issues=issues,
                             status=_evidence_status(op, metrics["levels"], len(ev.facts)))
+
+    @staticmethod
+    async def _unknown_code_question(db, tenant_id: str, code: str) -> str:
+        """A short question naming the closest existing codes (with name and price) for a code that is
+        not in the catalogue. Business-agnostic: only compares the tenant's own codes."""
+        import importlib
+
+        from app.services.knowledge_search_index import _price as price_of
+
+        options: List[str] = []
+        try:
+            sr = importlib.import_module("app.services.retrieval_router.structured_retriever")
+            near = await sr.StructuredRetriever().fetch_near_keys(db, tenant_id, code, limit=3)
+            for item, ver in near:
+                cd = getattr(ver, "canonical_data", None) or {}
+                p = price_of(cd if isinstance(cd, dict) else {})
+                key = (getattr(item, "external_identity_key", "") or "").upper()
+                title = getattr(item, "title", "") or ""
+                options.append(f"{key} - {title}" + (f", \u20b9{p:,.0f}" if p is not None else ""))
+        except Exception as exc:  # noqa: BLE001 - a lookup failure still gets an honest question
+            logger.warning("copilot near-code lookup failed", error=f"{type(exc).__name__}: {str(exc)[:200]}")
+        if not options:
+            return f"I couldn't find {code} in your catalogue. Could you check the code, or tell me the product name?"
+        if len(options) == 1:
+            return f"I couldn't find {code} in your catalogue. The closest match is {options[0]}. Should I use it?"
+        listed = "\n".join(f"- {o}" for o in options)
+        return f"I couldn't find {code} in your catalogue. Closest matches:\n{listed}\nWhich one should I use?"
 
     async def _answer_flow(self, rid: str, thread_id: str, tenant_id: str, req: CopilotRequest, decision: CopilotDecision,
                            snap, customer_msg: str, ev: EvidenceSet, metrics: Dict[str, Any], t0: float) -> CopilotResult:
@@ -400,7 +480,8 @@ class ReplyCopilotService:
         metrics["total_ms"] = round((time.perf_counter() - t0) * 1000, 1)
         issues = issues or []
         result = CopilotResult(
-            request_id=rid, thread_id=thread_id, operation=op, proposal=proposal, message=message, changes_summary=summary,
+            request_id=rid, thread_id=thread_id, operation=op, proposal=proposal,
+            message=message or (clarification or ""), changes_summary=summary,
             base_draft_revision=req.draft_revision, apply_allowed=bool(proposal) and not issues,
             facts_used=facts_used or [], unresolved=unresolved or [], issues=issues,
             clarification_question=clarification, evidence_status=status or ("Needs clarification" if clarification else ""),

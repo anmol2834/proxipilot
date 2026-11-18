@@ -173,7 +173,7 @@ export function IsolatedAiPromptBox({
         applied: Boolean(reply?.applied),
         summary:
           reply?.result?.changes_summary ||
-          (reply?.result?.message ? `answered: ${reply.result.message.slice(0, 160)}` : null) ||
+          (reply?.result?.message ? `copilot replied: ${reply.result.message.slice(0, 300)}` : null) ||
           (reply?.error ? "(failed)" : null),
       });
     });

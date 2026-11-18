@@ -289,7 +289,8 @@ def test_writing_only_runs_zero_retrieval_and_echoes_revision(monkeypatch):
     s, calls = _service(monkeypatch, d, [_out("Dear Asha,\n\nThe HA-001 deep cleaning service costs Rs. 1,499.\n\nKind regards,\nSupport")])
     res = asyncio.run(s.refine("t1", "th1", CopilotRequest(instruction="Make it formal", draft_text=DRAFT, draft_revision="r1")))
     assert res.operation == CopilotOperation.WRITING_ONLY and res.apply_allowed and res.base_draft_revision == "r1"
-    assert calls["resolve"] == [] and calls["ctx"] == 0 and res.metrics["retrieval_calls"] == 0
+    # codes in the draft are looked up by exact code (milliseconds); no search, no embedding
+    assert calls["resolve"] == [] and calls["ctx"] == 1 and res.metrics["retrieval_calls"] == 0
 
 
 def test_writing_only_cannot_smuggle_new_facts(monkeypatch):
@@ -441,7 +442,7 @@ def test_false_absence_claim_in_draft_is_checked_and_corrected(monkeypatch):
     fixed = _out("Hi,\n\nDSDR0099 is our 304 SS Soap Dispenser 1000ML at ₹2,740.\n\nRegards", used_fact_ids=["DSDR0099:price"])
     s, calls = _service(monkeypatch, d, [fixed], ctx_facts={"DSDR0099": [_fact("DSDR0099", "price", "2740.0")]})
     res = asyncio.run(s.refine("t1", "th1", CopilotRequest(instruction="make it professional", draft_text=draft)))
-    assert calls["ctx"] == 1 and res.metrics["corrected_absence_claims"] == ["DSDR0099"]
+    assert calls["ctx"] == 1 and res.metrics["corrected_absence_claims"] == ["DSDR0099"]  # one exact lookup
     assert res.operation == CopilotOperation.MIXED and res.apply_allowed and res.metrics["retrieval_calls"] == 0
 
 
@@ -639,3 +640,89 @@ def test_pure_note_is_answered_in_chat_not_drafted(monkeypatch):
         instruction="tell my agent that i can give discount on paper dispenser", draft_text=DRAFT)))
     assert res.operation == CopilotOperation.ANSWER and "DPDR0021" in res.message and res.proposal == ""
     assert calls["compose"] == 0 and res.metrics["note_for_copilot"]
+
+
+# --------------------------------------------------------------------------- asks before acting / knows its items
+
+def test_unknown_code_in_instruction_gets_a_question_not_a_draft(monkeypatch):
+    d = CopilotDecision(operation=CopilotOperation.NEW_RETRIEVAL, decided_by="llm",
+                        fact_requests=[FactRequest(request="price of DSDR0112-S")])
+    s, calls = _service(monkeypatch, d, [_out("should not draft")])
+
+    async def records(db, tenant, codes, ids):
+        calls["ctx"] += 1
+        return {}, [c for c in codes if c == "DSDR0112-S"]
+
+    async def question(db, tenant, code):
+        return f"I couldn't find {code} in your catalogue. The closest match is DSDR0112 - Automatic Dispenser, ₹4,350. Should I use it?"
+    s._context_records = records
+    s._unknown_code_question = question
+    res = asyncio.run(s.refine("t1", "th1", CopilotRequest(instruction="List the dsdr0112-s product and suggest in a draft to buy",
+                                                           draft_text=DRAFT)))
+    assert res.operation == CopilotOperation.CLARIFY and "DSDR0112" in res.message and res.proposal == ""
+    assert calls["decide"] == 0 and calls["compose"] == 0 and res.metrics["unknown_codes"] == ["DSDR0112-S"]
+
+
+@pytest.mark.parametrize("text", ["ok", "yes", "done", "perfect", "use the first one"])
+def test_confirmations_go_to_ai1_with_the_session(text):
+    assert decision.rule_decision(text, DRAFT) is None
+
+
+def test_product_names_for_codes_in_the_draft_always_reach_the_writer(monkeypatch):
+    d = CopilotDecision(operation=CopilotOperation.WRITING_ONLY, decided_by="llm")
+    named = [CopilotFact(fact_id="DSDR0112:price", entity_id="ki_1", entity_code="DSDR0112",
+                         entity_title="Automatic Soap/Sanitizer Dispenser 1100ML", attribute="price", value="4350.0",
+                         source=EvidenceSource.CONTEXT_RECORD, version_id="v1")]
+    draft = "Hi Sutter,\n\nI'd recommend considering DSDR0112.\n\nRegards,\nDolphy India"
+    s, calls = _service(monkeypatch, d, [_out("Hi Sutter,\n\nI'd recommend DSDR0112, our Automatic Soap/Sanitizer "
+                                              "Dispenser 1100ML.\n\nRegards,\nDolphy India")],
+                        ctx_facts={"DSDR0112": named})
+    res = asyncio.run(s.refine("t1", "th1", CopilotRequest(instruction="mention the name of the product too with product code",
+                                                           draft_text=draft)))
+    seen = calls["evidence_seen"][0]
+    assert any(f.entity_title and "Automatic" in f.entity_title for f in seen.facts)
+    assert res.apply_allowed and "Automatic Soap/Sanitizer" in res.proposal and res.metrics["retrieval_calls"] == 0
+
+
+@pytest.mark.parametrize("text", ["change it", "fix this", "update the draft", "do it again", "improve this"])
+def test_vague_edits_get_a_question(text):
+    d = decision.rule_decision(text, DRAFT)
+    assert d is not None and d.operation == CopilotOperation.CLARIFY and d.clarification_question
+
+
+def test_codes_without_their_product_name_are_detected():
+    ev = EvidenceSet(facts=[CopilotFact(fact_id="x", entity_code="DSDR0112", entity_title="Automatic Soap Dispenser 1100ML",
+                                        attribute="price", value="4350", source=EvidenceSource.CONTEXT_RECORD)])
+    assert composer.codes_missing_names("You may consider DSDR0112 instead.", ev) == ["DSDR0112"]
+    assert composer.codes_missing_names("Our Automatic Soap Dispenser (DSDR0112) suits you.", ev) == []
+    assert composer.codes_missing_names("HA-001 costs Rs. 1,499.", ev) == []          # unknown name: nothing to enforce
+
+
+def test_short_answer_to_a_copilot_question_continues_the_original_task():
+    from app.services.reply_copilot.contracts import CopilotTurn
+    q = "copilot replied: I couldn't find DSDR0112-S in your catalogue. The closest match is DSDR0112. Should I use it?"
+    req = CopilotRequest(instruction="yes", draft_text=DRAFT,
+                         history=[CopilotTurn(instruction="List the dsdr0112-s product and suggest in a draft to buy", summary=q)])
+    text, answered = svc_mod.effective_instruction(req)
+    assert answered and text.startswith("List the dsdr0112-s product") and '"yes"' in text and "Should I use it?" in text
+    long_req = req.model_copy(update={"instruction": "actually write a completely new email about hand dryers for this customer please"})
+    assert svc_mod.effective_instruction(long_req) == (long_req.instruction, False)
+    no_q = req.model_copy(update={"history": [CopilotTurn(instruction="make it formal", summary="made it formal")]})
+    assert svc_mod.effective_instruction(no_q)[1] is False
+
+
+def test_answering_does_not_re_ask_the_unknown_code_question(monkeypatch):
+    from app.services.reply_copilot.contracts import CopilotTurn
+    d = CopilotDecision(operation=CopilotOperation.MIXED, decided_by="llm", writing_goal="suggest DSDR0112",
+                        fact_requests=[FactRequest(request="price of DSDR0112", entity_codes=["DSDR0112"])])
+    s, calls = _service(monkeypatch, d, [_out("Hi Asha,\n\nWe suggest HA-001 at Rs. 1,499.\n\nRegards,\nSupport")])
+
+    async def records(db, tenant, codes, ids):
+        calls["ctx"] += 1
+        return {}, [c for c in codes if c == "DSDR0112-S"]
+    s._context_records = records
+    q = "copilot replied: I couldn't find DSDR0112-S in your catalogue. The closest match is DSDR0112. Should I use it?"
+    res = asyncio.run(s.refine("t1", "th1", CopilotRequest(
+        instruction="yes", draft_text=DRAFT,
+        history=[CopilotTurn(instruction="List the dsdr0112-s product and suggest in a draft to buy", summary=q)])))
+    assert res.operation != CopilotOperation.CLARIFY and res.metrics["answered_copilot_question"] and calls["decide"] == 1

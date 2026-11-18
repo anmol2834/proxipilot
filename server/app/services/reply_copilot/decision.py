@@ -62,8 +62,16 @@ def codes_in(text: str) -> List[str]:
 _GREETING = re.compile(
     r"^\s*(h+i+|h+e+l+o+|hey+|hiya|namaste|namaskar|good\s+(morning|afternoon|evening|night)|how\s+are\s+you|"
     r"what'?s\s+up|sup|yo)\b[\s!.,?]*(there|copilot|buddy|bro)?[\s!.,?]*$", re.IGNORECASE)
-_THANKS = re.compile(r"^\s*(thanks?( you)?|thx|ty|great|nice|cool|ok(ay)?|perfect|got it|awesome|done)[\s!.,?]*$",
-                     re.IGNORECASE)
+# Only real thanks. "ok", "yes", "done", "perfect" may answer a question the copilot just asked, so
+# they go to AI #1 with the session (which contains that question).
+_THANKS = re.compile(r"^\s*(thanks?( you)?( so much)?|thx|ty|thank u)[\s!.,?]*$", re.IGNORECASE)
+
+# "change it", "fix this", "do it again": nothing says WHAT to change -> ask instead of guessing.
+_VAGUE_EDIT = re.compile(r"^\s*(please\s+)?(change|edit|update|redo|modify|fix|improve|rewrite|do)\s+"
+                         r"(it|this|that|the (draft|email|mail|reply|message))(\s+again)?\s*(please)?[\s!.]*$",
+                         re.IGNORECASE)
+VAGUE_EDIT_QUESTION = ("What should I change - the tone (more formal or friendlier), the length, or the content "
+                       "(for example a product, price or detail)?")
 
 GREETING_REPLY = ("Hi! How can I help with this reply? I can improve or rewrite the draft, change its tone, "
                   "or look up products, prices and specifications for it.")
@@ -81,6 +89,9 @@ def rule_decision(instruction: str, draft_text: str) -> Optional[CopilotDecision
         return CopilotDecision(operation=CopilotOperation.CHAT, reply=GREETING_REPLY, decided_by="rules")
     if _THANKS.match(text):
         return CopilotDecision(operation=CopilotOperation.CHAT, reply=THANKS_REPLY, decided_by="rules")
+    if _VAGUE_EDIT.match(text) and draft_text.strip():
+        return CopilotDecision(operation=CopilotOperation.CLARIFY, clarification_question=VAGUE_EDIT_QUESTION,
+                               decided_by="rules")
     if not draft_text.strip() or codes_in(text) or _FACTS.search(text) or "?" in text:
         return None
     if _WRITING.search(text):
@@ -135,7 +146,16 @@ operation (pick exactly one):
   warranty, availability, delivery, contact, alternatives, policy) or names a product or category. Every product
   or category named gets a fact request, also inside dictated statements ("tell them we can discount the paper
   dispenser" -> look up paper dispensers). MIXED = wording change + facts, or an email change + a note for you.
-- CLARIFY: the instruction cannot be understood at all. Put a short question in clarification_question.
+- CLARIFY: you cannot act well without one answer from the employee: the instruction is ambiguous in a way
+  that changes the result (which product? which of several matches? include prices or not? who is it for?), or
+  it refers to something not in the conversation. Ask ONE short, specific question in clarification_question,
+  offering the likely options. Do not ask when a sensible default is obvious; do not ask twice in a row.
+
+CONVERSATION WITH THE COPILOT (SESSION)
+- If the copilot's last message was a question and the INSTRUCTION answers it ("yes", "ok", "use the first one",
+  "no, without price"), act on that answer: combine it with the instruction that led to the question.
+- Earlier instructions explain context, but each new instruction is the task. Do not re-apply an earlier
+  instruction unless the new one builds on it ("shorter", "add the name too").
 
 writing_goal: what must change in the EMAIL for this instruction (empty for CHAT / ANSWER). If the instruction
 also contains a note meant for the copilot (an authorization or information such as "I can give a discount on
