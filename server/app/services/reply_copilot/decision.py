@@ -189,6 +189,10 @@ fact_requests: at most 3. "request" is a standalone question as the customer wou
 product/code it concerns (resolve "this product" / "the second one" using CONTEXT ITEMS). attributes = the fields
 needed (e.g. "price", "warranty"). entity_codes = exact codes from the draft, the instruction or CONTEXT ITEMS.
 about_context_items = true when the request concerns items already in the conversation.
+"More / other / different options" (with no product type named) means more products of the SAME kind as the
+products listed in the DRAFT (use their names in CONTEXT ITEMS to name that kind, e.g. "more toilet paper
+dispensers"), not of whatever the customer last mentioned. If the draft lists clearly different kinds of products
+and the instruction does not say which, use CLARIFY and ask which kind.
 CONTEXT ITEMS are listed in the order they appear in the draft: "the second one", "the last one", "pehle wala"
 (first), "doosra" (second), "uska / iska / woh wala" (that one) refer to those items - use their codes.
 A fact request always asks about the PRODUCT itself (its price / details), never about something the employee is

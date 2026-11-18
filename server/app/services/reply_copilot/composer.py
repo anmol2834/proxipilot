@@ -82,8 +82,9 @@ WRITING
   The customer's own numbers (e.g. "I need 50 units") are their requirement, not our stock.
 - Totals: you may multiply a verified unit price by the quantity the customer asked for (and apply a GST rate
   only if one is stated); show the unit price too.
-- "More / other / different / alternative options" means products NOT already in the working draft; if the
-  facts contain none, say these are the closest options we have instead of repeating the same ones.
+- "More / other / different / alternative options" ADDS products that are NOT already in the working draft to the
+  existing list: keep the products already listed unless the employee says "instead" / "replace". If the facts
+  contain no new product, keep the draft as it is and say so in assistant_message instead of rewriting the email.
 - Focus on the CURRENT instruction: make exactly the change it asks for. Do not repeat a point twice, do not pad
   the email with points the customer did not ask about, and integrate new content where it belongs instead of
   appending it. Keep earlier session changes, but do not re-add content the employee removed.
