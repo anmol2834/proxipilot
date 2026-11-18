@@ -3,8 +3,8 @@
 import React from "react";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
+import Link from "next/link";
 import { Container } from "./layout";
-import { landingConfig } from "@/config/landing";
 import { ProxiPilotLogo } from "@/components/ui/ProxiPilotLogo";
 
 const SOCIAL_LINKS = [
@@ -46,16 +46,85 @@ const SOCIAL_LINKS = [
   },
 ];
 
-export function LandingFooter() {
-  const { footer, navigation } = landingConfig;
+const FOOTER_COLUMNS = [
+  {
+    title: "Product",
+    links: [
+      { label: "Features", href: "/features" },
+      { label: "How It Works", href: "/how-it-works" },
+      { label: "Integrations", href: "/integrations" },
+      { label: "Pricing", href: "/pricing" },
+      { label: "Request Demo", href: "/request-demo" },
+      { label: "Product Roadmap", href: "/features#roadmap" },
+    ],
+  },
+  {
+    title: "Solutions",
+    links: [
+      { label: "Overview", href: "/solutions" },
+      { label: "Small Businesses", href: "/solutions/small-business" },
+      { label: "Sales Teams", href: "/solutions/sales-teams" },
+      { label: "Customer Support", href: "/solutions/customer-support" },
+      { label: "E-commerce", href: "/solutions/ecommerce" },
+      { label: "SaaS Companies", href: "/solutions/saas-companies" },
+      { label: "Agencies", href: "/solutions/agencies" },
+      { label: "B2B Businesses", href: "/solutions/b2b-businesses" },
+      { label: "Wholesale", href: "/solutions/wholesale-businesses" },
+      { label: "Operations", href: "/solutions/operations-teams" },
+    ],
+  },
+  {
+    title: "Resources & Docs",
+    links: [
+      { label: "Blog & Research", href: "/blog" },
+      { label: "Help Center", href: "/help" },
+      { label: "Documentation", href: "/docs" },
+      { label: "Getting Started", href: "/docs/getting-started" },
+      { label: "Connect Gmail", href: "/docs/connect-gmail" },
+      { label: "Connect Outlook", href: "/docs/connect-outlook" },
+      { label: "AI Automation Rules", href: "/docs/ai-automation" },
+      { label: "Knowledge Base RAG", href: "/docs/business-knowledge" },
+      { label: "Managing Drafts", href: "/docs/manage-drafts" },
+      { label: "Troubleshooting", href: "/docs/troubleshooting" },
+      { label: "FAQ", href: "/faq" },
+    ],
+  },
+  {
+    title: "Company & Trust",
+    links: [
+      { label: "About ProxiPilot", href: "/about" },
+      { label: "Testimonials", href: "/testimonials" },
+      { label: "Security & Trust", href: "/security" },
+      { label: "Partner Program", href: "/partners" },
+      { label: "Careers", href: "/careers" },
+      { label: "Customer Support", href: "/support" },
+      { label: "Contact Us", href: "/contact" },
+      { label: "AI Transparency", href: "/ai-transparency" },
+      { label: "Subprocessors", href: "/subprocessors" },
+      { label: "SLA & Uptime", href: "/sla" },
+    ],
+  },
+];
 
+const BOTTOM_LEGAL_LINKS = [
+  { label: "Privacy Policy", href: "/privacy" },
+  { label: "Terms of Service", href: "/terms" },
+  { label: "Cookie Policy", href: "/cookies" },
+  { label: "Acceptable Use", href: "/acceptable-use" },
+  { label: "Email Sending Policy", href: "/email-sending-policy" },
+  { label: "DPA", href: "/dpa" },
+  { label: "Privacy Request", href: "/privacy-request" },
+];
+
+export function LandingFooter() {
   return (
     <Box
       component="footer"
       sx={{
         backgroundColor: "#FFFFFF",
-        pt: { xs: 8, md: 10 },
-        pb: { xs: 6, md: 7 },
+        borderTop: "1px solid #EEF2F6",
+        pt: { xs: 6, md: 7 },
+        pb: { xs: 5, md: 6 },
       }}
     >
       <Container size="xl">
@@ -63,47 +132,51 @@ export function LandingFooter() {
         <Box
           sx={{
             display: "grid",
-            gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)", md: "2.6fr repeat(4, 1fr)" },
-            gap: { xs: 5, md: 4 },
-            mb: { xs: 7, md: 9 },
+            gridTemplateColumns: {
+              xs: "1fr",
+              sm: "repeat(2, 1fr)",
+              md: "1.7fr 1fr 1.15fr 1.25fr 1.15fr",
+            },
+            gap: { xs: 4, md: 3 },
+            mb: { xs: 5, md: 6 },
           }}
         >
           {/* Left Brand Column */}
-          <Box sx={{ pr: { md: 3 } }}>
+          <Box sx={{ pr: { md: 2 } }}>
             {/* Logo */}
-            <Box sx={{ mb: 2 }}>
-              <ProxiPilotLogo size={32} href="#hero" textSize="1.375rem" />
+            <Box sx={{ mb: 1.5 }}>
+              <ProxiPilotLogo size={30} href="/" textSize="1.3rem" />
             </Box>
 
             {/* Tagline */}
             <Typography
               sx={{
                 color: "#64748B",
-                fontSize: "0.95rem",
+                fontSize: "0.875rem",
                 lineHeight: 1.5,
-                maxWidth: 280,
-                mb: 1.5,
+                maxWidth: 260,
+                mb: 1.25,
               }}
             >
-              Intelligent email automation for modern teams.
+              Intelligent email automation for modern commercial teams. Grounded in business knowledge, verified before sending.
             </Typography>
 
-            {/* Subtagline: LESS INBOX. MORE IMPACT. */}
+            {/* Subtagline */}
             <Typography
               sx={{
                 color: "#94A3B8",
-                fontSize: "0.75rem",
+                fontSize: "0.7rem",
                 fontWeight: 700,
-                letterSpacing: "0.1em",
+                letterSpacing: "0.08em",
                 textTransform: "uppercase",
-                mb: 3,
+                mb: 2.5,
               }}
             >
-              LESS INBOX. MORE IMPACT.
+              Operated by Cheldain
             </Typography>
 
             {/* Social Icons Row */}
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1.25 }}>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
               {SOCIAL_LINKS.map((item) => (
                 <Box
                   key={item.name}
@@ -113,8 +186,8 @@ export function LandingFooter() {
                   rel="noopener noreferrer"
                   aria-label={item.name}
                   sx={{
-                    width: 38,
-                    height: 38,
+                    width: 34,
+                    height: 34,
                     borderRadius: "50%",
                     backgroundColor: "#F8FAFC",
                     border: "1px solid #E2E8F0",
@@ -139,35 +212,36 @@ export function LandingFooter() {
           </Box>
 
           {/* 4 Nav Columns */}
-          {footer.columns.map((column) => (
+          {FOOTER_COLUMNS.map((column) => (
             <Box key={column.title}>
               <Typography
                 sx={{
                   fontWeight: 700,
                   color: "#0F172A",
-                  fontSize: "0.95rem",
-                  letterSpacing: "-0.01em",
-                  mb: 2.25,
+                  fontSize: "0.825rem",
+                  letterSpacing: "0.02em",
+                  textTransform: "uppercase",
+                  mb: 1.5,
                 }}
               >
                 {column.title}
               </Typography>
               <Box component="ul" sx={{ listStyle: "none", p: 0, m: 0 }}>
                 {column.links.map((link) => (
-                  <Box component="li" key={link.label} sx={{ mb: 1.5 }}>
-                    <Box
-                      component="a"
+                  <Box component="li" key={link.label} sx={{ mb: 0.85 }}>
+                    <Link
                       href={link.href}
-                      sx={{
-                        fontSize: "0.9rem",
-                        color: "#64748B",
+                      style={{
+                        fontSize: "0.825rem",
+                        color: "#475569",
                         textDecoration: "none",
-                        transition: "color 150ms ease",
-                        "&:hover": { color: "#2563EB" },
+                        transition: "color 140ms ease",
                       }}
+                      onMouseEnter={(e) => (e.currentTarget.style.color = "#2563EB")}
+                      onMouseLeave={(e) => (e.currentTarget.style.color = "#475569")}
                     >
                       {link.label}
-                    </Box>
+                    </Link>
                   </Box>
                 ))}
               </Box>
@@ -175,83 +249,68 @@ export function LandingFooter() {
           ))}
         </Box>
 
-        {/* Bottom Bar: Copyright & Legal / Status */}
+        {/* Bottom Bar: Copyright & Quick Links */}
         <Box
           sx={{
-            pt: 3.5,
+            pt: 2.5,
             borderTop: "1px solid #EEF2F6",
             display: "flex",
             flexDirection: { xs: "column", sm: "row" },
-            alignItems: { xs: "center", sm: "center" },
+            alignItems: { xs: "flex-start", sm: "center" },
             justifyContent: "space-between",
             gap: 2,
           }}
         >
-          <Typography sx={{ color: "#64748B", fontSize: "0.85rem" }}>
-            {footer.copyright}
+          <Typography sx={{ color: "#64748B", fontSize: "0.8rem" }}>
+            © 2025 Cheldain. Operating ProxiPilot. All rights reserved.
           </Typography>
 
-          <Box sx={{ display: "flex", alignItems: "center", gap: 3, flexWrap: "wrap" }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: { xs: 1.5, sm: 2 }, flexWrap: "wrap" }}>
+            {BOTTOM_LEGAL_LINKS.map((item, idx) => (
+              <React.Fragment key={item.label}>
+                <Link
+                  href={item.href}
+                  style={{
+                    fontSize: "0.785rem",
+                    color: "#64748B",
+                    textDecoration: "none",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = "#0F172A")}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = "#64748B")}
+                >
+                  {item.label}
+                </Link>
+                {idx < BOTTOM_LEGAL_LINKS.length - 1 && (
+                  <Box sx={{ width: "1px", height: 10, backgroundColor: "#CBD5E1" }} />
+                )}
+              </React.Fragment>
+            ))}
+
+            <Box sx={{ width: "1px", height: 10, backgroundColor: "#CBD5E1" }} />
+
             <Box
               component="a"
-              href="/privacy"
+              href="https://status.proxipilot.com"
+              target="_blank"
+              rel="noopener noreferrer"
               sx={{
-                fontSize: "0.85rem",
-                color: "#64748B",
-                textDecoration: "none",
-                "&:hover": { color: "#0F172A" },
-              }}
-            >
-              Privacy
-            </Box>
-            <Box sx={{ width: "1px", height: 12, backgroundColor: "#CBD5E1" }} />
-            <Box
-              component="a"
-              href="/terms"
-              sx={{
-                fontSize: "0.85rem",
-                color: "#64748B",
-                textDecoration: "none",
-                "&:hover": { color: "#0F172A" },
-              }}
-            >
-              Terms
-            </Box>
-            <Box sx={{ width: "1px", height: 12, backgroundColor: "#CBD5E1" }} />
-            <Box
-              component="a"
-              href="/security"
-              sx={{
-                fontSize: "0.85rem",
-                color: "#64748B",
-                textDecoration: "none",
-                "&:hover": { color: "#0F172A" },
-              }}
-            >
-              Security
-            </Box>
-            <Box sx={{ width: "1px", height: 12, backgroundColor: "#CBD5E1" }} />
-            <Box
-              component="a"
-              href="/status"
-              sx={{
-                fontSize: "0.85rem",
+                fontSize: "0.785rem",
                 color: "#64748B",
                 textDecoration: "none",
                 display: "inline-flex",
                 alignItems: "center",
-                gap: 0.75,
+                gap: 0.6,
                 "&:hover": { color: "#0F172A" },
               }}
             >
-              Status
+              Systems Operational
               <Box
                 sx={{
-                  width: 8,
-                  height: 8,
+                  width: 7,
+                  height: 7,
                   borderRadius: "50%",
                   backgroundColor: "#10B981",
-                  boxShadow: "0 0 6px rgba(16, 185, 129, 0.6)",
+                  boxShadow: "0 0 5px rgba(16, 185, 129, 0.7)",
                 }}
               />
             </Box>
