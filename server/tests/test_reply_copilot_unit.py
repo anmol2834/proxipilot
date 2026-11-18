@@ -834,3 +834,12 @@ def test_more_options_keeps_the_products_already_listed(monkeypatch):
                           ctx_facts={"DTPR0046": [_fact("DTPR0046", "price", "4390.0")]})
     asyncio.run(s2.refine("t1", "th1", CopilotRequest(instruction="suggest other products instead", draft_text=draft)))
     assert calls2["compose"] == 1                          # "instead": replacing is what was asked
+
+
+@pytest.mark.parametrize("request_text,instruction,match", [
+    ("What other toilet paper dispensers do you offer?", "suggest the more products to him", False),
+    ("What is the price of the hand dispenser?", "find the hand dispenser and it's price and then draft the mail", True),
+    ("What is the price of the cheapest SS soap dispenser?", "suggest the cheapest SS soap dispenser and add its price", True),
+])
+def test_early_search_is_reused_only_for_the_same_request(request_text, instruction, match):
+    assert svc_mod.speculation_matches(request_text, instruction) is match

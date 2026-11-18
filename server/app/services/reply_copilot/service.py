@@ -123,6 +123,26 @@ def effective_instruction(req: CopilotRequest) -> Tuple[str, bool]:
             f"answer; do not ask the same question again.)"), True
 
 
+_STOP = {"what", "which", "where", "when", "does", "have", "with", "your", "from", "this", "that", "they", "them",
+         "their", "there", "about", "would", "could", "should", "please", "price", "prices", "offer", "other", "more",
+         "some", "any", "much", "many", "tell", "give", "show", "find", "suggest", "list", "draft", "mail", "email",
+         "customer", "him", "her", "then", "also", "and", "the", "for", "you", "our", "are", "its", "it's"}
+
+
+def _content_words(text: str) -> set:
+    return {w.rstrip("s") for w in re.findall(r"[a-z0-9]{3,}", (text or "").lower()) if w not in _STOP}
+
+
+def speculation_matches(request: str, instruction: str) -> bool:
+    """The early search ran on the employee's raw words; reuse it only when AI #1's request asks for the
+    same thing (its content words are mostly in the instruction). "suggest more products" ->
+    "other toilet paper dispensers" names a product type the raw search never had."""
+    need = _content_words(request)
+    if not need:
+        return False
+    return len(need & _content_words(instruction)) / len(need) >= 0.6
+
+
 def refers_to_context(instruction: str) -> bool:
     return bool(decision_mod.codes_in(instruction) or _REFERS.search(instruction))
 
@@ -293,7 +313,8 @@ class ReplyCopilotService:
                                                            "reply": "Noted. I'll keep that in mind for this reply."})
                 metrics["note_for_copilot"] = True
             use_spec = bool(spec_task and len(decision.fact_requests) == 1
-                            and not decision.fact_requests[0].entity_codes)
+                            and not decision.fact_requests[0].entity_codes
+                            and speculation_matches(decision.fact_requests[0].request, req.instruction))
             if spec_task and not use_spec:
                 spec_task.cancel()
                 with contextlib.suppress(BaseException):
