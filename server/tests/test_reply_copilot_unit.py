@@ -816,3 +816,21 @@ def test_more_options_never_repeats_products_already_in_the_draft(monkeypatch):
     l3 = calls["evidence_seen"][0]
     codes_from_search = [f.entity_code for f in l3.facts if f.source == EvidenceSource.CONTEXT_RECORD and f.value == "3100.0"]
     assert codes_from_search == ["DTPR0099"] and res.metrics["excluded_already_shown"] == 2
+
+
+def test_more_options_keeps_the_products_already_listed(monkeypatch):
+    d = CopilotDecision(operation=CopilotOperation.NEW_RETRIEVAL, decided_by="llm",
+                        fact_requests=[FactRequest(request="more toilet paper dispensers", attributes=["price"])])
+    draft = "Hi Vishi,\n\nYou may consider DTPR0046 (₹4,390).\n\nRegards"
+    found = EvidenceSet(facts=[_fact("DTPR0099", "price", "3100.0")])
+    s, calls = _service(monkeypatch, d, [_out("Hi Vishi,\n\nYou may consider DTPR0099 (₹3,100).\n\nRegards"),
+                                         _out("Hi Vishi,\n\nYou may consider DTPR0046 (₹4,390) and DTPR0099 (₹3,100).\n\nRegards")],
+                        resolve_result=(found, {"level": "L3_retrieval"}),
+                        ctx_facts={"DTPR0046": [_fact("DTPR0046", "price", "4390.0")]})
+    res = asyncio.run(s.refine("t1", "th1", CopilotRequest(instruction="suggest more products to him", draft_text=draft)))
+    assert calls["compose"] == 2 and "DTPR0046" in res.proposal and "DTPR0099" in res.proposal
+    s2, calls2 = _service(monkeypatch, d, [_out("Hi Vishi,\n\nYou may consider DTPR0099 (₹3,100) instead.\n\nRegards")],
+                          resolve_result=(found, {"level": "L3_retrieval"}),
+                          ctx_facts={"DTPR0046": [_fact("DTPR0046", "price", "4390.0")]})
+    asyncio.run(s2.refine("t1", "th1", CopilotRequest(instruction="suggest other products instead", draft_text=draft)))
+    assert calls2["compose"] == 1                          # "instead": replacing is what was asked

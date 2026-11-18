@@ -71,6 +71,7 @@ _REFERS = re.compile(r"\b(this|that|these|those|same|above|selected|previous|men
                      r"uska|uske|uski|iska|iske|iski|unka|inka|usko|isko|unko|inko|woh|wo|ye|yeh|wala|wali|wale|"
                      r"pehla|pehle|doosra|dusra|teesra|tisra|upar|niche)\b", re.IGNORECASE)
 # "more / other / different options": items already in the working draft must not be suggested again.
+_REPLACE = re.compile(r"\b(instead|replace|remove|only|just|drop|hata|hatao|sirf)\b", re.IGNORECASE)
 _MORE = re.compile(r"\b(more|other|others|another|different|alternatives?|else|additional|aur|dusre|doosre|baaki|"
                    r"alag|naye|new ones)\b", re.IGNORECASE)
 # The instruction asks to look something up: worth starting retrieval while AI #1 is still deciding.
@@ -392,12 +393,17 @@ class ReplyCopilotService:
         listed = {(f.entity_code or "").upper() for f in ev.facts}
         # Every existing product the employee named in this instruction must be in the email.
         omitted = [c for c in decision_mod.codes_in(req.instruction) if c in listed and c not in proposal.upper()]
+        # "More / other options" ADDS to the list: products already in the draft stay unless replaced.
+        if _MORE.search(req.instruction) and not _REPLACE.search(req.instruction):
+            omitted += [c for c in decision_mod.product_codes_in(req.draft_text)
+                        if c not in proposal.upper() and c not in omitted]
         if (issues or unnamed or omitted) and metrics["repairs"] < MAX_REPAIRS:
             metrics["repairs"] += 1
             fix = "\n".join([f"- {i.code}: {i.detail}" for i in issues]
                             + [f"- NAME_MISSING: write the product name next to {c}." for c in unnamed]
-                            + [f"- REQUESTED_PRODUCT_MISSING: the instruction asks about {c}; include it with its "
-                               f"name and the details requested." for c in omitted])
+                            + [f"- PRODUCT_MISSING: keep / include {c} with its name and the details requested "
+                               f"(the employee asked for it, or asked for MORE options in addition to it)."
+                               for c in omitted])
             data2, cm = await self._compose(tenant_id, req.instruction, req.draft_text, customer_msg, brief, ev,
                                             repair=fix, session=session, goal=decision.writing_goal)
             self._count(metrics, cm)
