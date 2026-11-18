@@ -78,6 +78,30 @@ GREETING_REPLY = ("Hi! How can I help with this reply? I can improve or rewrite 
 THANKS_REPLY = "You're welcome! Tell me if you'd like any other change to the reply."
 
 
+# Order / invoice / PO / GST / tracking numbers look like codes but are not catalogue products.
+_GSTIN = re.compile(r"^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$")
+_REF_PREFIX = re.compile(r"^(PO|INV|ORD|SO|AWB|REF|GST|TKT|QTN|PI|DN|GRN|CHLN|BILL)[-/_]?\d", re.IGNORECASE)
+_REF_CONTEXT = re.compile(
+    r"\b(p\.?\s?o\.?|purchase order|invoice|inv|bill|gstin|gst|ref|reference|ticket|awb|tracking|challan|quotation|"
+    r"qtn|proforma|order\s*(?:no\.?|number|#|id))\s*(?:no\.?|number|#|id)?\s*[:#-]?\s*$", re.IGNORECASE)
+
+
+def is_reference_number(token: str, text: str) -> bool:
+    """True for order / invoice / PO / GST / tracking numbers (pure). Product codes stay codes."""
+    up = token.upper()
+    if _GSTIN.match(up) or _REF_PREFIX.match(up):
+        return True
+    for m in re.finditer(re.escape(token), text, re.IGNORECASE):
+        if _REF_CONTEXT.search(text[max(0, m.start() - 30):m.start()]):
+            return True
+    return False
+
+
+def product_codes_in(text: str) -> List[str]:
+    """Identifier-like tokens that may be catalogue products (reference numbers removed)."""
+    return [c for c in codes_in(text) if not is_reference_number(c, text or "")]
+
+
 def rule_decision(instruction: str, draft_text: str) -> Optional[CopilotDecision]:
     """Deterministic decision when the instruction is unambiguous; None means "ask AI #1".
 
@@ -165,6 +189,8 @@ fact_requests: at most 3. "request" is a standalone question as the customer wou
 product/code it concerns (resolve "this product" / "the second one" using CONTEXT ITEMS). attributes = the fields
 needed (e.g. "price", "warranty"). entity_codes = exact codes from the draft, the instruction or CONTEXT ITEMS.
 about_context_items = true when the request concerns items already in the conversation.
+CONTEXT ITEMS are listed in the order they appear in the draft: "the second one", "the last one", "pehle wala"
+(first), "doosra" (second), "uska / iska / woh wala" (that one) refer to those items - use their codes.
 A fact request always asks about the PRODUCT itself (its price / details), never about something the employee is
 granting: "I can give a discount on paper dispensers" -> request "What is the price of the paper dispenser?",
 attributes ["price"]. The catalogue holds products, not the employee's discounts or decisions.

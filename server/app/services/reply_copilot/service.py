@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import re
 import time
 import uuid
@@ -65,8 +66,13 @@ def merge_evidence(parts: List[EvidenceSet]) -> EvidenceSet:
 MAX_VERBATIM_TURNS = 6
 
 # The instruction points at items already in the conversation ("this one", "the same", a code).
-_REFERS = re.compile(r"\b(this|that|these|those|same|above|selected|previous|mentioned|aforesaid|said)\b",
-                     re.IGNORECASE)
+_REFERS = re.compile(r"\b(this|that|these|those|same|above|selected|previous|mentioned|aforesaid|said|"
+                     r"first|second|third|fourth|fifth|last|1st|2nd|3rd|4th|5th|"
+                     r"uska|uske|uski|iska|iske|iski|unka|inka|usko|isko|unko|inko|woh|wo|ye|yeh|wala|wali|wale|"
+                     r"pehla|pehle|doosra|dusra|teesra|tisra|upar|niche)\b", re.IGNORECASE)
+# "more / other / different options": items already in the working draft must not be suggested again.
+_MORE = re.compile(r"\b(more|other|others|another|different|alternatives?|else|additional|aur|dusre|doosre|baaki|"
+                   r"alag|naye|new ones)\b", re.IGNORECASE)
 # The instruction asks to look something up: worth starting retrieval while AI #1 is still deciding.
 _SEARCH = re.compile(r"\b(find|search|look\s*up|check|suggest|recommend|show|list|options?|alternatives?|cheapest|"
                      r"lowest|most expensive|price of|prices? for|which|available|availability|compare|best|similar)\b",
@@ -160,6 +166,17 @@ def employee_text(req: CopilotRequest) -> str:
     return " ".join([req.instruction] + [t.instruction for t in req.history] + [req.session_summary])
 
 
+def custom_price_note(proposal: str, ev: EvidenceSet, emp_text: str) -> str:
+    """A price the employee gave that differs from the catalogue: allowed, but say so (non-blocking)."""
+    catalogue = {round(_n, 2) for f in ev.facts if "price" in f.attribute.lower()
+                 for _n in [composer_mod._num(f.value) or -1.0] if _n > 0}
+    own = [p for p in composer_mod.prices_in(emp_text) if round(p, 2) not in catalogue and p in composer_mod.prices_in(proposal)]
+    if not own:
+        return ""
+    listed = ", ".join(f"\u20b9{p:,.0f}" for p in own)
+    return f"I used your price ({listed}); it differs from the catalogue price - make sure it is approved."
+
+
 def _norm(s: str) -> str:
     import re as _re
     return _re.sub(r"\s+", " ", (s or "").strip().lower())
@@ -230,8 +247,8 @@ class ReplyCopilotService:
             # ---- codes the employee typed must exist before anything is drafted: a missing code gets a
             # question with the closest real codes (exact lookup + trigram index, milliseconds, no model).
             known: Dict[str, List[CopilotFact]] = {}
-            draft_codes = decision_mod.codes_in(req.draft_text)
-            instr_codes = decision_mod.codes_in(req.instruction)
+            draft_codes = decision_mod.product_codes_in(req.draft_text)
+            instr_codes = decision_mod.product_codes_in(req.instruction)
             if draft_codes or instr_codes:
                 known, missing = await self._context_records(db, tenant_id, list(dict.fromkeys(instr_codes + draft_codes)), [])
                 unknown_instr = [] if answered else [c for c in instr_codes if c in missing]
@@ -300,12 +317,31 @@ class ReplyCopilotService:
                     ctx_facts, _missing = await self._context_records(
                         db, tenant_id, wanted, [p[0] for p in snap.presented])
                 t1 = time.perf_counter()
+                # "more / other options": treat the draft's products as already shown so retrieval moves
+                # on to new ones, and drop any repeat from the results.
+                more = bool(_MORE.search(req.instruction))
+                search_snap = snap
+                if more and known:
+                    shown = [(fs[0].entity_id, c, fs[0].entity_title) for c, fs in known.items() if fs and fs[0].entity_id]
+                    search_snap = dataclasses.replace(snap, presented=list(snap.presented) + shown)
                 if use_spec and spec_task is not None:
                     results = [await spec_task]
                     metrics["speculative"] = "used"
                 else:
-                    results = await asyncio.gather(*[self._resolve_one(tenant_id, snap, r, ctx_facts)
+                    results = await asyncio.gather(*[self._resolve_one(tenant_id, search_snap, r, ctx_facts)
                                                      for r in decision.fact_requests])
+                if more:
+                    already = set(draft_codes) - set(instr_codes)
+                    kept_results = []
+                    dropped = 0
+                    for e, m in results:
+                        keep = [f for f in e.facts if (f.entity_code or "").upper() not in already]
+                        dropped += len(e.facts) - len(keep)
+                        kept_results.append((e.model_copy(update={"facts": keep}), m))
+                    results = kept_results
+                    metrics["excluded_already_shown"] = dropped
+                    if dropped and not any(e.facts for e, _ in results):
+                        results[0][0].unresolved.append("No other matching products were found beyond those already suggested.")
                 metrics["evidence_ms"] = round((time.perf_counter() - t1) * 1000, 1)
                 ev = merge_evidence([ev] + [e for e, _ in results])
                 for _, m in results:
@@ -381,6 +417,9 @@ class ReplyCopilotService:
         unresolved = list(dict.fromkeys([str(u)[:300] for u in (data.get("unresolved") or [])] + ev.unresolved))[:10]
         metrics["rejected_evidence"] = len(data.get("rejected_evidence") or [])
         note = str(data.get("assistant_message") or "").strip()[:1200]
+        custom = custom_price_note(proposal, ev, employee_text(req))
+        if custom and not note:
+            note = custom
         if note and composer_mod.validate_proposal(note, req.draft_text, ev, grounding, employee_text(req)):
             note = ""                      # a note to the employee must be as grounded as the email itself
         return self._finish(rid, thread_id, op, req, metrics, t0, proposal=proposal, message=note,

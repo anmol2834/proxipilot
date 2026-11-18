@@ -739,3 +739,80 @@ def test_named_product_left_out_of_the_draft_is_repaired(monkeypatch):
     res = asyncio.run(s.refine("t1", "th1", CopilotRequest(instruction="List the dsdr0112-s product and suggest in a draft to buy",
                                                            draft_text=DRAFT)))
     assert calls["compose"] == 2 and "DSDR0112-S" in res.proposal and res.apply_allowed
+
+
+# --------------------------------------------------------------------------- audit fixes 1-4
+
+_F112 = EvidenceSet(facts=[CopilotFact(fact_id="x", entity_code="DSDR0112",
+                                       entity_title="Automatic Soap/Sanitizer Dispenser 1100ML (Warranty 6 Mont)",
+                                       attribute="price", value="4350.0", source=EvidenceSource.CONTEXT_RECORD)])
+_CONV = "Customer: i want to buy 20 qty. Quantity: approx. 50 units"
+
+
+@pytest.mark.parametrize("text,emp,expected", [
+    ("We have 300 units of your chosen Automatic Soap/Sanitizer Dispenser 1100ML (DSDR0112) available.", "",
+     {"UNVERIFIED_AVAILABILITY", "UNVERIFIED_STOCK"}),
+    ("The Automatic Soap/Sanitizer Dispenser (DSDR0112) is in stock.", "", {"UNVERIFIED_AVAILABILITY"}),
+    ("We'll check availability for 20 units and get back to you.", "", set()),
+    ("Please confirm if you'd like to proceed with your order for 20 units.", "", set()),
+    ("We have 300 units of DSDR0112 available.", "tell him we have 300 units in stock", set()),
+    ("We can dispatch DSDR0112 within 3 days.", "", {"UNVERIFIED_TIMELINE"}),
+    ("We can dispatch DSDR0112 within 3 days.", "say dispatch in 3 days", set()),
+    ("It comes with a 6 month warranty.", "", set()),
+    ("It comes with a 2 year warranty.", "", {"UNVERIFIED_WARRANTY"}),
+])
+def test_stock_timeline_and_warranty_claims(text, emp, expected):
+    got = {i.code for i in composer.validate_proposal(text, "", _F112, _CONV + " " + emp, emp)}
+    assert got == expected
+
+
+@pytest.mark.parametrize("text,emp,ok", [
+    ("For 20 units at ₹4,350 each, the total is ₹87,000.", "", True),
+    ("For 20 units the total is ₹87,000 + 18% GST = ₹1,02,660.", "add 18% GST", True),
+    ("The total for 20 units is ₹90,000.", "", False),
+    ("We can offer DSDR0112 at ₹4,000 per unit.", "quote him ₹4,000 per unit", True),
+    ("We can offer DSDR0112 at ₹4,000 per unit.", "", False),
+])
+def test_totals_and_employee_prices(text, emp, ok):
+    issues = composer.validate_proposal(text, "", _F112, _CONV + " " + emp, emp)
+    assert (not any(i.code == "UNVERIFIED_PRICE" for i in issues)) is ok
+
+
+def test_custom_price_gets_a_non_blocking_note():
+    note = svc_mod.custom_price_note("We can offer DSDR0112 at ₹4,000 per unit.", _F112, "quote him ₹4,000 per unit")
+    assert "₹4,000" in note and "differs from the catalogue" in note
+    assert svc_mod.custom_price_note("DSDR0112 is ₹4,350.", _F112, "quote ₹4,350") == ""
+
+
+@pytest.mark.parametrize("text,codes", [
+    ("reply to PO-2024-17 and suggest DSDR0112", ["DSDR0112"]),
+    ("invoice no INV2024 for DSDR0112", ["DSDR0112"]),
+    ("GSTIN 27AAPFU0939F1ZV customer wants DSDR0112", ["DSDR0112"]),
+    ("order DSDR0112 for him", ["DSDR0112"]),
+    ("our PO number 4567AB is pending", []),
+])
+def test_reference_numbers_are_not_products(text, codes):
+    assert decision.product_codes_in(text) == codes
+
+
+@pytest.mark.parametrize("text", ["add the price of the second one", "uska price add karo", "pehle wala suggest karo",
+                                  "remove the last one"])
+def test_ordinal_and_hindi_references_keep_context_items(text):
+    r = FactRequest(request="price", entity_codes=["DSDR0112"], about_context_items=True)
+    assert svc_mod.scoped_request(r, text).entity_codes == ["DSDR0112"]
+
+
+def test_more_options_never_repeats_products_already_in_the_draft(monkeypatch):
+    d = CopilotDecision(operation=CopilotOperation.NEW_RETRIEVAL, decided_by="llm",
+                        fact_requests=[FactRequest(request="toilet paper dispensers", attributes=["price"])])
+    draft = "Hi Vishi,\n\nYou may consider DTPR0046 and DTPR0017.\n\nRegards"
+    found = EvidenceSet(facts=[_fact("DTPR0046", "price", "4390.0"), _fact("DTPR0017", "price", "2590.0"),
+                               _fact("DTPR0099", "price", "3100.0")])
+    s, calls = _service(monkeypatch, d, [_out("Hi Vishi,\n\nYou may also consider DTPR0099 at ₹3,100.\n\nRegards")],
+                        resolve_result=(found, {"level": "L3_retrieval"}),
+                        ctx_facts={"DTPR0046": [_fact("DTPR0046", "price", "4390.0")],
+                                   "DTPR0017": [_fact("DTPR0017", "price", "2590.0")]})
+    res = asyncio.run(s.refine("t1", "th1", CopilotRequest(instruction="suggest the more products to him", draft_text=draft)))
+    l3 = calls["evidence_seen"][0]
+    codes_from_search = [f.entity_code for f in l3.facts if f.source == EvidenceSource.CONTEXT_RECORD and f.value == "3100.0"]
+    assert codes_from_search == ["DTPR0099"] and res.metrics["excluded_already_shown"] == 2

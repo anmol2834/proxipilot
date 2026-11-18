@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from app.core.config import get_settings
 from app.core.llm_params import completion_params
@@ -77,6 +77,13 @@ WRITING
   name AND code (from VERIFIED FACTS / KNOWN ITEMS), gives the one key fact asked for and a next step, and signs
   off. "Not this short" means a natural short paragraph, not the previous long version.
 - Never write that you will "confirm the product name / details" when VERIFIED FACTS already contain them.
+- Stock, quantities on hand, delivery times / dates and warranty periods: state them only when VERIFIED FACTS,
+  the WORKING DRAFT or the INSTRUCTION give them. Otherwise say the team will confirm availability / timelines.
+  The customer's own numbers (e.g. "I need 50 units") are their requirement, not our stock.
+- Totals: you may multiply a verified unit price by the quantity the customer asked for (and apply a GST rate
+  only if one is stated); show the unit price too.
+- "More / other / different / alternative options" means products NOT already in the working draft; if the
+  facts contain none, say these are the closest options we have instead of repeating the same ones.
 - Focus on the CURRENT instruction: make exactly the change it asks for. Do not repeat a point twice, do not pad
   the email with points the customer did not ask about, and integrate new content where it belongs instead of
   appending it. Keep earlier session changes, but do not re-add content the employee removed.
@@ -250,6 +257,89 @@ def _digits(s: str) -> str:
     return re.sub(r"\D", "", s)
 
 
+# ---- claims the catalogue rarely holds: stock, quantities on hand, delivery times, warranty periods
+_CHECKING = re.compile(r"\b(check|checking|confirm\w*|verify|whether|subject to|let you know|get back|will update|"
+                       r"once we|to be confirmed|team will|we'll confirm|we will confirm|can check|shall check)\b",
+                       re.IGNORECASE)
+_QTY = re.compile(r"(\d[\d,]*)\s*(units?|pcs|pieces|nos|qty|sets?|boxes|cartons|numbers)\b", re.IGNORECASE)
+_STOCK_WORDS = re.compile(r"\b(in stock|ready stock|ready to (?:ship|dispatch)|on hand|available (?:now|immediately|"
+                          r"for immediate)|stock (?:of|is|available))\b", re.IGNORECASE)
+_AVAILABLE = re.compile(r"\b(available|in stock|on hand)\b", re.IGNORECASE)
+_DELIVERY = re.compile(r"\b(deliver\w*|dispatch\w*|ship(?:ped|ping|s)?|arriv\w*|lead[- ]time|transit|reach you|"
+                       r"install\w*)\b", re.IGNORECASE)
+_TIME = re.compile(r"\b(\d+\s*(?:-|to)?\s*\d*\s*(?:working\s+|business\s+)?(?:hours?|hrs?|days?|weeks?|months?)|tomorrow|"
+                   r"today|tonight|this week|next week|by (?:mon|tues|wednes|thurs|fri|satur|sun)day|"
+                   r"\d{1,2}(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*)\b", re.IGNORECASE)
+_WARRANTY_N = re.compile(r"(\d+)\s*[- ]?(years?|yrs?|months?)\b[^.\n]{0,25}\bwarrant|\bwarrant\w*[^.\n]{0,25}?(\d+)\s*[- ]?"
+                         r"(years?|yrs?|months?)\b", re.IGNORECASE)
+_GST = re.compile(r"(\d+(?:\.\d+)?)\s*%\s*(?:gst|igst|cgst|sgst|tax|vat)|(?:gst|igst|tax|vat)\s*(?:@|of|at)?\s*"
+                  r"(\d+(?:\.\d+)?)\s*%", re.IGNORECASE)
+_QTY_WORDED = re.compile(r"\b(?:qty|quantity|order of|need|want|buy)\s*(?:of|:|-)?\s*(\d[\d,]*)", re.IGNORECASE)
+_STOCK_ATTR = re.compile(r"stock|inventory|available|availability|on_hand|qty", re.IGNORECASE)
+
+
+def _sentences(text: str) -> List[str]:
+    return [s for s in re.split(r"(?<=[.!?])\s+|\n+", text or "") if s.strip()]
+
+
+def _nums(text: str) -> Set[str]:
+    return {n.replace(",", "").split(".")[0] for n in re.findall(r"\d[\d,]*(?:\.\d+)?", text or "")}
+
+
+def quantities_in(text: str) -> Set[float]:
+    out: Set[float] = set()
+    for raw in [m[0] for m in _QTY.findall(text or "")] + _QTY_WORDED.findall(text or ""):
+        v = _num(raw)
+        if v and 0 < v <= 1_000_000:
+            out.add(v)
+    return out
+
+
+def gst_rates_in(text: str) -> Set[float]:
+    out: Set[float] = set()
+    for a, b in _GST.findall(text or ""):
+        v = _num(a or b)
+        if v is not None and 0 < v <= 40:
+            out.add(v)
+    return out
+
+
+def claim_issues(proposal: str, draft: str, ev: EvidenceSet, employee_text: str) -> List[CopilotIssue]:
+    """Stock / quantity-on-hand / delivery-time / warranty claims must come from the catalogue, the
+    employee's draft or the employee's instructions - never from the model, never from the customer."""
+    issues: List[CopilotIssue] = []
+    fact_text = " ".join(f"{f.entity_title or ''} {f.attribute} {f.value}" for f in ev.facts)
+    business = " ".join((fact_text, draft, employee_text))
+    business_nums = _nums(business)
+    stock_known = any(_STOCK_ATTR.search(f.attribute) for f in ev.facts) or bool(
+        re.search(r"stock|availab|on hand", " ".join((draft, employee_text)), re.IGNORECASE))
+    draft_norm = re.sub(r"\s+", " ", (draft or "").lower())
+    for s in _sentences(proposal):
+        if re.sub(r"\s+", " ", s.lower()).strip() in draft_norm:
+            continue                                   # carried over from the employee's own draft
+        if _CHECKING.search(s):
+            continue                                   # "we'll check availability" is not a claim
+        qty = [q for q, _ in _QTY.findall(s)]
+        if _STOCK_WORDS.search(s) or (qty and _AVAILABLE.search(s)):
+            if not stock_known:
+                issues.append(CopilotIssue(code="UNVERIFIED_AVAILABILITY",
+                                           detail="States stock/availability that is not in the catalogue or your instructions."))
+            for q in qty:
+                if q.replace(",", "") not in business_nums:
+                    issues.append(CopilotIssue(code="UNVERIFIED_STOCK", detail=f"Stock quantity {q} is not verified."))
+        if _DELIVERY.search(s):
+            for t in _TIME.findall(s):
+                key = t.lower()
+                if key not in business.lower() and not (_nums(t) and _nums(t) <= business_nums and any(
+                        w in business.lower() for w in ("day", "week", "hour", "month"))):
+                    issues.append(CopilotIssue(code="UNVERIFIED_TIMELINE", detail=f"Delivery time \"{t}\" is not verified."))
+        for m in _WARRANTY_N.finditer(s):
+            n = m.group(1) or m.group(3)
+            if n and n not in business_nums:
+                issues.append(CopilotIssue(code="UNVERIFIED_WARRANTY", detail=f"Warranty of {n} {m.group(2) or m.group(4)} is not verified."))
+    return issues
+
+
 def validate_proposal(proposal: str, draft: str, ev: EvidenceSet, grounding_text: str,
                       employee_text: str = "") -> List[CopilotIssue]:
     """Every business fact in the proposal must come from verified facts or the existing draft.
@@ -269,13 +359,33 @@ def validate_proposal(proposal: str, draft: str, ev: EvidenceSet, grounding_text
         if code not in allowed:
             issues.append(CopilotIssue(code="UNVERIFIED_CODE", detail=f"Code {code} is not in the verified facts or the conversation."))
 
-    verified_prices = {round(v, 2) for f in ev.facts if "price" in f.attribute.lower() or f.attribute.lower() in ("mrp", "rate")
-                       for v in [_num(f.value) or -1.0]} | {round(v, 2) for v in prices_in(draft)}
+    unit_prices = {round(v, 2) for f in ev.facts if "price" in f.attribute.lower() or f.attribute.lower() in ("mrp", "rate")
+                   for v in [_num(f.value) or -1.0] if v > 0} | {round(v, 2) for v in prices_in(draft)}
+    # Prices the employee gives in their own instructions are theirs to quote (custom / negotiated).
+    unit_prices |= {round(v, 2) for v in prices_in(employee_text)}
+    # Totals computed from verified unit prices x quantities in the conversation (+ any stated GST rate).
+    qtys = quantities_in(" ".join((grounding_text, draft, employee_text)))
+    rates = gst_rates_in(" ".join((grounding_text, draft, employee_text, " ".join(f.value for f in ev.facts))))
+    derived: Set[float] = set()
+    for p in unit_prices:
+        for q in qtys:
+            derived.add(round(p * q, 2))
+            for g in rates:
+                derived.add(round(p * q * g / 100, 2))
+                derived.add(round(p * q * (1 + g / 100), 2))
+        for g in rates:
+            derived.add(round(p * g / 100, 2))
+            derived.add(round(p * (1 + g / 100), 2))
+
+    def _ok(v: float) -> bool:
+        return round(v, 2) in unit_prices or any(abs(v - d) <= 1.0 for d in derived)
+
     for p in prices_in(proposal):
         if p == 0:
             issues.append(CopilotIssue(code="ZERO_PRICE", detail="Quoted a price of 0; a missing price must be confirmed by the team."))
-        elif round(p, 2) not in verified_prices:
+        elif not _ok(p):
             issues.append(CopilotIssue(code="UNVERIFIED_PRICE", detail=f"Price {p:,.2f} is not a verified catalogue price."))
+    issues.extend(claim_issues(proposal, draft, ev, employee_text))
 
     allowed_digits = _digits(allowed)
     for e in _EMAIL.findall(proposal):
