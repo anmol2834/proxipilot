@@ -854,3 +854,48 @@ def test_merge_additions_keeps_draft_and_follows_list_style():
     assert "Your DSDR0112 order for 20 units is noted." in out and "- B (DTPR0047)" in out
     assert out.index("DTPR0047") > out.index("DTPR0046") and out.endswith("Regards,\nTeam")
     assert svc_mod.merge_additions(d, d) == d
+
+
+def _titled(code, title, price):
+    return CopilotFact(fact_id=f"{code}:price", entity_id=f"ki_{code}", entity_code=code, entity_title=title,
+                       attribute="price", value=price, source=EvidenceSource.CONTEXT_RECORD, version_id="v1")
+
+
+_MIXED_DRAFT = ("Hi Vishi,\n\nThe Automatic Soap Dispenser (DSDR0112) is ₹4,350.\n\nAlso:\n"
+                "- Jumbo Toilet Paper Dispenser (DTPR0046) — ₹4,390\n\nRegards,\nDolphy India")
+_MIXED_KNOWN = {"DSDR0112": [_titled("DSDR0112", "Automatic Soap Dispenser", "4350.0")],
+                "DTPR0046": [_titled("DTPR0046", "Jumbo Toilet Paper Dispenser", "4390.0")]}
+
+
+def test_more_over_mixed_kinds_asks_which_kind():
+    q = svc_mod.more_kind_question(CopilotRequest(instruction="suggest the more products to him", draft_text=_MIXED_DRAFT),
+                                   _MIXED_KNOWN)
+    assert "Automatic Soap Dispenser" in q and "Jumbo Toilet Paper Dispenser" in q and q.startswith("More of which")
+
+
+@pytest.mark.parametrize("instruction", ["suggest more toilet paper dispensers", "show other soap dispensers instead",
+                                         "more options like DTPR0046"])
+def test_more_with_a_named_kind_does_not_ask(instruction):
+    assert svc_mod.more_kind_question(CopilotRequest(instruction=instruction, draft_text=_MIXED_DRAFT), _MIXED_KNOWN) == ""
+
+
+def test_more_kind_question_is_returned_before_any_model_call(monkeypatch):
+    d = CopilotDecision(operation=CopilotOperation.NEW_RETRIEVAL, decided_by="llm", fact_requests=[FactRequest(request="x")])
+    s, calls = _service(monkeypatch, d, [_out("unused")], ctx_facts=_MIXED_KNOWN)
+    res = asyncio.run(s.refine("t1", "th1", CopilotRequest(instruction="suggest the more products to him",
+                                                           draft_text=_MIXED_DRAFT)))
+    assert res.operation == CopilotOperation.CLARIFY and calls["decide"] == 0 and calls["compose"] == 0
+
+
+def test_repair_rewrite_cannot_undo_the_additive_merge(monkeypatch):
+    d = CopilotDecision(operation=CopilotOperation.NEW_RETRIEVAL, decided_by="llm",
+                        fact_requests=[FactRequest(request="more toilet paper dispensers", attributes=["price"])])
+    draft = "Hi Vishi,\n\n- Jumbo Toilet Paper Dispenser (DTPR0046) — ₹4,390\n\nRegards,\nDolphy India"
+    known = {"DTPR0046": [_titled("DTPR0046", "Jumbo Toilet Paper Dispenser", "4390.0")]}
+    found = EvidenceSet(facts=[_titled("DTPR0099", "Double Roll Dispenser", "3100.0")])
+    # first answer names a new code without its name (repair), the repair drops the original product
+    s, calls = _service(monkeypatch, d, [_out("Hi Vishi,\n\n- DTPR0099 — ₹3,100\n\nRegards,\nDolphy India"),
+                                         _out("Hi Vishi,\n\n- Double Roll Dispenser (DTPR0099) — ₹3,100\n\nRegards,\nDolphy India")],
+                        resolve_result=(found, {"level": "L3_retrieval"}), ctx_facts=known)
+    res = asyncio.run(s.refine("t1", "th1", CopilotRequest(instruction="suggest more toilet paper dispensers", draft_text=draft)))
+    assert "DTPR0046" in res.proposal and "DTPR0099" in res.proposal

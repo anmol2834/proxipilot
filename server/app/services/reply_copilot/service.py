@@ -203,6 +203,38 @@ _SIGN_OFF = re.compile(r"^\s*(regards|best regards|kind regards|warm regards|tha
 _BULLET = re.compile(r"^\s*([-*\u2022]|\d+[.)])\s+")
 
 
+_GENERIC_MORE = {"more", "other", "others", "another", "different", "alternative", "alternatives", "else", "additional",
+                 "product", "products", "option", "options", "item", "items", "suggest", "suggestion", "suggestions",
+                 "show", "give", "send", "add", "him", "her", "them", "the", "some", "few", "few", "aur", "dusre",
+                 "doosre", "baaki", "alag", "naye", "new", "ones", "please", "to", "a", "an", "and", "of", "also", "can",
+                 "you", "kuch", "karo", "do", "de", "dikhao", "batao"}
+
+
+def _family(code: str) -> str:
+    m = re.match(r"[A-Z]+", code.upper())
+    return m.group(0) if m else code.upper()
+
+
+def more_kind_question(req: CopilotRequest, known: Dict[str, List[CopilotFact]]) -> str:
+    """For "suggest more products" (no product type named) when the draft lists products of several
+    code families (e.g. soap dispensers and toilet-paper dispensers): the question to ask, else ""."""
+    if not (req.draft_text.strip() and _MORE.search(req.instruction)) or _REPLACE.search(req.instruction):
+        return ""
+    words = set(re.findall(r"[a-z]+", req.instruction.lower()))
+    if words - _GENERIC_MORE or decision_mod.product_codes_in(req.instruction):
+        return ""                                   # the employee said what kind (or named a product)
+    families: Dict[str, str] = {}
+    for code in decision_mod.product_codes_in(req.draft_text):
+        fam = _family(code)
+        title = next((f.entity_title for f in known.get(code, []) if f.entity_title), None)
+        if fam not in families and title:
+            families[fam] = title
+    if len(families) < 2:
+        return ""
+    options = "\n".join(f"- {t} ({fam}...)" for fam, t in list(families.items())[:4])
+    return f"More of which kind of product?\n{options}"
+
+
 def merge_additions(draft: str, proposal: str) -> str:
     """Insert the proposal's NEW product lines into the employee's draft (pure).
 
@@ -315,6 +347,14 @@ class ReplyCopilotService:
                 if t:
                     titles.setdefault(c, t)
             ctx_codes = list(dict.fromkeys(instr_codes + ctx_codes))
+
+            # ---- "more options" with no product type, over a draft listing several kinds of products
+            # (code families): ask which kind instead of guessing (deterministic, no model call).
+            kinds = more_kind_question(req, known)
+            if kinds:
+                metrics["more_kind_question"] = True
+                return self._finish(rid, thread_id, CopilotOperation.CLARIFY, req, metrics, t0,
+                                    clarification=kinds, message=kinds, status="Needs confirmation")
 
             # ---- speculative retrieval: a search-type instruction ("find X and its price") almost always
             # needs one primary search; start it now so it overlaps the decision call. Discarded if the
@@ -472,6 +512,11 @@ class ReplyCopilotService:
                 len(composer_mod.codes_missing_names(p2, ev)) + len(omitted2) < len(unnamed) + len(omitted)))
             if better or (not issues2 and issues):
                 data, proposal, issues = data2, p2, issues2
+
+        # The repair rewrite must not undo an additive merge: re-apply it on the final text.
+        if additive and any(c not in proposal.upper() for c in decision_mod.product_codes_in(req.draft_text)):
+            proposal = merge_additions(req.draft_text, proposal)
+            metrics["merged_additions"] = True
 
         if not req.draft_text.strip() and proposal:
             proposal = await self._with_closing(tenant_id, snap, proposal)
