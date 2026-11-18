@@ -726,3 +726,16 @@ def test_answering_does_not_re_ask_the_unknown_code_question(monkeypatch):
         instruction="yes", draft_text=DRAFT,
         history=[CopilotTurn(instruction="List the dsdr0112-s product and suggest in a draft to buy", summary=q)])))
     assert res.operation != CopilotOperation.CLARIFY and res.metrics["answered_copilot_question"] and calls["decide"] == 1
+
+
+def test_named_product_left_out_of_the_draft_is_repaired(monkeypatch):
+    d = CopilotDecision(operation=CopilotOperation.MIXED, decided_by="llm", writing_goal="suggest DSDR0112-S")
+    named = [CopilotFact(fact_id="DSDR0112-S:price", entity_id="ki_s", entity_code="DSDR0112-S",
+                         entity_title="SS 304 Automatic Soap Dispenser 1100ML", attribute="price", value="4350.0",
+                         source=EvidenceSource.CONTEXT_RECORD, version_id="v1")]
+    s, calls = _service(monkeypatch, d, [_out("Hi,\n\nPlease attach the PO again.\n\nRegards"),
+                                         _out("Hi,\n\nWe suggest the SS 304 Automatic Soap Dispenser 1100ML (DSDR0112-S) "
+                                              "at ₹4,350.\n\nRegards")], ctx_facts={"DSDR0112-S": named})
+    res = asyncio.run(s.refine("t1", "th1", CopilotRequest(instruction="List the dsdr0112-s product and suggest in a draft to buy",
+                                                           draft_text=DRAFT)))
+    assert calls["compose"] == 2 and "DSDR0112-S" in res.proposal and res.apply_allowed

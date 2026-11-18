@@ -353,17 +353,23 @@ class ReplyCopilotService:
         proposal = str(data.get("revised_draft") or "").strip()
         issues = self._check(proposal, req, ev, grounding)
         unnamed = composer_mod.codes_missing_names(proposal, ev)      # quality: repaired, never blocks Apply
-        if (issues or unnamed) and metrics["repairs"] < MAX_REPAIRS:
+        listed = {(f.entity_code or "").upper() for f in ev.facts}
+        # Every existing product the employee named in this instruction must be in the email.
+        omitted = [c for c in decision_mod.codes_in(req.instruction) if c in listed and c not in proposal.upper()]
+        if (issues or unnamed or omitted) and metrics["repairs"] < MAX_REPAIRS:
             metrics["repairs"] += 1
             fix = "\n".join([f"- {i.code}: {i.detail}" for i in issues]
-                            + [f"- NAME_MISSING: write the product name next to {c}." for c in unnamed])
+                            + [f"- NAME_MISSING: write the product name next to {c}." for c in unnamed]
+                            + [f"- REQUESTED_PRODUCT_MISSING: the instruction asks about {c}; include it with its "
+                               f"name and the details requested." for c in omitted])
             data2, cm = await self._compose(tenant_id, req.instruction, req.draft_text, customer_msg, brief, ev,
                                             repair=fix, session=session, goal=decision.writing_goal)
             self._count(metrics, cm)
             p2 = str(data2.get("revised_draft") or "").strip()
             issues2 = self._check(p2, req, ev, grounding)
-            better = len(issues2) < len(issues) or (len(issues2) == len(issues) and
-                                                     len(composer_mod.codes_missing_names(p2, ev)) < len(unnamed))
+            omitted2 = [c for c in omitted if c not in p2.upper()]
+            better = len(issues2) < len(issues) or (len(issues2) == len(issues) and (
+                len(composer_mod.codes_missing_names(p2, ev)) + len(omitted2) < len(unnamed) + len(omitted)))
             if better or (not issues2 and issues):
                 data, proposal, issues = data2, p2, issues2
 
