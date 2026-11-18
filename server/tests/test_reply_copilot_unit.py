@@ -828,7 +828,9 @@ def test_more_options_keeps_the_products_already_listed(monkeypatch):
                         resolve_result=(found, {"level": "L3_retrieval"}),
                         ctx_facts={"DTPR0046": [_fact("DTPR0046", "price", "4390.0")]})
     res = asyncio.run(s.refine("t1", "th1", CopilotRequest(instruction="suggest more products to him", draft_text=draft)))
-    assert calls["compose"] == 2 and "DTPR0046" in res.proposal and "DTPR0099" in res.proposal
+    # merged deterministically: one model call, draft kept verbatim, new product added
+    assert calls["compose"] == 1 and "DTPR0046" in res.proposal and "DTPR0099" in res.proposal
+    assert res.metrics["merged_additions"] and res.proposal.startswith(draft.split("(")[0])
     s2, calls2 = _service(monkeypatch, d, [_out("Hi Vishi,\n\nYou may consider DTPR0099 (₹3,100) instead.\n\nRegards")],
                           resolve_result=(found, {"level": "L3_retrieval"}),
                           ctx_facts={"DTPR0046": [_fact("DTPR0046", "price", "4390.0")]})
@@ -843,3 +845,12 @@ def test_more_options_keeps_the_products_already_listed(monkeypatch):
 ])
 def test_early_search_is_reused_only_for_the_same_request(request_text, instruction, match):
     assert svc_mod.speculation_matches(request_text, instruction) is match
+
+
+def test_merge_additions_keeps_draft_and_follows_list_style():
+    d = "Hi,\n\nYour DSDR0112 order for 20 units is noted.\n\nOptions:\n- A (DTPR0046)\n\nRegards,\nTeam"
+    p = "Hi,\n\nOptions:\n- A (DTPR0046)\n* B (DTPR0047)\n\nRegards,\nTeam"
+    out = svc_mod.merge_additions(d, p)
+    assert "Your DSDR0112 order for 20 units is noted." in out and "- B (DTPR0047)" in out
+    assert out.index("DTPR0047") > out.index("DTPR0046") and out.endswith("Regards,\nTeam")
+    assert svc_mod.merge_additions(d, d) == d

@@ -198,6 +198,38 @@ def custom_price_note(proposal: str, ev: EvidenceSet, emp_text: str) -> str:
     return f"I used your price ({listed}); it differs from the catalogue price - make sure it is approved."
 
 
+_SIGN_OFF = re.compile(r"^\s*(regards|best regards|kind regards|warm regards|thanks|thank you|best|sincerely|cheers)\b[,!.]?\s*$",
+                       re.IGNORECASE)
+_BULLET = re.compile(r"^\s*([-*\u2022]|\d+[.)])\s+")
+
+
+def merge_additions(draft: str, proposal: str) -> str:
+    """Insert the proposal's NEW product lines into the employee's draft (pure).
+
+    New lines = proposal lines naming a code the draft does not contain. They go right after the draft's
+    last line that names a product (the end of its list), else before the sign-off, else at the end, and
+    take the bullet style of that list. Everything the draft already says is kept verbatim."""
+    draft_codes = set(decision_mod.product_codes_in(draft))
+    new_lines = []
+    for ln in proposal.splitlines():
+        codes = decision_mod.product_codes_in(ln)
+        if codes and not (set(codes) & draft_codes) and ln.strip() not in new_lines:
+            new_lines.append(ln.strip())
+    if not new_lines:
+        return draft
+    lines = draft.splitlines()
+    anchor = max((i for i, ln in enumerate(lines) if decision_mod.product_codes_in(ln)), default=-1)
+    if anchor >= 0:
+        m = _BULLET.match(lines[anchor])
+        prefix = (m.group(1) + " ") if m else ""
+        if prefix:
+            new_lines = [prefix + _BULLET.sub("", ln) for ln in new_lines]
+        return "\n".join(lines[:anchor + 1] + new_lines + lines[anchor + 1:])
+    sign = next((i for i, ln in enumerate(lines) if _SIGN_OFF.match(ln)), len(lines))
+    block = [""] + new_lines + [""] if sign < len(lines) else [""] + new_lines
+    return "\n".join(lines[:sign] + block + lines[sign:]).replace("\n\n\n", "\n\n")
+
+
 def _norm(s: str) -> str:
     import re as _re
     return _re.sub(r"\s+", " ", (s or "").strip().lower())
@@ -414,10 +446,15 @@ class ReplyCopilotService:
         listed = {(f.entity_code or "").upper() for f in ev.facts}
         # Every existing product the employee named in this instruction must be in the email.
         omitted = [c for c in decision_mod.codes_in(req.instruction) if c in listed and c not in proposal.upper()]
-        # "More / other options" ADDS to the list: products already in the draft stay unless replaced.
-        if _MORE.search(req.instruction) and not _REPLACE.search(req.instruction):
-            omitted += [c for c in decision_mod.product_codes_in(req.draft_text)
-                        if c not in proposal.upper() and c not in omitted]
+        # "More / other options" ADDS to the email. If the model dropped anything the draft had, keep the
+        # employee's draft exactly and insert only the new product lines (deterministic, no extra call).
+        additive = bool(req.draft_text.strip() and _MORE.search(req.instruction) and not _REPLACE.search(req.instruction))
+        if additive and any(c not in proposal.upper() for c in decision_mod.product_codes_in(req.draft_text)):
+            merged = merge_additions(req.draft_text, proposal)
+            metrics["merged_additions"] = merged != req.draft_text
+            proposal = merged
+            issues = self._check(proposal, req, ev, grounding)
+            unnamed = composer_mod.codes_missing_names(proposal, ev)
         if (issues or unnamed or omitted) and metrics["repairs"] < MAX_REPAIRS:
             metrics["repairs"] += 1
             fix = "\n".join([f"- {i.code}: {i.detail}" for i in issues]
