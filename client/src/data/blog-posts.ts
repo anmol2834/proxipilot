@@ -17,6 +17,10 @@ export interface BlogPost {
   readTime: string;
   featured?: boolean;
   coverImage?: string;
+  /** Alt text for coverImage. */
+  coverAlt?: string;
+  /** Source of the cover photo (Unsplash License: free for commercial use, no attribution required). */
+  coverSource?: string;
   tags: string[];
 }
 
@@ -51,6 +55,9 @@ export const BLOG_CATEGORIES = [
 export const BLOG_POSTS: BlogPost[] = [
   {
     slug: "context-aware-ai-email-support",
+    coverImage: "/blog/cover-support-headset.jpg",
+    coverAlt: "Support headset resting beside an open laptop",
+    coverSource: "https://unsplash.com/photos/BeVGrXEktIk",
     title: "How Context-Aware AI Eliminates 80% of Support Inbox Repetition",
     excerpt:
       "Modern customer support teams drown under repetitive product and order queries. Discover how context-aware RAG vector search pulls verified documentation directly into drafted replies.",
@@ -86,6 +93,9 @@ export const BLOG_POSTS: BlogPost[] = [
   },
   {
     slug: "zero-training-mandate-enterprise-email",
+    coverImage: "/blog/cover-security-padlock.jpg",
+    coverAlt: "Golden padlock lying on a laptop keyboard",
+    coverSource: "https://unsplash.com/photos/FnA5pAzqhMM",
     title: "The Zero-Training Mandate: Why Enterprise Email AI Must Never Train on Customer Data",
     excerpt:
       "Enterprise security leaders cannot compromise on data privacy. Learn why ProxiPilot enforces non-training API contracts and isolated vector namespaces.",
@@ -117,6 +127,9 @@ export const BLOG_POSTS: BlogPost[] = [
   },
   {
     slug: "rag-vs-finetuning-customer-email",
+    coverImage: "/blog/cover-ai-neural-sphere.jpg",
+    coverAlt: "Glowing network of connected nodes forming a sphere",
+    coverSource: "https://unsplash.com/photos/nGoCBxiaRO0",
     title: "RAG vs Fine-Tuning for Customer Email: Why Grounded Evidence Wins",
     excerpt:
       "Should companies fine-tune private language models or deploy Retrieval-Augmented Generation (RAG)? A technical breakdown of accuracy, cost, and hallucination defense.",
@@ -148,6 +161,9 @@ export const BLOG_POSTS: BlogPost[] = [
   },
   {
     slug: "gmail-outlook-least-privilege-oauth",
+    coverImage: "/blog/cover-integrations-gmail.jpg",
+    coverAlt: "Gmail inbox open in a browser on a laptop",
+    coverSource: "https://unsplash.com/photos/black-laptop-computer-3Mhgvrk4tjM",
     title: "Gmail & Outlook Integration Guide: Least-Privilege OAuth in Practice",
     excerpt:
       "A complete guide to connecting Google Workspace and Microsoft 365 mailboxes safely using scoped OAuth permissions and envelope token encryption.",
@@ -179,6 +195,9 @@ export const BLOG_POSTS: BlogPost[] = [
   },
   {
     slug: "scaling-wholesale-b2b-sku-inquiries",
+    coverImage: "/blog/cover-wholesale-warehouse.jpg",
+    coverAlt: "Warehouse floor stacked with boxed inventory",
+    coverSource: "https://unsplash.com/photos/yellow-and-white-plastic-box-lot-sczNLg6rrhQ",
     title: "Scaling Wholesale & B2B Inquiries with SKU-Aware AI Copilots",
     excerpt:
       "Wholesale distributors receive endless emails asking for dimensions, MOQ, and stock availability. Here is how B2B distributors automate quotes with 100% precision.",
@@ -208,6 +227,9 @@ export const BLOG_POSTS: BlogPost[] = [
   },
   {
     slug: "autonomous-triage-human-in-the-loop",
+    coverImage: "/blog/cover-triage-team.jpg",
+    coverAlt: "Team gathered around a laptop reviewing work together",
+    coverSource: "https://unsplash.com/photos/people-sitting-on-chair-in-front-of-laptop-computers-rMILC1PIwM0",
     title: "Autonomous Email Triage with Human-in-the-Loop Safeguards",
     excerpt:
       "Full automation sounds tempting, but human review remains the gold standard for enterprise communications. Here is how to balance velocity with safety.",

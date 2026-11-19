@@ -1,37 +1,41 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import Image from "next/image";
 import Link from "next/link";
 import { GlobalNavbar } from "@/components/navigation/GlobalNavbar";
 import { LandingFooter } from "@/components/landing/LandingFooter";
+import { getAllBlogPosts, getBlogPostBySlug } from "@/data/blog-posts";
 import {
-  getAllBlogPosts,
-  getBlogPostBySlug,
-  getBlogPostsByCategory,
-} from "@/data/blog-posts";
-import {
-  IconCalendar,
+  IconCalendarEvent,
+  IconRefresh,
   IconClock,
   IconArrowLeft,
-  IconArrowRight,
-  IconChevronRight,
-  IconShare,
-  IconSparkles,
+  IconBrandX,
+  IconBrandLinkedin,
+  IconMail,
 } from "@tabler/icons-react";
+import {
+  BLOG_IMG_Q,
+  Breadcrumb,
+  SectionHead,
+  PostGrid,
+  BlogCta,
+  formatDate,
+  sortPosts,
+} from "@/components/blog/BlogParts";
+import b from "@/components/blog/blog.module.css";
 
 interface BlogPostPageProps {
   params: Promise<{ slug: string }>;
 }
 
+const SITE = "https://proxipilot.com";
+
 export async function generateStaticParams() {
-  const posts = getAllBlogPosts();
-  return posts.map((post) => ({
-    slug: post.slug,
-  }));
+  return getAllBlogPosts().map((post) => ({ slug: post.slug }));
 }
 
-export async function generateMetadata({
-  params,
-}: BlogPostPageProps): Promise<Metadata> {
+export async function generateMetadata({ params }: BlogPostPageProps): Promise<Metadata> {
   const { slug } = await params;
   const post = getBlogPostBySlug(slug);
 
@@ -42,16 +46,47 @@ export async function generateMetadata({
   return {
     title: `${post.title} — ProxiPilot Blog`,
     description: post.excerpt,
-    alternates: { canonical: `https://proxipilot.com/blog/${post.slug}` },
+    alternates: { canonical: `${SITE}/blog/${post.slug}` },
     openGraph: {
       title: post.title,
       description: post.excerpt,
       type: "article",
       publishedTime: post.publishedAt,
       modifiedTime: post.updatedAt,
-      url: `https://proxipilot.com/blog/${post.slug}`,
+      url: `${SITE}/blog/${post.slug}`,
+      ...(post.coverImage ? { images: [{ url: `${SITE}${post.coverImage}`, alt: post.coverAlt }] } : {}),
     },
   };
+}
+
+function slugify(text: string) {
+  return text
+    .replace(/<[^>]+>/g, "")
+    .toLowerCase()
+    .replace(/&[a-z]+;/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/** Give every <h2> in the (trusted, in-repo) article HTML an id, and collect them for the table of contents. */
+function withHeadingIds(html: string) {
+  const toc: { id: string; text: string }[] = [];
+  const out = html.replace(/<h2>([\s\S]*?)<\/h2>/g, (_m, inner: string) => {
+    const text = inner.replace(/<[^>]+>/g, "").trim();
+    const id = slugify(text) || `section-${toc.length + 1}`;
+    toc.push({ id, text });
+    return `<h2 id="${id}">${inner}</h2>`;
+  });
+  return { html: out, toc };
+}
+
+function initials(name: string) {
+  return name
+    .split(/\s+/)
+    .map((w) => w[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
 }
 
 export default async function BlogPostPage({ params }: BlogPostPageProps) {
@@ -62,9 +97,31 @@ export default async function BlogPostPage({ params }: BlogPostPageProps) {
     notFound();
   }
 
-  const related = getBlogPostsByCategory(post.category.slug)
-    .filter((p) => p.slug !== post.slug)
-    .slice(0, 2);
+  const { html, toc } = withHeadingIds(post.content);
+  const all = sortPosts(getAllBlogPosts()).filter((p) => p.slug !== post.slug);
+  const related = [
+    ...all.filter((p) => p.category.slug === post.category.slug),
+    ...all.filter((p) => p.category.slug !== post.category.slug),
+  ].slice(0, 3);
+
+  const url = `${SITE}/blog/${post.slug}`;
+  const share = [
+    {
+      label: "Share on X",
+      href: `https://twitter.com/intent/tweet?url=${encodeURIComponent(url)}&text=${encodeURIComponent(post.title)}`,
+      Icon: IconBrandX,
+    },
+    {
+      label: "Share on LinkedIn",
+      href: `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(url)}`,
+      Icon: IconBrandLinkedin,
+    },
+    {
+      label: "Share by email",
+      href: `mailto:?subject=${encodeURIComponent(post.title)}&body=${encodeURIComponent(url)}`,
+      Icon: IconMail,
+    },
+  ];
 
   const jsonLd = {
     "@context": "https://schema.org",
@@ -73,284 +130,163 @@ export default async function BlogPostPage({ params }: BlogPostPageProps) {
     description: post.excerpt,
     datePublished: post.publishedAt,
     dateModified: post.updatedAt,
-    author: {
-      "@type": "Organization",
-      name: post.author.name,
-    },
-    publisher: {
-      "@type": "Organization",
-      name: "ProxiPilot",
-      url: "https://proxipilot.com",
-    },
-    mainEntityOfPage: `https://proxipilot.com/blog/${post.slug}`,
+    ...(post.coverImage ? { image: `${SITE}${post.coverImage}` } : {}),
+    author: { "@type": "Organization", name: post.author.name },
+    publisher: { "@type": "Organization", name: "ProxiPilot", url: SITE },
+    mainEntityOfPage: url,
   };
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "#FFFFFF" }}>
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
-      />
+    <div className={b.page}>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
       <GlobalNavbar />
 
-      <main style={{ flex: "1 0 auto" }}>
-        {/* Breadcrumb Header */}
-        <section
-          style={{
-            padding: "40px 24px 32px",
-            backgroundColor: "#F8FAFC",
-            borderBottom: "1px solid #E2E8F0",
-          }}
-        >
-          <div style={{ maxWidth: 860, margin: "0 auto" }}>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                fontSize: 13,
-                color: "#64748B",
-                marginBottom: 16,
-                flexWrap: "wrap",
-              }}
-            >
-              <Link href="/" style={{ color: "#64748B", textDecoration: "none" }}>
-                Home
-              </Link>
-              <IconChevronRight size={14} />
-              <Link href="/blog" style={{ color: "#64748B", textDecoration: "none" }}>
-                Blog
-              </Link>
-              <IconChevronRight size={14} />
-              <Link
-                href={`/blog/category/${post.category.slug}`}
-                style={{ color: "#64748B", textDecoration: "none" }}
-              >
-                {post.category.name}
-              </Link>
-            </div>
-
-            <Link
-              href={`/blog/category/${post.category.slug}`}
-              style={{
-                display: "inline-block",
-                padding: "3px 10px",
-                borderRadius: 4,
-                backgroundColor: "#EFF6FF",
-                color: "#2563EB",
-                fontSize: 12,
-                fontWeight: 700,
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-                textDecoration: "none",
-                marginBottom: 12,
-              }}
-            >
-              {post.category.name}
-            </Link>
-
-            <h1
-              style={{
-                fontSize: "clamp(26px, 4vw, 38px)",
-                fontWeight: 800,
-                color: "#0F172A",
-                lineHeight: 1.22,
-                letterSpacing: "-0.025em",
-                marginBottom: 16,
-              }}
-            >
-              {post.title}
-            </h1>
-
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 16,
-                fontSize: 13,
-                color: "#64748B",
-                flexWrap: "wrap",
-              }}
-            >
-              <span style={{ fontWeight: 600, color: "#1E293B" }}>By {post.author.name}</span>
-              <span>•</span>
-              <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                <IconCalendar size={14} /> Published {post.publishedAt}
-              </span>
-              <span>•</span>
-              <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                <IconClock size={14} /> {post.readTime}
-              </span>
-            </div>
-          </div>
-        </section>
-
-        {/* Article Content */}
-        <section style={{ padding: "48px 24px 64px", maxWidth: 860, margin: "0 auto" }}>
-          {/* Excerpt Lead Paragraph */}
-          <div
-            style={{
-              fontSize: 18,
-              fontWeight: 500,
-              color: "#334155",
-              lineHeight: 1.6,
-              borderLeft: "4px solid #2563EB",
-              paddingLeft: 20,
-              marginBottom: 36,
-            }}
-          >
-            {post.excerpt}
-          </div>
-
-          {/* Body Content */}
-          <div
-            style={{
-              fontSize: 16,
-              color: "#334155",
-              lineHeight: 1.75,
-            }}
-            dangerouslySetInnerHTML={{ __html: post.content }}
-          />
-
-          {/* Tags */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              flexWrap: "wrap",
-              marginTop: 44,
-              paddingTop: 24,
-              borderTop: "1px solid #E2E8F0",
-            }}
-          >
-            <span style={{ fontSize: 13, fontWeight: 700, color: "#64748B" }}>Tags:</span>
-            {post.tags.map((tag, i) => (
-              <span
-                key={i}
-                style={{
-                  fontSize: 12,
-                  padding: "4px 10px",
-                  borderRadius: 14,
-                  backgroundColor: "#F1F5F9",
-                  color: "#475569",
-                  fontWeight: 500,
-                }}
-              >
-                #{tag}
-              </span>
-            ))}
-          </div>
-
-          {/* Author Bio Box */}
-          <div
-            style={{
-              marginTop: 36,
-              padding: "24px",
-              borderRadius: 12,
-              backgroundColor: "#F8FAFC",
-              border: "1px solid #E2E8F0",
-              display: "flex",
-              alignItems: "center",
-              gap: 16,
-            }}
-          >
-            <div
-              style={{
-                width: 48,
-                height: 48,
-                borderRadius: 24,
-                backgroundColor: "#2563EB",
-                color: "#FFFFFF",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontWeight: 800,
-                fontSize: 18,
-                flexShrink: 0,
-              }}
-            >
-              PP
-            </div>
-            <div>
-              <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A" }}>{post.author.name}</div>
-              <div style={{ fontSize: 13, color: "#64748B", marginTop: 2 }}>{post.author.role}</div>
-              <div style={{ fontSize: 12, color: "#94A3B8", marginTop: 4 }}>
-                Building production-grade AI email copilots grounded in deterministic enterprise knowledge.
+      <main className={b.main}>
+        <article>
+          <header className={b.postHero}>
+            <div className={b.container}>
+              <Breadcrumb
+                items={[
+                  { label: "Home", href: "/" },
+                  { label: "Blog", href: "/blog" },
+                  { label: post.category.name, href: `/blog/category/${post.category.slug}` },
+                ]}
+              />
+              <div className={b.postCat}>
+                <Link href={`/blog/category/${post.category.slug}`} className={b.pill}>
+                  {post.category.name}
+                </Link>
+              </div>
+              <h1 className={b.postTitle}>{post.title}</h1>
+              <div className={b.byline}>
+                <span className={b.author}>
+                  <span className={b.authorAvatar} aria-hidden="true">
+                    {initials(post.author.name)}
+                  </span>
+                  <span>
+                    <span className={b.authorName}>{post.author.name}</span>
+                    <span className={b.authorRole}>{post.author.role}</span>
+                  </span>
+                </span>
+                <i className={b.bylineSep} aria-hidden="true" />
+                <span>
+                  <IconCalendarEvent size={15} stroke={1.7} aria-hidden="true" />
+                  Published <time dateTime={post.publishedAt}>{formatDate(post.publishedAt)}</time>
+                </span>
+                {post.updatedAt !== post.publishedAt && (
+                  <span>
+                    <IconRefresh size={15} stroke={1.7} aria-hidden="true" />
+                    Updated <time dateTime={post.updatedAt}>{formatDate(post.updatedAt)}</time>
+                  </span>
+                )}
+                <span>
+                  <IconClock size={15} stroke={1.7} aria-hidden="true" />
+                  {post.readTime}
+                </span>
               </div>
             </div>
-          </div>
-
-          {/* Related Articles */}
-          {related.length > 0 && (
-            <div style={{ marginTop: 56 }}>
-              <h3
-                style={{
-                  fontSize: 20,
-                  fontWeight: 800,
-                  color: "#0F172A",
-                  marginBottom: 20,
-                  letterSpacing: "-0.02em",
-                }}
-              >
-                Related Reading in {post.category.name}
-              </h3>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-                  gap: 18,
-                }}
-              >
-                {related.map((rp) => (
-                  <Link
-                    key={rp.slug}
-                    href={`/blog/${rp.slug}`}
-                    style={{
-                      padding: "18px 20px",
-                      borderRadius: 12,
-                      border: "1px solid #E2E8F0",
-                      backgroundColor: "#FFFFFF",
-                      textDecoration: "none",
-                      color: "#0F172A",
-                      display: "flex",
-                      flexDirection: "column",
-                      justifyContent: "space-between",
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontSize: 12, color: "#2563EB", fontWeight: 700, marginBottom: 6 }}>
-                        {rp.category.name}
-                      </div>
-                      <div style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.4, marginBottom: 8 }}>
-                        {rp.title}
-                      </div>
-                    </div>
-                    <div style={{ fontSize: 12, color: "#94A3B8" }}>{rp.readTime}</div>
-                  </Link>
-                ))}
+            {post.coverImage && (
+              <div className={b.cover}>
+                <Image
+                  src={post.coverImage}
+                  alt={post.coverAlt ?? ""}
+                  fill
+                  quality={BLOG_IMG_Q}
+                  sizes="(max-width: 1200px) 100vw, 1160px"
+                  preload
+                />
               </div>
-            </div>
-          )}
+            )}
+          </header>
 
-          {/* Back to Blog Button */}
-          <div style={{ marginTop: 44 }}>
-            <Link
-              href="/blog"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                fontSize: 14,
-                fontWeight: 600,
-                color: "#2563EB",
-                textDecoration: "none",
-              }}
-            >
-              <IconArrowLeft size={16} /> Back to all articles
-            </Link>
+          <div className={b.container}>
+            <div className={b.postLayout}>
+              <div>
+                <p className={b.lead}>{post.excerpt}</p>
+                <div className={b.prose} dangerouslySetInnerHTML={{ __html: html }} />
+
+                <div className={b.authorBox}>
+                  <span className={b.authorAvatar} aria-hidden="true">
+                    {initials(post.author.name)}
+                  </span>
+                  <div>
+                    <p className={b.authorBoxName}>{post.author.name}</p>
+                    <p className={b.authorBoxRole}>{post.author.role}</p>
+                    <p className={b.authorBoxText}>
+                      Building production-grade AI email copilots grounded in deterministic enterprise knowledge.
+                    </p>
+                  </div>
+                </div>
+
+                <Link href="/blog" className={b.backLink}>
+                  <IconArrowLeft size={16} /> Back to all articles
+                </Link>
+              </div>
+
+              <aside className={b.aside} aria-label="Article tools">
+                {toc.length > 0 && (
+                  <nav className={b.asideCard} aria-label="On this page">
+                    <p className={b.asideTitle}>On this page</p>
+                    <ol className={b.toc}>
+                      {toc.map((t, i) => (
+                        <li key={t.id}>
+                          <a href={`#${t.id}`}>
+                            <span className={b.tocNum}>{String(i + 1).padStart(2, "0")}</span>
+                            {t.text}
+                          </a>
+                        </li>
+                      ))}
+                    </ol>
+                  </nav>
+                )}
+                <div className={b.asideCard}>
+                  <p className={b.asideTitle}>Share</p>
+                  <div className={b.share}>
+                    {share.map(({ label, href, Icon }) => (
+                      <a
+                        key={label}
+                        href={href}
+                        className={b.shareBtn}
+                        aria-label={label}
+                        title={label}
+                        target={href.startsWith("http") ? "_blank" : undefined}
+                        rel="noopener noreferrer"
+                      >
+                        <Icon size={17} stroke={1.8} />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+                <div className={b.asideCard}>
+                  <p className={b.asideTitle}>Tags</p>
+                  <div className={b.tags}>
+                    {post.tags.map((tag) => (
+                      <span key={tag} className={b.tag}>
+                        #{tag}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </aside>
+            </div>
           </div>
-        </section>
+        </article>
+
+        {related.length > 0 && (
+          <section className={b.section} aria-labelledby="related-title">
+            <div className={b.container}>
+              <SectionHead
+                id="related-title"
+                label="Keep reading"
+                title="Related Articles"
+                text={`More from ${post.category.name} and across the ProxiPilot journal.`}
+              />
+              <PostGrid posts={related} />
+            </div>
+          </section>
+        )}
+
+        <BlogCta />
       </main>
 
       <LandingFooter />
