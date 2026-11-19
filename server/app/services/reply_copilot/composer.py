@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 from app.core.config import get_settings
 from app.core.llm_params import completion_params
 from app.core.logging import logger
+from app.services.llm_retry import create_with_retry
 from app.services.reply_copilot.contracts import CopilotFact, CopilotIssue, EvidenceSet, FactRequest
 from app.services.reply_copilot.decision import codes_in
 
@@ -188,7 +189,7 @@ async def compose(tenant_id: str, instruction: str, draft: str, customer_message
     sem = await reply_drafter._get_tenant_semaphore(tenant_id)
     async with reply_drafter._global_semaphore:
         async with sem:
-            resp = await reply_drafter._get_client().chat.completions.create(**kwargs)
+            resp = await create_with_retry(reply_drafter._get_client(), kwargs, label="copilot_compose")
     choice = resp.choices[0]
     if not choice.message.content or choice.finish_reason == "length":
         raise ValueError(f"copilot proposal truncated or empty (finish_reason={choice.finish_reason})")
@@ -479,7 +480,7 @@ async def answer(tenant_id: str, instruction: str, draft: str, customer_message:
     sem = await reply_drafter._get_tenant_semaphore(tenant_id)
     async with reply_drafter._global_semaphore:
         async with sem:
-            resp = await reply_drafter._get_client().chat.completions.create(**kwargs)
+            resp = await create_with_retry(reply_drafter._get_client(), kwargs, label="copilot_answer")
     data = json.loads(resp.choices[0].message.content or "{}")
     return data, {"compose_llm_calls": 1, "compose_ms": round((time.perf_counter() - t0) * 1000, 1)}
 

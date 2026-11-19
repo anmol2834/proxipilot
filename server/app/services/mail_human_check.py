@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional
 from app.core.config import get_settings
 from app.core.llm_params import completion_params
 from app.core.logging import logger
+from app.services.llm_retry import create_with_retry
 
 _SCHEMA: Dict[str, Any] = {
     "name": "mail_human_check",
@@ -55,7 +56,7 @@ async def is_human_business_mail(sender: str, subject: str, body: str) -> Option
     }
     kwargs.update(completion_params(settings.openai_model, "minimal"))
     try:
-        resp = await reply_drafter._get_client().chat.completions.create(**kwargs)
+        resp = await create_with_retry(reply_drafter._get_client(), kwargs, label="mail_human_check")
         data = json.loads(resp.choices[0].message.content or "{}")
     except Exception as exc:  # noqa: BLE001 - classification must never break sync
         logger.warning("mail human check unavailable", error=f"{type(exc).__name__}: {str(exc)[:200]}")

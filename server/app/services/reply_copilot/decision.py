@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from app.core.config import get_settings
 from app.core.llm_params import completion_params
 from app.core.logging import logger
+from app.services.llm_retry import create_with_retry
 from app.services.reply_copilot.contracts import CopilotDecision, CopilotOperation, FactRequest
 
 _WRITING = re.compile(
@@ -306,7 +307,7 @@ async def decide(instruction: str, draft_text: str, customer_message: str,
     kwargs.update(completion_params(settings.openai_model, "minimal"))
     metrics: Dict[str, Any] = {"decision_llm_calls": 1}
     try:
-        resp = await reply_drafter._get_client().chat.completions.create(**kwargs)
+        resp = await create_with_retry(reply_drafter._get_client(), kwargs, label="copilot_decision")
         usage = getattr(resp, "usage", None)
         if usage is not None:
             metrics["decision_tokens"] = {"prompt": getattr(usage, "prompt_tokens", None),

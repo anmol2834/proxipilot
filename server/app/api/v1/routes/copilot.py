@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.context import TenantContext, require_permission
 from app.core.logging import logger
+from app.services.llm_retry import TransientLLMError
 from app.services.reply_copilot import CopilotRequest, CopilotResult, ThreadNotFound, reply_copilot_service
 
 router = APIRouter(prefix="/copilot", tags=["AI Reply Copilot"])
@@ -47,6 +48,10 @@ async def refine_draft(
             return await reply_copilot_service.refine(ctx.organization_id, thread_id, payload, user_id=ctx.user_id)
         except ThreadNotFound:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found.")
+        except TransientLLMError:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                                detail="The AI service had a temporary problem. Your draft is unchanged; "
+                                       "please try again in a moment.")
         except asyncio.TimeoutError:
             raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT,
                                 detail="Copilot took too long. Your draft is unchanged; please try again.")

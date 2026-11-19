@@ -218,7 +218,11 @@ export function IsolatedAiPromptBox({
         {
           id: `err-${Date.now()}`,
           role: "assistant",
-          content: cancelled ? "Cancelled. Your draft is unchanged." : `${detail} Your draft is unchanged.`,
+          content: cancelled
+            ? "Cancelled. Your draft is unchanged."
+            : /draft is unchanged/i.test(detail)
+              ? detail
+              : `${detail} Your draft is unchanged.`,
           timestamp: now(),
           error: true,
         },
