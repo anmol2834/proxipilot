@@ -30,6 +30,8 @@ export interface Message {
   providerMessageId: string;
   sender: ConversationSender;
   recipients: string[];
+  /** CC'd addresses (empty when none). */
+  cc: string[];
   /** Empty string — subject lives on Conversation, not individual messages. */
   subject: string;
   /** Normalized plain-text body. No HTML. No MIME. */
@@ -37,7 +39,15 @@ export interface Message {
   sentAt: string;
   timestampFormatted: string;
   direction: "inbound" | "outbound";
+  /** Sent from the connected mailbox (our own reply), not by the customer. */
+  fromMe: boolean;
   createdAt: string;
+}
+
+/** The connected mailbox a thread belongs to (the business side of the conversation). */
+export interface Mailbox {
+  name: string | null;
+  email: string;
 }
 
 export interface Conversation {
@@ -68,8 +78,15 @@ export interface PaginatedConversationsResponse {
   hasMore: boolean;
 }
 
+/**
+ * One page of a thread. The first page holds the NEWEST messages; `previousCursor` loads the
+ * page just older than it. Items are chronological (oldest first) within a page.
+ * `totalCount` and `mailbox` are only present on the first page.
+ */
 export interface PaginatedMessagesResponse {
   items: Message[];
   previousCursor: string | null;
   hasMore: boolean;
+  totalCount?: number | null;
+  mailbox?: Mailbox | null;
 }

@@ -65,6 +65,7 @@ interface BackendMessage {
   sent_at: string | null;
   body_text: string | null;
   direction: string;
+  from_me?: boolean;
   integration_account_id: string;
   created_at: string;
 }
@@ -81,6 +82,8 @@ interface BackendPaginatedMessages {
   previous_cursor: string | null;
   has_more: boolean;
   total_returned: number;
+  total_count?: number | null;
+  mailbox?: BackendSender | null;
 }
 
 // =============================================================================
@@ -195,12 +198,14 @@ function _messageToMessage(m: BackendMessage, conversationId: string): Message {
     conversationId,
     providerMessageId: m.id,
     sender,
-    recipients: m.to_emails,
+    recipients: m.to_emails || [],
+    cc: m.cc_emails || [],
     subject: "", // Subject is on thread, not message
     body: m.body_text || "",
     sentAt: m.sent_at || m.created_at,
     timestampFormatted: _formatTimestamp(m.sent_at || m.created_at),
     direction: m.direction as "inbound" | "outbound",
+    fromMe: m.from_me ?? m.direction === "outbound",
     createdAt: m.created_at,
   };
 }
@@ -256,8 +261,9 @@ class InboxService {
   }
 
   /**
-   * Get paginated messages for a thread.
-   * Chronological (oldest first). `before` cursor enables upward scroll.
+   * Get one page of a thread's messages. Without `before` this is the newest page; pass the
+   * previous response's `previousCursor` as `before` to load the page of older messages.
+   * Items are chronological (oldest first) within each page.
    */
   async getConversationMessages(params: {
     conversationId: string;
@@ -281,6 +287,8 @@ class InboxService {
       ),
       previousCursor: data.previous_cursor ?? null,
       hasMore: data.has_more,
+      totalCount: data.total_count ?? null,
+      mailbox: data.mailbox ? { name: data.mailbox.name ?? null, email: data.mailbox.email } : null,
     };
   }
 

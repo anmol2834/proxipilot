@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useRef, useEffect, useState } from "react";
-import { Conversation, Message, LeadTemperature } from "@/types/inbox.types";
+import { Conversation, Message, LeadTemperature, Mailbox } from "@/types/inbox.types";
+import { ThreadMessages } from "./ThreadMessages";
 import { useDiscardDraft, useSendDraft, useSendManualReply, useThreadDraft } from "@/hooks/useMemory";
 import { useTenant } from "@/hooks/use-tenant";
 import { can } from "@/lib/permissions";
@@ -31,7 +32,17 @@ import {
 
 interface ConversationDetailPaneProps {
   conversation: Conversation | null;
+  /** Loaded messages, chronological (oldest first). */
   messages: Message[];
+  messagesLoading?: boolean;
+  messagesError?: boolean;
+  onRetryMessages?: () => void;
+  totalMessageCount?: number | null;
+  mailbox?: Mailbox | null;
+  hasOlderMessages?: boolean;
+  isLoadingOlder?: boolean;
+  olderMessagesError?: boolean;
+  onLoadOlder?: () => void;
   onToggleStar: (starred: boolean) => void;
   onSetLeadTemperature: (temp: LeadTemperature) => void;
   onDeleteClick: () => void;
@@ -140,21 +151,18 @@ function getSubjectTopic(subject: string, senderName: string): string {
   return "Updates";
 }
 
-function getAvatarStyle(name: string) {
-  const lower = name.toLowerCase();
-  if (lower.includes("shiprocket")) return { bg: "#F3E8FF", color: "#9333EA" };
-  if (lower.includes("derma")) return { bg: "#D1FAE5", color: "#059669" };
-  if (lower.includes("indeed")) return { bg: "#EDE9FE", color: "#4F46E5" };
-  if (lower.includes("quora")) return { bg: "#CCFBF1", color: "#0D9488" };
-  if (lower.includes("zomato")) return { bg: "#EF4444", color: "#FFFFFF" };
-  if (lower.includes("myntra")) return { bg: "#EFF6FF", color: "#0284C7" };
-  if (lower.includes("grok")) return { bg: "#ECFDF5", color: "#059669" };
-  return { bg: "#EFF6FF", color: "#2563EB" };
-}
-
 export function ConversationDetailPane({
   conversation,
   messages,
+  messagesLoading = false,
+  messagesError = false,
+  onRetryMessages,
+  totalMessageCount = null,
+  mailbox = null,
+  hasOlderMessages = false,
+  isLoadingOlder = false,
+  olderMessagesError = false,
+  onLoadOlder,
   onToggleStar,
   onSetLeadTemperature,
   onDeleteClick,
@@ -206,9 +214,9 @@ export function ConversationDetailPane({
   const [loadedDraftId, setLoadedDraftId] = useState<string | null>(null);
   const draftLoaded = Boolean(draft && loadedDraftId === draft.id);
 
-  // Scroll to top and reset reply field when conversation changes
+  // Reset the reply box when the conversation changes (scrolling is owned by ThreadMessages,
+  // which opens every thread at its newest message).
   useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = 0;
     setIsReplyOpen(false);
     setReplyText("");
     setLoadedDraftId(null);
@@ -255,8 +263,8 @@ export function ConversationDetailPane({
   if (!conversation) return <EmptyDetailPane />;
 
   const { sender, subject, leadTemperature, starred, aiSummary } = conversation;
-  const primaryMessage = messages[messages.length - 1];
-  const avatarStyle = getAvatarStyle(sender.name);
+  const messageCount = totalMessageCount ?? (messages.length || null);
+  const mailboxLabel = mailbox ? (mailbox.name ? `${mailbox.name} <${mailbox.email}>` : mailbox.email) : null;
 
   const isHot = leadTemperature === "hot";
   const isWarm = leadTemperature === "warm";
@@ -425,7 +433,9 @@ export function ConversationDetailPane({
           flex: 1,
           minHeight: 0,
           overflowY: "auto",
-          padding: "24px 28px 32px",
+          // Prepends are compensated manually (ThreadMessages); native anchoring would double it.
+          overflowAnchor: "none",
+          padding: isReplyOpen ? "24px 28px 24px" : "24px 28px 88px",
           display: "flex",
           flexDirection: "column",
           gap: 16,
@@ -517,78 +527,38 @@ export function ConversationDetailPane({
           </button>
         </div>
 
-        {/* Sender row */}
+        {/* Participants: who this conversation is between, plus thread actions */}
         <div
           style={{
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            marginTop: 4,
             gap: 16,
+            padding: "10px 14px",
+            borderRadius: 10,
+            background: "#F8FAFC",
+            border: "1px solid #EEF2F6",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
-            {/* Avatar */}
-            <div
-              style={{
-                width: 40,
-                height: 40,
-                borderRadius: "50%",
-                background: sender.avatarBg || avatarStyle.bg,
-                color: sender.avatarColor || avatarStyle.color,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 14,
-                fontWeight: 700,
-                flexShrink: 0,
-              }}
-            >
-              {sender.initials}
+          <div style={{ minWidth: 0, fontSize: 12.5, color: "#64748B", lineHeight: 1.6 }}>
+            <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <span style={{ fontWeight: 600, color: "#334155" }}>Customer</span>{" "}
+              <span style={{ color: "#0F172A", fontWeight: 600 }}>{sender.name}</span>
+              {sender.email && sender.email !== sender.name && <> &lt;{sender.email}&gt;</>}
             </div>
-
-            {/* Name + email + to me */}
-            <div style={{ minWidth: 0 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "nowrap" }}>
-                <span style={{ fontSize: 14, fontWeight: 700, color: "#0F172A", whiteSpace: "nowrap" }}>
-                  {sender.name}
-                </span>
-                <span
-                  style={{
-                    fontSize: 12.5,
-                    color: "#64748B",
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                  }}
-                >
-                  &lt;{sender.email}&gt;
-                </span>
+            {mailboxLabel && (
+              <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <span style={{ fontWeight: 600, color: "#334155" }}>Your mailbox</span> {mailboxLabel}
               </div>
-              <div
-                style={{
-                  fontSize: 12,
-                  color: "#64748B",
-                  marginTop: 2,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 3,
-                  cursor: "pointer",
-                }}
-              >
-                <span>to Anmol Sinha</span>
-                <IconChevronDown size={11} stroke={2} />
-              </div>
-            </div>
+            )}
           </div>
 
-          {/* Timestamp + actions on right */}
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-            <span style={{ fontSize: 12, color: "#64748B", whiteSpace: "nowrap" }}>
-              {primaryMessage?.timestampFormatted || conversation.latestMessageAt || ""}
-            </span>
-
-            {/* Star */}
+            {messageCount ? (
+              <span style={{ fontSize: 12, color: "#64748B", whiteSpace: "nowrap" }}>
+                {messageCount} message{messageCount === 1 ? "" : "s"}
+              </span>
+            ) : null}
             <button
               onClick={() => onToggleStar(!starred)}
               style={{
@@ -601,11 +571,10 @@ export function ConversationDetailPane({
                 alignItems: "center",
               }}
               title={starred ? "Unstar" : "Star"}
+              aria-label={starred ? "Unstar conversation" : "Star conversation"}
             >
               {starred ? <IconStarFilled size={16} color="#F59E0B" /> : <IconStar size={16} stroke={1.8} />}
             </button>
-
-            {/* Quick reply shortcut */}
             <button
               onClick={() => setIsReplyOpen(true)}
               style={{
@@ -618,61 +587,12 @@ export function ConversationDetailPane({
                 alignItems: "center",
               }}
               title="Reply"
+              aria-label="Reply"
             >
               <IconCornerUpLeft size={16} stroke={1.8} />
             </button>
-
-            {/* More */}
-            <button
-              style={{
-                background: "none",
-                border: "none",
-                cursor: "pointer",
-                padding: 2,
-                color: "#94A3B8",
-                display: "flex",
-                alignItems: "center",
-              }}
-              title="More"
-            >
-              <IconDots size={16} stroke={1.8} />
-            </button>
           </div>
         </div>
-
-        {/* Message body */}
-        <div
-          style={{
-            fontSize: 14.5,
-            color: "#334155",
-            lineHeight: 1.75,
-            whiteSpace: "pre-line",
-            fontFamily: "inherit",
-            paddingTop: 4,
-          }}
-        >
-          {primaryMessage?.body || conversation.snippet}
-        </div>
-
-        {/* Expand button */}
-        <button
-          style={{
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            color: "#94A3B8",
-            fontSize: 18,
-            fontWeight: 700,
-            padding: "0 4px",
-            letterSpacing: 2,
-            alignSelf: "flex-start",
-            lineHeight: 1,
-          }}
-          title="Show more"
-        >
-          ···
-        </button>
-
         {/* ── AI Summary Card (Always rendered) ── */}
         <div
           style={{
@@ -734,6 +654,23 @@ export function ConversationDetailPane({
             {aiSummaryText}
           </p>
         </div>
+
+        {/* ── Full conversation history (newest batch first, older on scroll-up) ── */}
+        <ThreadMessages
+          conversationId={conversation.id}
+          messages={messages}
+          mailbox={mailbox}
+          totalCount={totalMessageCount}
+          loading={messagesLoading}
+          error={messagesError}
+          onRetry={() => onRetryMessages?.()}
+          hasOlder={hasOlderMessages}
+          loadingOlder={isLoadingOlder}
+          olderError={olderMessagesError}
+          onLoadOlder={() => onLoadOlder?.()}
+          scrollRef={scrollRef}
+          fallbackText={conversation.snippet}
+        />
       </div>
 
       {/* ── Bottom Right Floating Reply Button (when reply is initially closed) ── */}

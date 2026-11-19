@@ -1,14 +1,14 @@
 "use client";
 
+import { useMemo } from "react";
 import {
   useInfiniteQuery,
-  useQuery,
   useMutation,
   useQueryClient,
 } from "@tanstack/react-query";
 import { queryKeys } from "@/lib/query/query-keys";
 import { inboxService } from "@/services/inbox.service";
-import { LeadTemperature, Conversation } from "@/types/inbox.types";
+import { LeadTemperature, Conversation, Message } from "@/types/inbox.types";
 
 export function useInfiniteConversations() {
   return useInfiniteQuery({
@@ -23,18 +23,58 @@ export function useInfiniteConversations() {
   });
 }
 
+/** Messages fetched per request when opening a thread / scrolling up through its history. */
+export const THREAD_PAGE_SIZE = 5;
+
+/**
+ * A thread's messages, loaded newest-first in small batches.
+ *
+ * Page 0 is the newest {@link THREAD_PAGE_SIZE} messages (one small request on open); each
+ * `fetchNextPage()` loads the batch just OLDER than everything loaded so far, using the
+ * server's keyset cursor. `messages` is the de-duplicated, chronological list (oldest first)
+ * across all loaded batches, ready to render top-to-bottom.
+ */
 export function useConversationMessages(conversationId: string | null) {
-  return useQuery({
+  const query = useInfiniteQuery({
     queryKey: conversationId ? queryKeys.inbox.threads(conversationId) : ["inbox", "thread", "empty"],
-    queryFn: () =>
-      conversationId
-        ? inboxService.getConversationMessages({ conversationId })
-        : Promise.resolve({ items: [], previousCursor: null, hasMore: false }),
+    queryFn: ({ pageParam }) =>
+      inboxService.getConversationMessages({
+        conversationId: conversationId as string,
+        before: pageParam,
+        limit: THREAD_PAGE_SIZE,
+      }),
+    initialPageParam: null as string | null,
+    // "Next" page = older history (the user scrolls up for it).
+    getNextPageParam: (lastPage) => (lastPage.hasMore ? lastPage.previousCursor ?? undefined : undefined),
     enabled: Boolean(conversationId),
     staleTime: 60 * 1000,
     gcTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
   });
+
+  const pages = query.data?.pages;
+  const messages = useMemo<Message[]>(() => {
+    if (!pages?.length) return [];
+    const seen = new Set<string>();
+    const out: Message[] = [];
+    // pages[0] is the newest batch: walk from the oldest loaded batch to the newest.
+    for (let p = pages.length - 1; p >= 0; p--) {
+      for (const m of pages[p].items) {
+        if (seen.has(m.id)) continue; // a refetch after new mail can shift batch edges
+        seen.add(m.id);
+        out.push(m);
+      }
+    }
+    return out;
+  }, [pages]);
+
+  return {
+    ...query,
+    messages,
+    /** Total messages in the thread (from the newest page), or null if not known yet. */
+    totalCount: pages?.[0]?.totalCount ?? null,
+    mailbox: pages?.[0]?.mailbox ?? null,
+  };
 }
 
 export function useToggleStar() {

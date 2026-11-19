@@ -25,13 +25,14 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, select, text, update
+from sqlalchemy import and_, func, select, text, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.context import TenantContext, get_tenant_context
 from app.core.database import get_db
 from app.core.logging import logger
 from app.models.inbox import EmailMessage, EmailThread, LeadIntent, ThreadStatus
+from app.models.integration import ConnectedIntegrationAccount
 
 router = APIRouter(prefix="/inbox", tags=["Inbox"])
 
@@ -81,6 +82,9 @@ class MessageDTO(BaseModel):
     sent_at: Optional[datetime] = None
     body_text: Optional[str] = None
     direction: str
+    # True when the message was sent from the connected mailbox (our reply), so the UI can tell
+    # the customer's messages apart from the business's own without guessing from names.
+    from_me: bool = False
     integration_account_id: str
     created_at: datetime
 
@@ -96,10 +100,19 @@ class PaginatedThreadsResponse(BaseModel):
 
 
 class PaginatedMessagesResponse(BaseModel):
+    """One page of a thread, in chronological order (oldest first within the page).
+
+    The first page (no ``before``) holds the NEWEST messages; ``previous_cursor`` fetches the
+    page of messages just older than this one, so the client can load history while the user
+    scrolls up. ``total_count`` and ``mailbox`` are only computed for the first page.
+    """
+
     items: List[MessageDTO]
     previous_cursor: Optional[str] = None
     has_more: bool
     total_returned: int
+    total_count: Optional[int] = None
+    mailbox: Optional[SenderDTO] = None
 
 
 # =============================================================================
@@ -191,8 +204,12 @@ def _thread_to_dto(thread: EmailThread) -> ThreadDTO:
     )
 
 
-def _message_to_dto(msg: EmailMessage) -> MessageDTO:
-    """Map EmailMessage ORM object to MessageDTO."""
+def _message_to_dto(msg: EmailMessage, mailbox: Optional[SenderDTO] = None) -> MessageDTO:
+    """Map EmailMessage ORM object to MessageDTO.
+
+    ``mailbox`` is the connected account the thread belongs to: messages sent from it are marked
+    ``from_me`` and, when the provider gave no display name, carry the mailbox's name.
+    """
     to_emails: List[str] = []
     cc_emails: List[str] = []
     try:
@@ -206,14 +223,21 @@ def _message_to_dto(msg: EmailMessage) -> MessageDTO:
     except Exception:
         pass
 
+    from_email = msg.from_email or ""
+    from_me = msg.direction == "outbound" or bool(
+        mailbox and mailbox.email and from_email.lower() == mailbox.email.lower()
+    )
+    name = msg.from_name or (mailbox.name if from_me and mailbox else None)
+
     return MessageDTO(
         id=msg.id,
-        sender=SenderDTO(name=msg.from_name, email=msg.from_email),
+        sender=SenderDTO(name=name, email=from_email),
         to_emails=to_emails,
         cc_emails=cc_emails,
         sent_at=msg.sent_at,
         body_text=msg.body_text,
         direction=msg.direction,
+        from_me=from_me,
         integration_account_id=msg.integration_account_id,
         created_at=msg.created_at,
     )
@@ -370,25 +394,49 @@ async def list_thread_messages(
     db: AsyncSession = Depends(get_db),
     context: TenantContext = Depends(get_tenant_context),
 ) -> PaginatedMessagesResponse:
-    """List messages in a thread, ordered chronologically (oldest first).
+    """One page of a thread's messages, newest page first, each page in chronological order.
 
-    Uses keyset cursor on (sent_at, id) for stable pagination.
-    The `before` cursor enables prepending older messages on upward scroll.
+    Keyset pagination on (message time, id), walking BACKWARDS in time:
+      * no ``before``  -> the newest ``limit`` messages (what the reader sees on open);
+      * ``before=<previous_cursor>`` -> the ``limit`` messages just older than that page.
+    The client prepends each older page while the user scrolls up, so opening a long thread
+    costs one small query instead of loading the whole history.
+
+    Message time is ``COALESCE(sent_at, created_at)`` so a message without a Date header can
+    neither break the ordering nor be skipped by the cursor (a NULL row comparison is never true).
     """
     org_id = context.organization_id
 
-    # Verify thread belongs to org
-    thread_stmt = select(EmailThread.id).where(
-        EmailThread.id == thread_id,
-        EmailThread.tenant_id == org_id,
+    # Verify the thread belongs to the caller's org and learn which mailbox it lives in
+    # (one query: needed to label our own replies as "from me").
+    thread_res = await db.execute(
+        select(
+            EmailThread.id,
+            ConnectedIntegrationAccount.email_address,
+            ConnectedIntegrationAccount.display_name,
+        )
+        .outerjoin(
+            ConnectedIntegrationAccount,
+            and_(
+                ConnectedIntegrationAccount.id == EmailThread.integration_account_id,
+                ConnectedIntegrationAccount.tenant_id == org_id,
+            ),
+        )
+        .where(EmailThread.id == thread_id, EmailThread.tenant_id == org_id)
     )
-    thread_res = await db.execute(thread_stmt)
-    if not thread_res.scalar_one_or_none():
+    thread_row = thread_res.first()
+    if not thread_row:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Thread not found",
         )
+    mailbox = (
+        SenderDTO(name=thread_row.display_name or None, email=thread_row.email_address)
+        if thread_row.email_address
+        else None
+    )
 
+    msg_time = func.coalesce(EmailMessage.sent_at, EmailMessage.created_at)
     filters: List[Any] = [
         EmailMessage.tenant_id == org_id,
         EmailMessage.thread_id == thread_id,
@@ -396,39 +444,49 @@ async def list_thread_messages(
 
     if before:
         before_ts, before_id = _decode_message_cursor(before)
-        if before_ts:
-            filters.append(
-                text(
-                    "(email_messages.sent_at, email_messages.id) < (:before_ts, :before_id)"
-                ).bindparams(before_ts=before_ts, before_id=before_id)
+        if before_ts is None or not before_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid pagination cursor",
             )
+        filters.append(tuple_(msg_time, EmailMessage.id) < tuple_(before_ts, before_id))
 
     stmt = (
         select(EmailMessage)
         .where(and_(*filters))
-        .order_by(EmailMessage.sent_at.asc(), EmailMessage.id.asc())
-        .limit(limit + 1)
+        .order_by(msg_time.desc(), EmailMessage.id.desc())
+        .limit(limit + 1)  # one extra row tells us whether an older page exists
     )
-
-    result = await db.execute(stmt)
-    rows = list(result.scalars().all())
+    rows = list((await db.execute(stmt)).scalars().all())
 
     has_more = len(rows) > limit
-    if has_more:
-        rows = rows[:limit]
+    rows = rows[:limit]
+    rows.reverse()  # chronological within the page (oldest at the top, newest at the bottom)
 
     previous_cursor = None
     if has_more and rows:
-        first = rows[0]
-        previous_cursor = _encode_message_cursor(first.sent_at, first.id)
+        oldest = rows[0]
+        previous_cursor = _encode_message_cursor(oldest.sent_at or oldest.created_at, oldest.id)
 
-    items = [_message_to_dto(m) for m in rows]
+    total_count = None
+    if not before:
+        total_count = (
+            await db.execute(
+                select(func.count())
+                .select_from(EmailMessage)
+                .where(EmailMessage.tenant_id == org_id, EmailMessage.thread_id == thread_id)
+            )
+        ).scalar_one()
+
+    items = [_message_to_dto(m, mailbox) for m in rows]
 
     return PaginatedMessagesResponse(
         items=items,
         previous_cursor=previous_cursor,
         has_more=has_more,
         total_returned=len(items),
+        total_count=total_count,
+        mailbox=mailbox,
     )
 
 

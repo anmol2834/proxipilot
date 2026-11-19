@@ -1,0 +1,300 @@
+/* Conversation history: one card per message, oldest at the top, newest at the bottom. */
+
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ── Top of the history: load-earlier control / start-of-conversation marker ──
+   Fixed height so swapping button <-> spinner never shifts the messages below it. */
+.historyEdge {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.loadOlderBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid #dbe3ee;
+  background: #fff;
+  color: #2563eb;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.loadOlderBtn:hover {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+.loadOlderBtn:focus-visible,
+.cardHeader:focus-visible,
+.showMore:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+.edgeNote {
+  font-size: 12px;
+  color: #94a3b8;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.edgeError {
+  font-size: 12.5px;
+  color: #b91c1c;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid #dbeafe;
+  border-top-color: #2563eb;
+  animation: threadSpin 0.7s linear infinite;
+}
+@keyframes threadSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── Day separator ── */
+.dayDivider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 6px 0 2px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #64748b;
+}
+.dayDivider::before,
+.dayDivider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: #e8ecf0;
+}
+
+/* ── Message card ── */
+.card {
+  border: 1px solid #e8ecf0;
+  border-radius: 12px;
+  background: #fff;
+  overflow: hidden;
+}
+.cardMine {
+  border-color: #dbe7fb;
+  background: #f8fbff;
+  box-shadow: inset 3px 0 0 #2563eb;
+}
+.cardLatest {
+  border-color: #cbd5e1;
+}
+.cardMine.cardLatest {
+  border-color: #bfd3f6;
+}
+
+.cardHeader {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px 10px;
+  background: none;
+  border: 0;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.collapsed .cardHeader {
+  padding-bottom: 14px;
+}
+
+.avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.who {
+  min-width: 0;
+  flex: 1;
+}
+.nameRow {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+}
+.email {
+  font-size: 12.5px;
+  color: #64748b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.youBadge {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #1d4ed8;
+  background: #dbeafe;
+  border-radius: 4px;
+  padding: 1px 6px;
+  align-self: center;
+}
+.recipients {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #64748b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recipients b {
+  font-weight: 600;
+  color: #475569;
+}
+.snippet {
+  margin-top: 2px;
+  font-size: 13px;
+  color: #64748b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: #64748b;
+  white-space: nowrap;
+  padding-top: 2px;
+}
+.chevron {
+  color: #94a3b8;
+  transition: transform 0.15s ease;
+}
+.collapsed .chevron {
+  transform: rotate(-90deg);
+}
+
+.body {
+  padding: 0 18px 16px 64px;
+  font-size: 14.5px;
+  line-height: 1.7;
+  color: #334155;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.showMore {
+  margin-top: 6px;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: #2563eb;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* ── Loading skeleton ── */
+.skeleton {
+  border: 1px solid #eef2f6;
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  gap: 12px;
+}
+.skelAvatar,
+.skelLine {
+  background: linear-gradient(90deg, #f1f5f9 0%, #e9eef4 50%, #f1f5f9 100%);
+  background-size: 200% 100%;
+  animation: threadShimmer 1.2s ease-in-out infinite;
+}
+.skelAvatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.skelLines {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.skelLine {
+  height: 10px;
+  border-radius: 5px;
+}
+@keyframes threadShimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.stateBox {
+  border: 1px dashed #e2e8f0;
+  border-radius: 12px;
+  padding: 18px;
+  font-size: 13px;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+@media (max-width: 767px) {
+  .body {
+    padding-left: 16px;
+  }
+  .email {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner,
+  .skelAvatar,
+  .skelLine {
+    animation: none;
+  }
+}

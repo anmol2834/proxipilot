@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useEffect, Suspense } from "react";
+import React, { useState, useMemo, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
   useInfiniteConversations,
@@ -48,9 +48,15 @@ function InboxContent() {
     return allConversations[0] || null;
   }, [allConversations, activeConversationId]);
 
-  // Messages query for active thread
-  const { data: messagesData } = useConversationMessages(selectedConversation?.id || null);
-  const messages = messagesData?.items || [];
+  // Active thread's messages: newest batch first, older batches loaded as the user scrolls up.
+  const thread = useConversationMessages(selectedConversation?.id || null);
+  const { fetchNextPage: fetchOlderMessages, refetch: refetchMessages } = thread;
+  const loadOlderMessages = useCallback(() => {
+    void fetchOlderMessages();
+  }, [fetchOlderMessages]);
+  const retryMessages = useCallback(() => {
+    void refetchMessages();
+  }, [refetchMessages]);
 
   // Mutations
   const toggleStarMutation = useToggleStar();
@@ -263,7 +269,16 @@ function InboxContent() {
         >
           <ConversationDetailPane
             conversation={selectedConversation}
-            messages={messages}
+            messages={thread.messages}
+            messagesLoading={thread.isLoading}
+            messagesError={thread.isError && !thread.messages.length}
+            onRetryMessages={retryMessages}
+            totalMessageCount={thread.totalCount}
+            mailbox={thread.mailbox}
+            hasOlderMessages={Boolean(thread.hasNextPage)}
+            isLoadingOlder={thread.isFetchingNextPage}
+            olderMessagesError={thread.isFetchNextPageError}
+            onLoadOlder={loadOlderMessages}
             onToggleStar={(starred) => {
               if (selectedConversation) handleToggleStar(selectedConversation.id, !starred);
             }}
