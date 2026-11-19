@@ -1,8 +1,10 @@
 """Transactional (system) email: verification and password-reset codes.
 
-Delivery is provider-neutral SMTP using only the standard library, run in a worker thread so the
-event loop never blocks. Configure with the EMAIL_* / SMTP_* settings (see
-TransactionalEmailSettings). With EMAIL_DELIVERY=log nothing is sent.
+Delivery modes (TransactionalEmailSettings, EMAIL_DELIVERY):
+- smtp:   standard-library SMTP in a worker thread, for any SMTP provider.
+- twilio: Twilio Email REST API (POST https://comms.twilio.com/v1/Emails, HTTP Basic with an
+          API key SID + secret). The From domain must be authenticated in Twilio Email > Domains.
+With EMAIL_DELIVERY=log nothing is sent.
 """
 
 from __future__ import annotations
@@ -15,6 +17,8 @@ from email.message import EmailMessage
 from email.utils import formataddr, formatdate, make_msgid
 from typing import Literal, Optional
 
+import httpx
+
 from app.core.config import get_transactional_email_settings
 from app.core.logging import logger
 
@@ -23,6 +27,10 @@ CodePurpose = Literal["EMAIL_VERIFICATION", "PASSWORD_RESET"]
 BRAND_BLUE = "#3562F5"
 INK = "#0F172A"
 MUTED = "#64748B"
+
+
+# Tests swap this for httpx.MockTransport.
+_TWILIO_TRANSPORT: Optional[httpx.AsyncBaseTransport] = None
 
 
 class EmailDeliveryError(RuntimeError):
@@ -81,9 +89,41 @@ def _send_smtp(msg: EmailMessage) -> None:
         raise EmailDeliveryError(f"SMTP delivery failed: {exc.__class__.__name__}: {exc}") from exc
 
 
-async def send_email(to: str, subject: str, text: str, html_body: str) -> bool:
-    """Send one email. Returns True if handed to SMTP, False in log mode. Raises EmailDeliveryError."""
+async def _send_twilio(to: str, subject: str, text: str, html_body: str) -> str:
+    """Send through the Twilio Email API; returns Twilio's operation id."""
     cfg = get_transactional_email_settings()
+    payload = {
+        "from": {"address": cfg.email_from_address, "name": cfg.email_from_name},
+        "to": [{"address": to}],
+        "content": {"subject": subject, "html": html_body, "text": text},
+    }
+    try:
+        async with httpx.AsyncClient(
+            timeout=cfg.smtp_timeout_seconds, transport=_TWILIO_TRANSPORT
+        ) as client:
+            res = await client.post(
+                cfg.twilio_email_api_url,
+                json=payload,
+                auth=(cfg.twilio_api_key_sid, cfg.twilio_api_key_secret),
+            )
+    except httpx.HTTPError as exc:
+        raise EmailDeliveryError(f"Twilio Email request failed: {exc.__class__.__name__}: {exc}") from exc
+    if res.status_code not in (200, 201, 202):
+        raise EmailDeliveryError(f"Twilio Email rejected the message: HTTP {res.status_code}: {res.text[:300]}")
+    try:
+        return str(res.json().get("operationId", ""))
+    except ValueError:
+        return ""
+
+
+async def send_email(to: str, subject: str, text: str, html_body: str) -> bool:
+    """Send one email. Returns True if handed to the provider, False in log mode.
+    Raises EmailDeliveryError if the provider refuses or cannot be reached."""
+    cfg = get_transactional_email_settings()
+    if cfg.email_delivery == "twilio":
+        operation_id = await _send_twilio(to, subject, text, html_body)
+        logger.info("Email sent", provider="twilio", to=_mask(to), subject=subject, operation_id=operation_id)
+        return True
     if cfg.email_delivery != "smtp":
         logger.info("Email not sent (EMAIL_DELIVERY=log)", to=_mask(to), subject=subject)
         return False

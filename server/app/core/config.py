@@ -566,12 +566,13 @@ def get_automation_worker_settings() -> AutomationWorkerSettings:
 class TransactionalEmailSettings(BaseAppConfig):
     """System email sent by ProxiPilot itself (verification and password-reset codes).
 
-    Provider-neutral: any SMTP service works (AWS SES, Resend, Postmark, Brevo, Google Workspace relay).
-    EMAIL_DELIVERY=log (the default) sends nothing and only logs, which is fine locally but means
-    users never receive codes, so production must use smtp.
+    EMAIL_DELIVERY selects how mail leaves:
+      - smtp:   any SMTP service (SendGrid, AWS SES, Resend, Postmark, Google Workspace relay)
+      - twilio: Twilio Email REST API (POST comms.twilio.com/v1/Emails, API key SID + secret)
+      - log:    the default; sends nothing and only logs. Fine locally, but users never receive codes.
     """
 
-    email_delivery: Literal["log", "smtp"] = Field(default="log", alias="EMAIL_DELIVERY")
+    email_delivery: Literal["log", "smtp", "twilio"] = Field(default="log", alias="EMAIL_DELIVERY")
     smtp_host: str = Field(default="", alias="SMTP_HOST")
     smtp_port: int = Field(default=587, alias="SMTP_PORT")
     smtp_username: str = Field(default="", alias="SMTP_USERNAME")
@@ -581,11 +582,22 @@ class TransactionalEmailSettings(BaseAppConfig):
     email_from_address: str = Field(default="no-reply@proxipilot.com", alias="EMAIL_FROM_ADDRESS")
     email_from_name: str = Field(default="ProxiPilot", alias="EMAIL_FROM_NAME")
     email_reply_to: str = Field(default="", alias="EMAIL_REPLY_TO")
+    twilio_api_key_sid: str = Field(default="", alias="TWILIO_API_KEY_SID")
+    twilio_api_key_secret: str = Field(default="", alias="TWILIO_API_KEY_SECRET", repr=False)
+    twilio_email_api_url: str = Field(
+        default="https://comms.twilio.com/v1/Emails", alias="TWILIO_EMAIL_API_URL"
+    )
 
     @model_validator(mode="after")
-    def _require_smtp_details(self) -> "TransactionalEmailSettings":
+    def _require_provider_details(self) -> "TransactionalEmailSettings":
         if self.email_delivery == "smtp" and not (self.smtp_host and self.email_from_address):
             raise ValueError("EMAIL_DELIVERY=smtp needs SMTP_HOST and EMAIL_FROM_ADDRESS.")
+        if self.email_delivery == "twilio" and not (
+            self.twilio_api_key_sid and self.twilio_api_key_secret and self.email_from_address
+        ):
+            raise ValueError(
+                "EMAIL_DELIVERY=twilio needs TWILIO_API_KEY_SID, TWILIO_API_KEY_SECRET and EMAIL_FROM_ADDRESS."
+            )
         return self
 
 

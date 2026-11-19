@@ -147,3 +147,60 @@ async def test_smtp_failure_raises_delivery_error(monkeypatch):
 def test_smtp_mode_requires_host():
     with pytest.raises(ValueError):
         TransactionalEmailSettings(EMAIL_DELIVERY="smtp", SMTP_HOST="")
+
+
+# ---------------------------------------------------------------------------
+# Twilio Email API mode
+# ---------------------------------------------------------------------------
+
+import base64
+import json
+
+import httpx
+
+
+def _twilio(monkeypatch, handler):
+    _use(
+        monkeypatch,
+        EMAIL_DELIVERY="twilio",
+        TWILIO_API_KEY_SID="SKtestsid",
+        TWILIO_API_KEY_SECRET="test-secret",
+        EMAIL_FROM_ADDRESS="hello@proxipilot.com",
+        EMAIL_FROM_NAME="ProxiPilot",
+    )
+    monkeypatch.setattr(te, "_TWILIO_TRANSPORT", httpx.MockTransport(handler))
+
+
+@pytest.mark.asyncio
+async def test_twilio_mode_posts_expected_payload(monkeypatch):
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        seen["auth"] = request.headers["authorization"]
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(202, json={"operationId": "op_123", "operationLocation": "x"})
+
+    _twilio(monkeypatch, handler)
+    assert await te.send_code_email("pat@example.com", "731205", "PASSWORD_RESET") is True
+
+    assert seen["url"] == "https://comms.twilio.com/v1/Emails"
+    assert seen["auth"] == "Basic " + base64.b64encode(b"SKtestsid:test-secret").decode()
+    body = seen["body"]
+    assert body["from"] == {"address": "hello@proxipilot.com", "name": "ProxiPilot"}
+    assert body["to"] == [{"address": "pat@example.com"}]
+    assert body["content"]["subject"] == "Reset your ProxiPilot password"
+    assert "731205" in body["content"]["text"] and "7 3 1 2 0 5" in body["content"]["html"]
+
+
+@pytest.mark.asyncio
+async def test_twilio_mode_rejection_raises(monkeypatch):
+    _twilio(monkeypatch, lambda r: httpx.Response(401, json={"message": "Authenticate"}))
+    with pytest.raises(te.EmailDeliveryError) as e:
+        await te.send_code_email("pat@example.com", "731205", "EMAIL_VERIFICATION")
+    assert "401" in str(e.value)
+
+
+def test_twilio_mode_requires_key():
+    with pytest.raises(ValueError):
+        TransactionalEmailSettings(EMAIL_DELIVERY="twilio", TWILIO_API_KEY_SID="SKx")
