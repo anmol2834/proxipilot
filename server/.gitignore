@@ -61,3 +61,6 @@ dmypy.json
 # Docker & local storage
 data/
 *.log
+
+# Local .env backups (contain secrets)
+.env.bak*

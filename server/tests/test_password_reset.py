@@ -224,3 +224,36 @@ async def test_unknown_email_gets_same_response_and_no_challenge(fake_redis, aud
         assert audit_calls == []
         await asyncio.sleep(0.05)
         assert sent_emails == []  # nothing is emailed for unknown addresses
+
+
+@pytest.mark.asyncio
+async def test_signup_emails_verification_code(fake_redis, audit_calls, sent_emails):
+    """Email/password signup sends its verification code through the configured provider."""
+    from app.contracts.auth import ResendOtpRequest, SignupRequest
+
+    db_manager.initialize()
+    email = f"pytest_signup_{uuid.uuid4().hex[:10]}@example.com"
+    async with db_manager.session_factory() as db:
+        try:
+            res = await auth_service.signup(
+                db,
+                SignupRequest(first_name="Py", last_name="Test", email=email, password="signup-pass-123"),
+            )
+            code = await fake_redis.get(f"otp:{res.challenge_id}:code")
+            assert sent_emails == [{"to": email, "code": code, "purpose": "EMAIL_VERIFICATION"}]
+
+            # Resend (after the cooldown) emails a fresh code too.
+            await fake_redis.delete(f"otp:{res.challenge_id}:cooldown")
+            await auth_service.resend_otp(db, ResendOtpRequest(challenge_id=res.challenge_id, email=email))
+            new_code = await fake_redis.get(f"otp:{res.challenge_id}:code")
+            assert sent_emails[-1] == {"to": email, "code": new_code, "purpose": "EMAIL_VERIFICATION"}
+            assert len(sent_emails) == 2
+        finally:
+            await db.rollback()
+            user_ids = (await db.execute(select(User.id).where(User.email == email))).scalars().all()
+            for uid in user_ids:
+                await db.execute(delete(EmailVerificationChallenge).where(EmailVerificationChallenge.user_id == uid))
+                await db.execute(delete(AuthenticationIdentity).where(AuthenticationIdentity.user_id == uid))
+                await db.execute(delete(UserSession).where(UserSession.user_id == uid))
+                await db.execute(delete(User).where(User.id == uid))
+            await db.commit()

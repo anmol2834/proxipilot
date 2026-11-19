@@ -81,7 +81,10 @@ def _use(monkeypatch, **env):
 def test_templates_show_code_and_never_leak_it_into_reset_subject():
     subject, text, html_body = te.render_code_email("482916", "EMAIL_VERIFICATION")
     assert subject == "482916 is your ProxiPilot verification code"
-    assert "482916" in text and "4 8 2 9 1 6" in html_body and "Expires in 10 minutes" in html_body
+    assert "482916" in text and "Expires in 10 minutes" in html_body
+    # The code renders as one unbroken, non-wrapping run so it never splits across lines on phones.
+    assert ">482916</div>" in html_body and "white-space:nowrap" in html_body
+    assert "4 8 2 9 1 6" not in html_body
 
     subject, text, html_body = te.render_code_email("482916", "PASSWORD_RESET")
     assert "482916" not in subject
@@ -124,7 +127,7 @@ async def test_smtp_delivers_multipart_message_with_auth(monkeypatch, smtp_sink)
     assert msg["Message-ID"].endswith("@proxipilot.com>")
     plain = msg.get_body(preferencelist=("plain",)).get_content()
     rich = msg.get_body(preferencelist=("html",)).get_content()
-    assert "731205" in plain and "7 3 1 2 0 5" in rich
+    assert "731205" in plain and ">731205</div>" in rich
 
 
 @pytest.mark.asyncio
@@ -190,7 +193,7 @@ async def test_twilio_mode_posts_expected_payload(monkeypatch):
     assert body["from"] == {"address": "hello@proxipilot.com", "name": "ProxiPilot"}
     assert body["to"] == [{"address": "pat@example.com"}]
     assert body["content"]["subject"] == "Reset your ProxiPilot password"
-    assert "731205" in body["content"]["text"] and "7 3 1 2 0 5" in body["content"]["html"]
+    assert "731205" in body["content"]["text"] and ">731205</div>" in body["content"]["html"]
 
 
 @pytest.mark.asyncio
@@ -203,4 +206,4 @@ async def test_twilio_mode_rejection_raises(monkeypatch):
 
 def test_twilio_mode_requires_key():
     with pytest.raises(ValueError):
-        TransactionalEmailSettings(EMAIL_DELIVERY="twilio", TWILIO_API_KEY_SID="SKx")
+        TransactionalEmailSettings(EMAIL_DELIVERY="twilio", TWILIO_API_KEY_SID="SKx", TWILIO_API_KEY_SECRET="")

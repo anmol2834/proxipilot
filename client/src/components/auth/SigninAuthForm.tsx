@@ -3,7 +3,9 @@
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { authApi } from "@/lib/api";
+import { startFreshSession } from "@/lib/query/session-cache";
 import { env } from "@/config/env";
 import { CustomCheckbox } from "@/components/ui/CustomCheckbox";
 import { ProxiPilotLogo } from "@/components/ui/ProxiPilotLogo";
@@ -11,6 +13,7 @@ import { ProxiPilotLogo } from "@/components/ui/ProxiPilotLogo";
 export function SigninAuthForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const queryClient = useQueryClient();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -78,6 +81,9 @@ export function SigninAuthForm() {
       const onboardingState = await authApi.getOnboardingState(
         signinRes.organization_id || undefined
       );
+
+      // Never carry cached data from a previous (possibly revoked) session into the app.
+      startFreshSession(queryClient, onboardingState);
 
       if (onboardingState.is_completed) {
         router.push("/dashboard");

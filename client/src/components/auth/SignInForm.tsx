@@ -12,6 +12,8 @@ import InputAdornment from "@mui/material/InputAdornment";
 import IconButton from "@mui/material/IconButton";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
+import { startFreshSession } from "@/lib/query/session-cache";
 import { useEffect } from "react";
 
 import { authApi } from "@/lib/api";
@@ -21,6 +23,7 @@ import { ProxiPilotLogo } from "@/components/ui/ProxiPilotLogo";
 
 export function SignInForm() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -62,6 +65,7 @@ export function SignInForm() {
 
       // Check authoritative server onboarding progression
       const onboardingState = await authApi.getOnboardingState(signinRes.organization_id || undefined);
+      startFreshSession(queryClient, onboardingState);
 
       if (onboardingState.is_completed) {
         router.push("/dashboard");

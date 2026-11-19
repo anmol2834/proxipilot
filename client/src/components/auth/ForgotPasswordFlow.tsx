@@ -12,7 +12,9 @@ import {
   IconCheck,
   IconX,
 } from "@tabler/icons-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { authApi } from "@/lib/api";
+import { startFreshSession } from "@/lib/query/session-cache";
 import { ProxiPilotLogo } from "@/components/ui/ProxiPilotLogo";
 import f from "./forgot-password.module.css";
 
@@ -142,6 +144,7 @@ function Progress({ step }: { step: Step }) {
 }
 
 export function ForgotPasswordFlow() {
+  const queryClient = useQueryClient();
   const [step, setStep] = useState<Step>("email");
   const [email, setEmail] = useState("");
   const [emailTouched, setEmailTouched] = useState(false);
@@ -310,6 +313,8 @@ export function ForgotPasswordFlow() {
     setLoading(true);
     try {
       await authApi.resetPassword({ reset_token: resetToken, new_password: password });
+      // Every session was just signed out; drop anything cached for the old one.
+      startFreshSession(queryClient);
       setPassword("");
       setConfirm("");
       try {

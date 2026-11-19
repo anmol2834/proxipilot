@@ -157,7 +157,6 @@ def render_code_email(code: str, purpose: CodePurpose, expires_minutes: int = 10
     """Return (subject, text, html) for a 6-digit code email."""
     copy = _COPY[purpose]
     subject = copy["subject"].format(code=code)
-    spaced = " ".join(code)
 
     text = (
         f"{copy['heading']}\n\n"
@@ -194,7 +193,7 @@ def render_code_email(code: str, purpose: CodePurpose, expires_minutes: int = 10
       </td></tr>
       <tr><td style="padding:20px 32px;">
         <div style="background:#F3F6FF;border:1px solid #DCE4FF;border-radius:12px;padding:18px 12px;text-align:center;">
-          <div style="font-family:SFMono-Regular,Consolas,Menlo,monospace;font-size:32px;font-weight:700;letter-spacing:6px;color:{INK};">{esc(spaced)}</div>
+          <div style="font-family:SFMono-Regular,Consolas,Menlo,monospace;font-size:30px;line-height:1.2;font-weight:700;letter-spacing:8px;white-space:nowrap;color:{INK};">{esc(code)}</div>
           <div style="margin-top:8px;font-family:Inter,Segoe UI,Helvetica,Arial,sans-serif;font-size:13px;color:{MUTED};">Expires in {expires_minutes} minutes</div>
         </div>
       </td></tr>
