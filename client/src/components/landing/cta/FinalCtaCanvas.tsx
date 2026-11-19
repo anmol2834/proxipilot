@@ -79,14 +79,20 @@ export function FinalCtaCanvas() {
               justifyContent: "center",
               flexShrink: 0,
               boxShadow: "0 2px 8px rgba(0, 0, 0, 0.1)",
+              p: 1,
             }}
           >
-            <svg width="24" height="18" viewBox="0 0 24 18" fill="none">
-              <path d="M1.5 16.5V4.5L12 12L22.5 4.5V16.5C22.5 17.3284 21.8284 18 21 18H3C2.17157 18 1.5 17.3284 1.5 16.5Z" fill="#EA4335" />
-              <path d="M1.5 4.5L12 12L22.5 4.5V2.5C22.5 1.67157 21.8284 1 21 1H3C2.17157 1 1.5 1.67157 1.5 2.5V4.5Z" fill="#FBBC05" />
-              <path d="M12 12L1.5 4.5V2.5C1.5 1.67157 2.17157 1 3 1H7.5L12 5.5L16.5 1H21C21.8284 1 22.5 1.67157 22.5 2.5V4.5L12 12Z" fill="#4285F4" />
-              <path d="M1.5 16.5V4.5L7.5 9V18H3C2.17157 18 1.5 17.3284 1.5 16.5Z" fill="#34A853" />
-            </svg>
+            <Box
+              component="img"
+              src="/logos/gmail.png"
+              alt="Gmail"
+              sx={{
+                width: 26,
+                height: 26,
+                objectFit: "contain",
+                display: "block",
+              }}
+            />
           </Box>
           <Box>
             <Typography sx={{ fontSize: "0.95rem", fontWeight: 700, color: "#FFFFFF", lineHeight: 1.25 }}>

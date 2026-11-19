@@ -390,12 +390,17 @@ export function DualPathDecisionCanvas() {
         >
           {/* Logo */}
           <Box sx={{ width: 34, height: 34, mb: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
-              <circle cx="11" cy="16" r="6" fill="#3B82F6" fillOpacity="0.9" />
-              <circle cx="21" cy="16" r="6" fill="#635BFF" fillOpacity="0.9" />
-              <path d="M16 11.5C17.5 12.8 18.5 14.3 18.5 16C18.5 17.7 17.5 19.2 16 20.5C14.5 19.2 13.5 17.7 13.5 16C13.5 14.3 14.5 12.8 16 11.5Z" fill="#4F46E5" />
-              <circle cx="16" cy="10" r="3.5" fill="#4F7CFF" />
-            </svg>
+            <Box
+              component="img"
+              src="/Proxipilot logo.svg"
+              alt="ProxiPilot"
+              sx={{
+                width: 32,
+                height: 32,
+                objectFit: "contain",
+                display: "block",
+              }}
+            />
           </Box>
           <Typography sx={{ fontWeight: 800, fontSize: "1.125rem", color: "#0F172A", letterSpacing: "-0.02em" }}>
             ProxiPilot
