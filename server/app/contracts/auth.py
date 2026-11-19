@@ -63,6 +63,51 @@ class ResendOtpResponse(BaseModel):
     message: str = "New verification code dispatched."
 
 
+class ForgotPasswordRequest(BaseModel):
+    """Start a password reset for an email address."""
+
+    email: EmailStr
+
+
+class ForgotPasswordResponse(BaseModel):
+    """Always returned, whether or not an account exists (no account enumeration)."""
+
+    challenge_id: str
+    email: str
+    cooldown_seconds: int = 45
+    expires_in_seconds: int = 600
+    status: str = "DISPATCHED"
+
+
+class ResetPasswordVerifyRequest(BaseModel):
+    """Prove control of the mailbox with the 6-digit reset code."""
+
+    email: EmailStr
+    challenge_id: str = Field(description="Challenge ID returned from forgot-password")
+    otp: str = Field(min_length=6, max_length=6, description="6-digit reset code")
+
+
+class ResetPasswordVerifyResponse(BaseModel):
+    """Short-lived token that authorises setting a new password."""
+
+    reset_token: str
+    expires_in_seconds: int = 600
+
+
+class ResetPasswordRequest(BaseModel):
+    """Set a new password using a verified reset token."""
+
+    reset_token: str = Field(min_length=16, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128, description="New plaintext password")
+
+
+class ResetPasswordResponse(BaseModel):
+    """Password changed; every existing session has been signed out."""
+
+    email: str
+    status: str = "PASSWORD_RESET"
+
+
 class SigninRequest(BaseModel):
     """Email and password sign-in request."""
 

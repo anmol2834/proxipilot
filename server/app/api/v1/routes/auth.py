@@ -22,6 +22,12 @@ from app.contracts.auth import (
     UserMeResponse,
     VerifyOtpRequest,
     VerifyOtpResponse,
+    ForgotPasswordRequest,
+    ForgotPasswordResponse,
+    ResetPasswordRequest,
+    ResetPasswordResponse,
+    ResetPasswordVerifyRequest,
+    ResetPasswordVerifyResponse,
 )
 from app.core.database import get_db
 from app.core.security import TokenPayload, get_current_user
@@ -92,6 +98,46 @@ async def resend_otp(
 ) -> ResendOtpResponse:
     """Issue a new verification code if the 45-second cooldown period has elapsed."""
     return await auth_service.resend_otp(db, payload)
+
+
+@router.post(
+    "/forgot-password",
+    response_model=ForgotPasswordResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Start a password reset (same response whether or not the account exists)",
+)
+async def forgot_password(
+    payload: ForgotPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ForgotPasswordResponse:
+    """Issue a 6-digit reset code. Call again after the cooldown to resend."""
+    return await auth_service.request_password_reset(db, payload)
+
+
+@router.post(
+    "/reset-password/verify",
+    response_model=ResetPasswordVerifyResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Verify the reset code and receive a short-lived reset token",
+)
+async def verify_password_reset(
+    payload: ResetPasswordVerifyRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ResetPasswordVerifyResponse:
+    return await auth_service.verify_password_reset(db, payload)
+
+
+@router.post(
+    "/reset-password",
+    response_model=ResetPasswordResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Set a new password and sign out every existing session",
+)
+async def reset_password(
+    payload: ResetPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ResetPasswordResponse:
+    return await auth_service.reset_password(db, payload)
 
 
 @router.post(

@@ -561,3 +561,35 @@ def get_email_worker_settings() -> EmailWorkerSettings:
 def get_automation_worker_settings() -> AutomationWorkerSettings:
     """Singleton getter for Automation worker scoped settings."""
     return AutomationWorkerSettings()
+
+
+class TransactionalEmailSettings(BaseAppConfig):
+    """System email sent by ProxiPilot itself (verification and password-reset codes).
+
+    Provider-neutral: any SMTP service works (AWS SES, Resend, Postmark, Brevo, Google Workspace relay).
+    EMAIL_DELIVERY=log (the default) sends nothing and only logs, which is fine locally but means
+    users never receive codes, so production must use smtp.
+    """
+
+    email_delivery: Literal["log", "smtp"] = Field(default="log", alias="EMAIL_DELIVERY")
+    smtp_host: str = Field(default="", alias="SMTP_HOST")
+    smtp_port: int = Field(default=587, alias="SMTP_PORT")
+    smtp_username: str = Field(default="", alias="SMTP_USERNAME")
+    smtp_password: str = Field(default="", alias="SMTP_PASSWORD", repr=False)
+    smtp_security: Literal["starttls", "ssl", "none"] = Field(default="starttls", alias="SMTP_SECURITY")
+    smtp_timeout_seconds: float = Field(default=15.0, alias="SMTP_TIMEOUT_SECONDS")
+    email_from_address: str = Field(default="no-reply@proxipilot.com", alias="EMAIL_FROM_ADDRESS")
+    email_from_name: str = Field(default="ProxiPilot", alias="EMAIL_FROM_NAME")
+    email_reply_to: str = Field(default="", alias="EMAIL_REPLY_TO")
+
+    @model_validator(mode="after")
+    def _require_smtp_details(self) -> "TransactionalEmailSettings":
+        if self.email_delivery == "smtp" and not (self.smtp_host and self.email_from_address):
+            raise ValueError("EMAIL_DELIVERY=smtp needs SMTP_HOST and EMAIL_FROM_ADDRESS.")
+        return self
+
+
+@lru_cache(maxsize=1)
+def get_transactional_email_settings() -> TransactionalEmailSettings:
+    """Singleton getter for system email delivery settings."""
+    return TransactionalEmailSettings()
