@@ -23,6 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import logger
+from app.services import mail_authenticity
 
 
 # =============================================================================
@@ -275,6 +276,7 @@ class EmailFilterService:
         db: Optional[AsyncSession],
         tenant_id: str,
         is_existing_conversation: bool = False,
+        own_domain: str = "",
     ) -> ClassificationResult:
         """Stage 1: Evaluate metadata and headers before fetching full email body.
         
@@ -302,6 +304,7 @@ class EmailFilterService:
             headers=headers,
             tenant_id=tenant_id,
             is_existing_conversation=is_existing_conversation,
+            own_domain=own_domain,
         )
 
     def classify_metadata_sync(
@@ -310,6 +313,7 @@ class EmailFilterService:
         headers: Dict[str, str],
         tenant_id: str,
         is_existing_conversation: bool = False,
+        own_domain: str = "",
     ) -> ClassificationResult:
         """Synchronous multi-signal metadata evaluator (in-memory deterministic signals)."""
         score = 0
@@ -413,6 +417,13 @@ class EmailFilterService:
                 score=80,
             )
 
+        # 8b. Hard evidence of machine-sent mail (RFC 3834 auto-submitted, no-reply senders,
+        # verification / login / security codes, bulk precedence, Gmail Promotions/Social/Forums).
+        auth = mail_authenticity.assess(labels=label_ids, headers=headers, subject=subject_raw,
+                                        existing_conversation=is_existing_conversation, own_domain=own_domain)
+        if auth.hard_reason:
+            return _rejected(auth)
+
         # 9. Header Signals (Accumulate into score for Stage 2)
         if any(h in lower_headers for h in _PROMOTIONAL_HEADERS):
             score += 35
@@ -458,136 +469,76 @@ class EmailFilterService:
         subject: str,
         from_header: str,
         metadata_result: Optional[ClassificationResult] = None,
+        headers: Optional[Dict[str, str]] = None,
+        label_ids: Optional[List[str]] = None,
+        is_existing_conversation: bool = False,
+        own_domain: str = "",
     ) -> ClassificationResult:
-        """Stage 2: Evaluate full message body with score carry-over from metadata stage."""
-        # Initialize with score and reasons carried over from metadata
-        score = metadata_result.score if metadata_result else 0
+        """Stage 2: decide from the full message whether a PERSON wrote it to the business.
+
+        Order matters: a metadata-stage rejection is final (no keyword can resurrect it), hard
+        automation evidence rejects, and only mail with human evidence is a business conversation.
+        Mail the signals cannot decide is returned as AMBIGUOUS for the caller's second opinion.
+        """
         reasons = list(metadata_result.reasons) if metadata_result else []
-
         clean_body = (body_text or "").strip()
-        body_lower = clean_body.lower()
-        subject_lower = (subject or "").lower()
+        subject = subject or ""
 
-        # 1. Strong Protection for Short Human Messages & Greetings
-        # e.g. "Hyyy", "Helloooooooo", "Hello", "Hi"
-        if _HUMAN_GREETINGS.match(clean_body) or _HUMAN_GREETINGS.match(subject_lower):
-            reasons.append("human_greeting_detected")
+        # 1. A rejection from the metadata stage is final.
+        if metadata_result is not None and not metadata_result.should_store:
+            return metadata_result
+        if metadata_result is not None and metadata_result.is_trusted:
+            return metadata_result
+
+        hdrs = dict(headers or {})
+        hdrs.setdefault("from", from_header or "")
+        hdrs.setdefault("subject", subject)
+        auth = mail_authenticity.assess(labels=label_ids or [], headers=hdrs, subject=subject, body=clean_body,
+                                        existing_conversation=is_existing_conversation, own_domain=own_domain)
+        # Legacy protections count as human evidence (they no longer override automation evidence).
+        if _HUMAN_GREETINGS.match(clean_body) or _HUMAN_GREETINGS.match(subject.lower()):
+            auth.human += 25
+            auth.reasons.append("human_greeting_detected")
+        if _INQUIRY_PATTERNS.search(clean_body) or _INQUIRY_PATTERNS.search(subject):
+            auth.human += 25
+            auth.reasons.append("customer_inquiry_or_order_language")
+        reasons += auth.reasons
+        verdict = auth.verdict
+
+        if verdict == "REJECT":
+            return _rejected(auth, reasons)
+
+        if verdict != "HUMAN":
+            # Legacy notification rules decide the obvious remaining cases.
+            for pattern, category, why in (
+                (_FINANCIAL_SECURITY_PATTERNS, EmailCategory.SECURITY_OR_FINANCIAL_NOTICE, "body_financial_or_security_markers"),
+                (_SHIPPING_DELIVERY_PATTERNS, EmailCategory.NON_CONVERSATIONAL_NOTIFICATION, "shipping_delivery_markers"),
+                (_PRODUCT_NOTIFICATION_PATTERNS, EmailCategory.NON_CONVERSATIONAL_NOTIFICATION, "body_product_notification_markers"),
+                (_PROMOTIONAL_CAMPAIGN_PATTERNS, EmailCategory.PROMOTIONAL_BULK, "promotional_campaign_subject_matched"),
+                (_JOB_ALERT_PATTERNS, EmailCategory.PROMOTIONAL_BULK, "job_alert_subject_matched"),
+                (_DIGEST_NEWSLETTER_PATTERNS, EmailCategory.PROMOTIONAL_BULK, "digest_newsletter_subject_matched"),
+            ):
+                if pattern.search(subject) or (pattern is not _JOB_ALERT_PATTERNS and pattern.search(clean_body)):
+                    reasons.append(why)
+                    return ClassificationResult(category=category,
+                                                disposition=EmailDisposition.SUPPRESS_BEFORE_EMAIL_PERSISTENCE,
+                                                confidence=0.85, reasons=reasons, score=auth.automation)
+
+        if verdict == "HUMAN":
             return ClassificationResult(
                 category=EmailCategory.BUSINESS_CONVERSATION,
                 disposition=EmailDisposition.STORE_AND_RESOLVE_CONTEXT,
-                confidence=0.90,
+                confidence=0.9,
                 reasons=reasons,
-                score=0,
+                score=auth.automation,
             )
-
-        # 2. Strong Protection for Explicit Inquiries and Customer Continuations
-        # e.g. "Please share me your catalogue and price list", "We are ready to proceed"
-        if _INQUIRY_PATTERNS.search(clean_body) or _INQUIRY_PATTERNS.search(subject_lower):
-            reasons.append("customer_inquiry_or_order_confirmation")
-            return ClassificationResult(
-                category=EmailCategory.BUSINESS_CONVERSATION,
-                disposition=EmailDisposition.STORE_AND_RESOLVE_CONTEXT,
-                confidence=0.95,
-                reasons=reasons,
-                score=0,
-            )
-
-        # If metadata stage already produced a high-confidence suppression category, preserve it
-        if metadata_result and metadata_result.category not in (EmailCategory.AMBIGUOUS, EmailCategory.BUSINESS_CONVERSATION):
-            if not metadata_result.should_store:
-                return ClassificationResult(
-                    category=metadata_result.category,
-                    disposition=metadata_result.disposition,
-                    confidence=metadata_result.confidence,
-                    reasons=reasons,
-                    score=score,
-                )
-
-        # 3. Detect Body-Level Financial / Security content
-        if _FINANCIAL_SECURITY_PATTERNS.search(clean_body) or _FINANCIAL_SECURITY_PATTERNS.search(subject_lower):
-            reasons.append("body_financial_or_security_markers")
-            return ClassificationResult(
-                category=EmailCategory.SECURITY_OR_FINANCIAL_NOTICE,
-                disposition=EmailDisposition.SUPPRESS_BEFORE_EMAIL_PERSISTENCE,
-                confidence=0.90,
-                reasons=reasons,
-                score=score + 40,
-            )
-
-        # 4. Detect Product/Account & Shipping Notifications
-        if _SHIPPING_DELIVERY_PATTERNS.search(subject_lower) or _SHIPPING_DELIVERY_PATTERNS.search(clean_body):
-            reasons.append("shipping_delivery_markers")
-            return ClassificationResult(
-                category=EmailCategory.NON_CONVERSATIONAL_NOTIFICATION,
-                disposition=EmailDisposition.SUPPRESS_BEFORE_EMAIL_PERSISTENCE,
-                confidence=0.90,
-                reasons=reasons,
-                score=score + 40,
-            )
-
-        if _PRODUCT_NOTIFICATION_PATTERNS.search(clean_body):
-            reasons.append("body_product_notification_markers")
-            return ClassificationResult(
-                category=EmailCategory.NON_CONVERSATIONAL_NOTIFICATION,
-                disposition=EmailDisposition.SUPPRESS_BEFORE_EMAIL_PERSISTENCE,
-                confidence=0.90,
-                reasons=reasons,
-                score=score + 40,
-            )
-
-        # Standalone subject pattern checks if metadata result was not provided
-        if _PROMOTIONAL_CAMPAIGN_PATTERNS.search(subject or ""):
-            score += 40
-            reasons.append("promotional_campaign_subject_matched")
-        if _JOB_ALERT_PATTERNS.search(subject or ""):
-            score += 40
-            reasons.append("job_alert_subject_matched")
-        if _DIGEST_NEWSLETTER_PATTERNS.search(subject or ""):
-            score += 40
-            reasons.append("digest_newsletter_subject_matched")
-
-        # 5. Marketing Footer & Promotional Markers
-        footer_markers = [
-            "unsubscribe", "manage preferences", "email preferences",
-            "opt out", "opt-out", "view in browser", "you received this email because",
-            "no longer want to receive", "click here to unsubscribe",
-        ]
-        footer_hits = sum(1 for m in footer_markers if m in body_lower)
-        if footer_hits >= 2:
-            score += 35
-            reasons.append(f"multiple_marketing_footer_markers:{footer_hits}")
-        elif footer_hits == 1:
-            score += 20
-            reasons.append("marketing_footer_marker:1")
-
-        # Promotional phrases in body
-        promo_phrases = [
-            "limited time offer", "discount", "% off", "coupon code",
-            "free shipping", "exclusive deal", "shop now", "register now",
-            "reserve your spot", "webinar", "bootcamp",
-        ]
-        promo_hits = sum(1 for p in promo_phrases if p in body_lower)
-        if promo_hits >= 2:
-            score += 25
-            reasons.append(f"promotional_phrases_in_body:{promo_hits}")
-
-        # Final Threshold Evaluation
-        if score >= 45:
-            return ClassificationResult(
-                category=EmailCategory.PROMOTIONAL_BULK,
-                disposition=EmailDisposition.SUPPRESS_BEFORE_EMAIL_PERSISTENCE,
-                confidence=0.85,
-                reasons=reasons,
-                score=score,
-            )
-
-        # Genuine business conversation
+        # Undecided: the caller asks the small classifier before anything is stored.
         return ClassificationResult(
-            category=EmailCategory.BUSINESS_CONVERSATION,
+            category=EmailCategory.AMBIGUOUS,
             disposition=EmailDisposition.STORE_AND_RESOLVE_CONTEXT,
-            confidence=0.85,
-            reasons=reasons,
-            score=score,
+            confidence=0.5,
+            reasons=reasons + [f"unsure:human={auth.human},automation={auth.automation}"],
+            score=auth.automation,
         )
 
     async def _check_allowlist(
@@ -619,6 +570,29 @@ class EmailFilterService:
 # =============================================================================
 # Helper Utilities
 # =============================================================================
+
+
+_HARD_KIND_CATEGORY = {
+    "security": EmailCategory.SECURITY_OR_FINANCIAL_NOTICE,
+    "automated_reply": EmailCategory.AUTOMATED_REPLY,
+    "promotional": EmailCategory.PROMOTIONAL_BULK,
+    "bulk": EmailCategory.PROMOTIONAL_BULK,
+    "notification": EmailCategory.NON_CONVERSATIONAL_NOTIFICATION,
+}
+
+
+def _rejected(auth: "mail_authenticity.Authenticity", reasons: Optional[List[str]] = None) -> ClassificationResult:
+    """Never stored, never answered."""
+    category = _HARD_KIND_CATEGORY.get(auth.hard_kind, EmailCategory.PROMOTIONAL_BULK)
+    if not auth.hard_kind and any(r.startswith(("gmail_tab", "transactional")) for r in auth.reasons):
+        category = EmailCategory.NON_CONVERSATIONAL_NOTIFICATION
+    return ClassificationResult(
+        category=category,
+        disposition=EmailDisposition.SUPPRESS_BEFORE_EMAIL_PERSISTENCE,
+        confidence=0.95 if auth.hard_reason else 0.85,
+        reasons=list(reasons if reasons is not None else auth.reasons),
+        score=max(auth.automation, 90 if auth.hard_reason else 0),
+    )
 
 
 def _extract_email_addr(from_header: str) -> str:

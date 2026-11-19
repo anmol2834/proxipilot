@@ -240,12 +240,40 @@ async def _get_and_clear_pending_watermark(account_id: str) -> Optional[int]:
 # =============================================================================
 
 # Metadata headers needed for Phase 1 filter
+def _own_domain(account: Any) -> str:
+    email = (getattr(account, "email_address", "") or "").lower()
+    return email.split("@", 1)[1] if "@" in email else ""
+
+
+async def _second_opinion(result: "ClassificationResult", from_header: str, subject: str,
+                          body: str) -> "ClassificationResult":
+    """Undecided mail: one small classifier call decides. Only a human-written business message is
+    stored; if the classifier is unavailable, mail with any automation evidence is not stored."""
+    from app.services.mail_human_check import is_human_business_mail
+
+    verdict = await is_human_business_mail(from_header, subject, body or "")
+    reasons = list(result.reasons)
+    if verdict is True or (verdict is None and result.score == 0):
+        reasons.append("second_opinion:human" if verdict else "second_opinion:unavailable_no_automation")
+        return ClassificationResult(category=EmailCategory.BUSINESS_CONVERSATION,
+                                    disposition=EmailDisposition.STORE_AND_RESOLVE_CONTEXT,
+                                    confidence=0.8, reasons=reasons, score=result.score)
+    reasons.append("second_opinion:not_human" if verdict is False else "second_opinion:unavailable_automation")
+    return ClassificationResult(category=EmailCategory.NON_CONVERSATIONAL_NOTIFICATION,
+                                disposition=EmailDisposition.SUPPRESS_BEFORE_EMAIL_PERSISTENCE,
+                                confidence=0.8, reasons=reasons, score=result.score)
+
+
 _METADATA_HEADERS: List[str] = [
     "From", "To", "Date", "Subject",
     "Message-ID", "In-Reply-To", "References",
     "Content-Type", "Precedence", "List-Id",
     "List-Unsubscribe", "List-Post", "List-Help",
     "List-Archive", "Auto-Submitted",
+    # automated-vs-human signals (mail_authenticity)
+    "List-Unsubscribe-Post", "Feedback-ID", "X-Auto-Response-Suppress", "X-Mailer", "User-Agent",
+    "X-Google-Group-Id", "Mailing-list", "X-SES-Outgoing", "X-SG-EID", "X-Mailgun-Sid", "X-MC-User",
+    "X-Campaign", "X-HubSpot-Message-Id", "X-PM-Message-Id", "X-Mandrill-User", "X-Mailjet-Campaign",
 ]
 
 
@@ -775,6 +803,9 @@ class GmailSyncEngine:
                     headers=headers,
                     db=db,
                     tenant_id=account.tenant_id,
+                    is_existing_conversation=await self._is_existing_conversation(
+                        account, full_data.get("threadId", msg_id), db),
+                    own_domain=_own_domain(account),
                 )
                 if not classification.should_store:
                     stats.metadata_blocked += 1
@@ -841,6 +872,9 @@ class GmailSyncEngine:
                 headers=headers,
                 db=db,
                 tenant_id=account.tenant_id,
+                is_existing_conversation=await self._is_existing_conversation(
+                    account, meta.get("threadId", msg_id), db),
+                own_domain=_own_domain(account),
             )
 
             if not classification.should_store:
@@ -977,14 +1011,18 @@ class GmailSyncEngine:
             from_header = headers.get("from", "")
             subject_raw = parse_result.subject or headers.get("subject", "")
 
+            existing = await self._is_existing_conversation(account, external_thread_id, db)
+            own_domain = _own_domain(account)
+            msg_labels = list(msg_data.get("labelIds", []))
             # If metadata classification was not precomputed (e.g. direct call), run Stage 1
             if metadata_result is None:
-                label_ids = msg_data.get("labelIds", [])
                 metadata_result = await email_filter.classify_metadata(
-                    label_ids=label_ids,
+                    label_ids=msg_labels,
                     headers=headers,
                     db=db,
                     tenant_id=account.tenant_id,
+                    is_existing_conversation=existing,
+                    own_domain=own_domain,
                 )
 
             classification = email_filter.classify_body(
@@ -992,7 +1030,14 @@ class GmailSyncEngine:
                 subject=subject_raw,
                 from_header=from_header,
                 metadata_result=metadata_result,
+                headers=headers,
+                label_ids=msg_labels,
+                is_existing_conversation=existing,
+                own_domain=own_domain,
             )
+            if classification.category == EmailCategory.AMBIGUOUS:
+                classification = await _second_opinion(classification, from_header, subject_raw,
+                                                       parse_result.body_text)
 
         # Non-negotiable requirement: Block unwanted emails before thread upsert or message insert
         if not classification.should_store:
@@ -1185,6 +1230,24 @@ class GmailSyncEngine:
             sent_at=sent_at.isoformat(),
         )
         return True
+
+    async def _is_existing_conversation(self, account: Any, external_thread_id: str, db: AsyncSession) -> bool:
+        """True when this Gmail thread is already a conversation in which the business replied.
+        One indexed lookup; never raises (a failure just means "not known")."""
+        if not external_thread_id:
+            return False
+        try:
+            row = await db.execute(
+                select(EmailMessage.id)
+                .join(EmailThread, EmailThread.id == EmailMessage.thread_id)
+                .where(EmailThread.tenant_id == account.tenant_id,
+                       EmailThread.integration_account_id == account.id,
+                       EmailThread.external_thread_id == external_thread_id,
+                       EmailMessage.direction == MessageDirection.OUTBOUND.value)
+                .limit(1))
+            return row.first() is not None
+        except Exception:  # noqa: BLE001
+            return False
 
     async def _upsert_thread(
         self,

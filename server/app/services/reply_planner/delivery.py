@@ -172,6 +172,15 @@ class OutboundEmailDeliveryService:
             match = re.search(r"[\w\.-]+@[\w\.-]+", current_msg.from_email)
             recipient_email = match.group(0) if match else current_msg.from_email.strip()
 
+            # Last safety net: never auto-send to an address nobody reads (no-reply, mailer-daemon,
+            # bounce, system). Such mail should have been filtered before storage; if it got this far,
+            # the draft stays for a person to look at.
+            from app.services.mail_authenticity import is_no_reply_address
+            if is_no_reply_address(recipient_email):
+                logger.warning("Auto-send skipped: recipient is a no-reply / system address",
+                               thread_id=thread.id, message_id=current_msg.id)
+                return None
+
             # 5. Strict multi-layer idempotency guard
             # A. Redis in-flight lock to eliminate concurrency race
             redis_client = redis_manager.client
