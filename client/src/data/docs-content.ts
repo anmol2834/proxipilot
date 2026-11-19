@@ -44,7 +44,7 @@ export const DOCS_NAVIGATION = [
     group: "Maintenance & Diagnostics",
     items: [
       { title: "Troubleshooting & Health", slug: "troubleshooting", href: "/docs/troubleshooting" },
-      { title: "Customer Support Portal", slug: "support", href: "/support" },
+      { title: "Contact Support", slug: "support", href: "/contact" },
     ],
   },
 ];
@@ -71,7 +71,7 @@ export const DOCS_ARTICLES: Record<string, DocArticle> = {
       <section id="prerequisites">
         <h2>1. Prerequisites & Account Setup</h2>
         <p>Before connecting your mailbox to ProxiPilot, ensure you have an active workspace account. If you haven't created one, navigate to <a href="/signup">Sign Up</a> and register using your business email address.</p>
-        <div style="background: #EFF6FF; border-left: 3px solid #2563EB; padding: 12px 14px; border-radius: 6px; margin: 12px 0; font-size: 13.5px; color: #1E3A8A;">
+        <div class="callout" data-tone="tip">
           <strong>Tip:</strong> We recommend using a dedicated shared inbox account (such as <code>support@company.com</code> or <code>sales@company.com</code>) to evaluate team workflows before connecting individual executive accounts.
         </div>
       </section>
@@ -93,9 +93,9 @@ export const DOCS_ARTICLES: Record<string, DocArticle> = {
         <p>To ground AI replies in your company's actual products, return policies, and pricing:</p>
         <ol>
           <li>Go to <strong>Dashboard &rarr; Knowledge Base</strong>.</li>
-          <li>Click <strong>Upload Document</strong> or <strong>Add Snippet</strong>.</li>
-          <li>Upload your product FAQs, service agreements, or catalog PDF files.</li>
-          <li>ProxiPilot automatically parses, chunks, and creates vector embeddings stored securely in your private Qdrant collection.</li>
+          <li>Click <strong>Add Knowledge</strong> and choose a category, such as <strong>Products &amp; Services</strong> or <strong>Policies</strong>.</li>
+          <li>Upload a spreadsheet in CSV, XLS or XLSX format, for example your product catalog, price list or FAQ sheet.</li>
+          <li>Check the columns ProxiPilot detected in the preview, then click <strong>Import data</strong>. Each row becomes a knowledge entry, indexed for search in your private Qdrant collection.</li>
         </ol>
       </section>
 
@@ -142,7 +142,7 @@ export const DOCS_ARTICLES: Record<string, DocArticle> = {
           <li><code>https://www.googleapis.com/auth/gmail.modify</code>: Allows reading email subject lines and thread history, and saving AI-generated drafts in your Gmail drafts folder.</li>
           <li><code>https://www.googleapis.com/auth/gmail.send</code>: Allows sending emails when you explicitly click "Send" or when an approved automation rule triggers.</li>
         </ul>
-        <div style="background: #FEF2F2; border-left: 3px solid #DC2626; padding: 12px 14px; border-radius: 6px; margin: 12px 0; font-size: 13.5px; color: #991B1B;">
+        <div class="callout" data-tone="warning">
           <strong>Security Guarantee:</strong> We do NOT request access to Google Drive, Google Contacts, Google Calendar, or full account deletion permissions.
         </div>
       </section>
@@ -276,43 +276,48 @@ export const DOCS_ARTICLES: Record<string, DocArticle> = {
     slug: "business-knowledge",
     title: "Business Knowledge Base & RAG Indexing",
     category: "Intelligence & Workflow",
-    description: "How to upload documents, configure vector chunking, and ensure accurate evidence-gated responses without hallucinations.",
+    description: "How to import your catalogs, price lists and policies, organize them by category, and keep them current so every draft is grounded in accurate facts.",
     updatedAt: "June 2025",
     readTime: "5 min read",
     prevSlug: "ai-automation",
     nextSlug: "manage-drafts",
     relatedSlugs: ["ai-automation", "getting-started", "troubleshooting"],
     sections: [
-      { id: "supported-formats", title: "1. Supported File Formats" },
-      { id: "chunking-strategy", title: "2. Vector Chunking & Semantic Search" },
-      { id: "document-tags", title: "3. Organizing with Tags & Namespaces" },
-      { id: "updating-docs", title: "4. Updating & Deleting Documents" },
+      { id: "supported-formats", title: "1. Supported Formats" },
+      { id: "chunking-strategy", title: "2. From Spreadsheet to Searchable Knowledge" },
+      { id: "document-tags", title: "3. Organizing with Categories" },
+      { id: "updating-docs", title: "4. Updating & Rolling Back Knowledge" },
     ],
     content: `
       <section id="supported-formats">
-        <h2>1. Supported File Formats</h2>
-        <p>ProxiPilot's ingestion pipeline supports:</p>
+        <h2>1. Supported Formats</h2>
+        <p>ProxiPilot imports structured business knowledge from spreadsheets:</p>
         <ul>
-          <li>PDF documents (spec sheets, user manuals, policy agreements).</li>
-          <li>Plain text and Markdown (<code>.txt</code>, <code>.md</code>).</li>
-          <li>CSV product catalogues and SKU tables.</li>
-          <li>Direct text snippet input via the web dashboard.</li>
+          <li>CSV files (<code>.csv</code>), such as product catalogs, SKU tables and price lists.</li>
+          <li>Excel workbooks (<code>.xls</code>, <code>.xlsx</code>), such as rate cards, stock and lead-time sheets, and FAQ lists.</li>
         </ul>
+        <p>Each import goes into one category, so keep one topic per file. Once imported, individual entries can be edited from the Knowledge Base.</p>
+        <div class="callout" data-tone="tip">
+          <strong>Have a PDF or Word document?</strong> Copy the facts your team answers most often, such as specs, prices and policy terms, into a spreadsheet with one row per fact, then import it.
+        </div>
       </section>
 
       <section id="chunking-strategy">
-        <h2>2. Vector Chunking & Semantic Search</h2>
-        <p>When you upload a document, ProxiPilot segments the text into 500-token semantic chunks with 10% overlap to preserve contextual continuity. Chunks are converted into high-dimensional vector embeddings and indexed in your isolated Qdrant vector collection.</p>
+        <h2>2. From Spreadsheet to Searchable Knowledge</h2>
+        <p>When you upload a file, ProxiPilot detects its columns and maps them to the fields of the category you chose. You review the mapping in a preview before clicking <strong>Import data</strong>.</p>
+        <p>Each row becomes a knowledge entry. Entries are converted into vector embeddings and indexed in your workspace's isolated Qdrant collection, so ProxiPilot can find the right fact by meaning, not just by exact keywords.</p>
       </section>
 
       <section id="document-tags">
-        <h2>3. Organizing with Tags & Namespaces</h2>
-        <p>Tag documents by department (e.g., <code>sales-pricing</code>, <code>technical-support</code>, <code>warranty-policy</code>). Automation rules can restrict their retrieval scope to specific tags, preventing internal pricing sheets from surfacing in technical support drafts.</p>
+        <h2>3. Organizing with Categories</h2>
+        <p>Knowledge is organized into nine categories: Company Info, Products &amp; Services, Contacts, Policies, Support &amp; FAQs, Offers &amp; Promotions, Operations, Locations, and Brand &amp; Communication.</p>
+        <p>Putting each fact in the right category, for example prices in Products &amp; Services and return terms in Policies, helps ProxiPilot retrieve the most relevant evidence for every draft.</p>
       </section>
 
       <section id="updating-docs">
-        <h2>4. Updating & Deleting Documents</h2>
-        <p>When company policies change, simply upload the new document version and delete the outdated file. Qdrant immediately prunes old vectors, ensuring all future drafts reflect current policy.</p>
+        <h2>4. Updating & Rolling Back Knowledge</h2>
+        <p>When prices or policies change, edit the affected entries or import an updated spreadsheet, then publish the new version. Drafts created after you publish use the updated facts.</p>
+        <p>Every entry keeps a version history, so you can compare versions and roll back if a change was made by mistake. Delete entries that no longer apply so they stop being used as evidence.</p>
       </section>
     `,
   },

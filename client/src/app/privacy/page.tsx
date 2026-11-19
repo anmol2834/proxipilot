@@ -98,7 +98,7 @@ export default function PrivacyPage() {
           <strong>Strict Non-Training Policy:</strong> Under our enterprise commercial API agreements with OpenAI and Anthropic, your prompts, corporate emails, and generated drafts are <strong>never used to train foundation models</strong>. Data is processed solely for inference and is subject to provider zero-retention policies.
         </p>
         <p style={{ fontSize: 14, color: "#334155", margin: "0 0 10px", lineHeight: 1.62 }}>
-          For further architectural details, consult our dedicated <Link href="/ai-transparency" style={{ color: "#2563EB", fontWeight: 600 }}>AI Transparency &amp; Data Use Policy</Link>.
+          For further architectural details, consult our <Link href="/security" style={{ color: "#2563EB", fontWeight: 600 }}>Security Center</Link>.
         </p>
       </section>
 

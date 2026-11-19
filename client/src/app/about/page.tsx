@@ -9,8 +9,7 @@ import {
   IconPlayerPlayFilled,
   IconCircleCheckFilled,
   IconCheck,
-  IconFileTypePdf,
-  IconFileTypeDocx,
+  IconFileTypeCsv,
   IconFileSpreadsheet,
   IconPencil,
   IconFocus2,
@@ -231,12 +230,12 @@ function Approach() {
             <div className={s.miniUi} aria-hidden="true">
               <div className={s.miniTitle}>Knowledge Base</div>
               <div className={s.miniRow}>
-                <IconFileTypePdf size={15} color="#E5252A" />
-                <span className={s.grow}>Product Specs.pdf</span>
+                <IconFileSpreadsheet size={15} color="#1E8E3E" />
+                <span className={s.grow}>Product Catalog.xlsx</span>
               </div>
               <div className={s.miniRow}>
-                <IconFileTypeDocx size={15} color="#185ABD" />
-                <span className={s.grow}>Return Policy.docx</span>
+                <IconFileTypeCsv size={15} color="#2F4FE8" />
+                <span className={s.grow}>Return Policies.csv</span>
               </div>
               <div className={s.miniRow}>
                 <IconFileSpreadsheet size={15} color="#1E8E3E" />
@@ -453,7 +452,7 @@ function Trust() {
             <h3 className={s.trustTitleSm}>Operated by Cheldain</h3>
             <p className={s.trustText}>
               ProxiPilot is engineered and operated globally by <strong>Cheldain</strong>, an enterprise software
-              organization incorporated in India, serving customers worldwide under Delaware USA commercial terms.
+              organization incorporated in India, serving customers worldwide.
             </p>
             <p className={s.trustNote}>
               Global payments and tax remittances handled by authorized Merchant of Record partners (Paddle &amp; Lemon
@@ -508,8 +507,8 @@ function Cta() {
           <Link href="/signup" className={s.btnWhite}>
             Start Free Trial <IconArrowRight size={16} stroke={2.2} />
           </Link>
-          <Link href="/request-demo" className={s.btnOutlineLight}>
-            Request Product Demo
+          <Link href="/contact" className={s.btnOutlineLight}>
+            Talk to Sales
           </Link>
         </div>
       </div>

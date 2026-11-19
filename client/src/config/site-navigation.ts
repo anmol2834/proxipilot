@@ -142,16 +142,6 @@ export const MAIN_NAVIGATION: {
         href: "/security",
         description: "Enterprise encryption, multi-tenant isolation, and zero model training.",
       },
-      {
-        title: "Partners",
-        href: "/partners",
-        description: "Collaborate with ProxiPilot as a technology, agency, or reseller partner.",
-      },
-      {
-        title: "Careers",
-        href: "/careers",
-        description: "Join our distributed engineering, AI research, and growth teams.",
-      },
     ],
   },
 };

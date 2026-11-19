@@ -49,7 +49,7 @@ export default function SmallBusinessSolutionPage() {
         {
           step: "01",
           title: "Upload Your Services & Rates",
-          desc: "Drop your PDF price list, FAQ document, or service brochure into the ProxiPilot knowledge base.",
+          desc: "Import your price list, FAQs, and service details into the ProxiPilot knowledge base from a CSV or Excel spreadsheet.",
         },
         {
           step: "02",

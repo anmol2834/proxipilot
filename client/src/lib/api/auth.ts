@@ -121,7 +121,54 @@ export interface ActivationStatusData {
   knowledge_items_count: number;
 }
 
+export interface ForgotPasswordResponse {
+  challenge_id: string;
+  email: string;
+  cooldown_seconds: number;
+  expires_in_seconds: number;
+  status: string;
+}
+
+export interface ResetPasswordVerifyResponse {
+  reset_token: string;
+  expires_in_seconds: number;
+}
+
+export interface ResetPasswordResponse {
+  email: string;
+  status: string;
+}
+
 export const authApi = {
+  /**
+   * Start a password reset. The response is the same whether or not the account exists;
+   * call again after the cooldown to resend a code.
+   */
+  async requestPasswordReset(email: string): Promise<ForgotPasswordResponse> {
+    const res = await apiClient.post<ForgotPasswordResponse>("/auth/forgot-password", { email });
+    return res.data;
+  },
+
+  /**
+   * Exchange the 6-digit reset code for a short-lived reset token.
+   */
+  async verifyPasswordReset(data: {
+    email: string;
+    challenge_id: string;
+    otp: string;
+  }): Promise<ResetPasswordVerifyResponse> {
+    const res = await apiClient.post<ResetPasswordVerifyResponse>("/auth/reset-password/verify", data);
+    return res.data;
+  },
+
+  /**
+   * Set the new password. Every existing session for the account is signed out.
+   */
+  async resetPassword(data: { reset_token: string; new_password: string }): Promise<ResetPasswordResponse> {
+    const res = await apiClient.post<ResetPasswordResponse>("/auth/reset-password", data);
+    return res.data;
+  },
+
   /**
    * Fetch authoritative workspace activation status (mailboxes & knowledge items).
    */

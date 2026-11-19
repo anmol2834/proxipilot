@@ -17,7 +17,7 @@ ProxiPilot consists of a distributed backend and a real-time Next.js frontend:
 - Thread coalescing, header normalization, and MIME payload parsing.
 
 ### B. Enterprise Knowledge Ingestion & Vector RAG
-- Flexible multi-category document parser supporting Excel (.xlsx, .xls), CSV, PDF, and text.
+- Flexible multi-category spreadsheet importer supporting Excel (.xlsx, .xls) and CSV, with column detection and import preview.
 - Automatic column mapping using semantic heuristics and schema profiling.
 - Qdrant Vector Storage with hybrid reciprocal rank fusion (RRF) combining dense semantic embeddings and sparse lexical tokens.
 - Versioned knowledge sources with audit trails and lineage tracking.

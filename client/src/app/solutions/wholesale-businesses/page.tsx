@@ -49,7 +49,7 @@ export default function WholesaleBusinessesSolutionPage() {
         {
           step: "01",
           title: "Upload SKU Catalogs & Price Lists",
-          desc: "Index your master inventory spreadsheets, product specification PDFs, and MOQ tiers into ProxiPilot vector memory.",
+          desc: "Import your master inventory spreadsheets, product specifications, and MOQ tiers (CSV or Excel) into ProxiPilot vector memory.",
         },
         {
           step: "02",

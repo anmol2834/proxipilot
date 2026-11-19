@@ -1428,7 +1428,7 @@ export function HowItWorksClientView() {
             </Link>
 
             <Link
-              href="/request-demo"
+              href="/contact"
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -1445,7 +1445,7 @@ export function HowItWorksClientView() {
                 transition: "all 140ms ease",
               }}
             >
-              <span>Request Product Demo</span>
+              <span>Talk to Sales</span>
             </Link>
           </div>
         </div>

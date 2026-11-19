@@ -6,7 +6,7 @@ ProxiPilot connects to enterprise email providers (Gmail, Microsoft Outlook) and
 
 ## Core Capabilities
 - **Email Synchronization**: Bidirectional real-time OAuth sync for Gmail and Microsoft Outlook with incremental cursor polling and webhook fallbacks.
-- **Enterprise Knowledge RAG**: Multi-category document ingestion (Excel, PDF, CSV) indexed in Qdrant vector database with hybrid semantic + BM25 lexical ranking.
+- **Enterprise Knowledge RAG**: Multi-category spreadsheet ingestion (Excel .xlsx/.xls and CSV) indexed in Qdrant vector database with hybrid semantic + BM25 lexical ranking.
 - **Evidence-Gated Reply Planner**: Proprietary planner that inspects retrieved facts, matches conversation intents, and strictly rejects speculative answers.
 - **Transactional Outbox & Memory**: Outbox relay pattern for idempotent email dispatch, combined with persistent multi-turn thread memory and client style profile calibration.
 - **Multi-Tenant Security**: Cryptographic tenant isolation, role-based access control (RBAC), and SOC 2 ready compliance.

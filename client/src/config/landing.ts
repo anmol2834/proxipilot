@@ -488,8 +488,6 @@ export const landingConfig: LandingConfig = {
           { label: "Integrations", href: "/integrations" },
           { label: "Pricing", href: "/#pricing" },
           { label: "Security & Trust", href: "/security" },
-          { label: "AI Transparency", href: "/ai-transparency" },
-          { label: "Service Level Agreement", href: "/sla" },
         ],
       },
       {
@@ -520,11 +518,9 @@ export const landingConfig: LandingConfig = {
         title: "Trust & Compliance",
         links: [
           { label: "Security & Trust Center", href: "/security" },
-          { label: "AI Transparency & Data Use", href: "/ai-transparency" },
           { label: "Data Processing Agreement (DPA)", href: "/dpa" },
           { label: "Subprocessors Directory", href: "/subprocessors" },
           { label: "Data Retention & Deletion", href: "/data-retention" },
-          { label: "Service Level Agreement (SLA)", href: "/sla" },
           { label: "Third-Party Integration Terms", href: "/integrations" },
           { label: "Law Enforcement Requests", href: "/law-enforcement-requests" },
           { label: "Privacy Request Portal", href: "/privacy-request" },

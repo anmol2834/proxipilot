@@ -50,7 +50,7 @@ export default function CustomerSupportSolutionPage() {
         {
           step: "01",
           title: "Connect Knowledge Sources",
-          desc: "Index your product help articles, troubleshooting PDFs, return policies, and standard operating procedures (SOPs).",
+          desc: "Import your help answers, troubleshooting steps, return policies, and standard operating procedures (SOPs) from CSV or Excel.",
         },
         {
           step: "02",

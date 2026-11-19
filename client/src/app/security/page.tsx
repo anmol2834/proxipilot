@@ -350,7 +350,6 @@ export default function SecurityTrustCenterPage() {
               {[
                 { title: "Data Processing Agreement (DPA)", href: "/dpa", desc: "Standard Contractual Clauses & GDPR compliance" },
                 { title: "Subprocessors List", href: "/subprocessors", desc: "List of authorized cloud hosting & vector providers" },
-                { title: "AI Transparency Policy", href: "/ai-transparency", desc: "Zero model training and inference boundary terms" },
                 { title: "Data Retention & Deletion", href: "/data-retention", desc: "Cryptographic erasure upon account closure" },
                 { title: "Third-Party Integrations", href: "/integrations", desc: "Authorized Google & Microsoft API terms" },
                 { title: "Privacy Request Portal", href: "/privacy-request", desc: "Self-service GDPR data export and erasure" },

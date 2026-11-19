@@ -136,7 +136,7 @@ export function SolutionPageShell({
             {/* CTAs */}
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 36 }}>
               <Link
-                href="/request-demo"
+                href="/contact"
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
@@ -151,7 +151,7 @@ export function SolutionPageShell({
                   boxShadow: "0 2px 4px rgba(37, 99, 235, 0.2)",
                 }}
               >
-                Schedule 15-Min Walkthrough <IconArrowRight size={16} />
+                Talk to Sales <IconArrowRight size={16} />
               </Link>
               <Link
                 href="/pricing"
@@ -615,7 +615,7 @@ export function SolutionPageShell({
             </p>
             <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
               <Link
-                href="/request-demo"
+                href="/contact"
                 style={{
                   padding: "11px 24px",
                   borderRadius: 8,

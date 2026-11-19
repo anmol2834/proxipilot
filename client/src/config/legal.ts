@@ -46,7 +46,7 @@ export const LEGAL_METADATA: Record<string, LegalPolicyMeta> = {
     lastUpdated: "June 1, 2025",
     pdfUrl: "/ProxiPilot_Privacy_Policy.pdf",
     docxUrl: "/ProxiPilot_Privacy_Policy.docx",
-    relatedSlugs: ["cookies", "subprocessors", "ai-transparency", "data-retention"],
+    relatedSlugs: ["cookies", "subprocessors", "data-retention"],
   },
   cookies: {
     slug: "cookies",
@@ -68,7 +68,7 @@ export const LEGAL_METADATA: Record<string, LegalPolicyMeta> = {
       "Defines prohibited conduct, anti-spam rules, AI usage limits, and platform security standards for all users.",
     effectiveDate: "June 1, 2025",
     lastUpdated: "November 14, 2026",
-    relatedSlugs: ["terms", "email-sending-policy", "ai-transparency"],
+    relatedSlugs: ["terms", "email-sending-policy"],
   },
   "email-sending-policy": {
     slug: "email-sending-policy",
@@ -90,7 +90,7 @@ export const LEGAL_METADATA: Record<string, LegalPolicyMeta> = {
       "Details billing cycles, Merchant of Record terms (Paddle / Lemon Squeezy), subscription cancellations, and billing disputes.",
     effectiveDate: "June 1, 2025",
     lastUpdated: "November 14, 2026",
-    relatedSlugs: ["terms", "sla"],
+    relatedSlugs: ["terms"],
   },
   "grievance-redressal": {
     slug: "grievance-redressal",
@@ -123,18 +123,7 @@ export const LEGAL_METADATA: Record<string, LegalPolicyMeta> = {
       "Transparent schedule of third-party cloud infrastructure, AI models, and service providers used by ProxiPilot.",
     effectiveDate: "June 1, 2025",
     lastUpdated: "November 17, 2026",
-    relatedSlugs: ["dpa", "privacy", "security", "ai-transparency"],
-  },
-  "ai-transparency": {
-    slug: "ai-transparency",
-    title: "AI Transparency & Data Use Policy",
-    shortTitle: "AI Transparency",
-    category: "trust",
-    summary:
-      "How ProxiPilot utilizes LLMs, RAG vector retrieval, human-in-the-loop safeguards, and strict zero-training data commitments.",
-    effectiveDate: "June 1, 2025",
-    lastUpdated: "November 17, 2026",
-    relatedSlugs: ["privacy", "acceptable-use", "subprocessors", "security"],
+    relatedSlugs: ["dpa", "privacy", "security"],
   },
   security: {
     slug: "security",
@@ -157,17 +146,6 @@ export const LEGAL_METADATA: Record<string, LegalPolicyMeta> = {
     effectiveDate: "June 1, 2025",
     lastUpdated: "November 17, 2026",
     relatedSlugs: ["privacy", "dpa", "privacy-request"],
-  },
-  sla: {
-    slug: "sla",
-    title: "Service Level Agreement & Support",
-    shortTitle: "Service Level Agreement",
-    category: "trust",
-    summary:
-      "Platform availability targets (99.9% uptime target), maintenance windows, support response tiers, and outage exclusions.",
-    effectiveDate: "June 1, 2025",
-    lastUpdated: "November 17, 2026",
-    relatedSlugs: ["terms", "refund", "security"],
   },
   "intellectual-property": {
     slug: "intellectual-property",
@@ -317,10 +295,8 @@ export const LEGAL_NAV_GROUPS = [
     links: [
       { slug: "dpa", label: "Data Processing Agreement", href: "/dpa" },
       { slug: "subprocessors", label: "Subprocessors List", href: "/subprocessors" },
-      { slug: "ai-transparency", label: "AI Transparency & Data Use", href: "/ai-transparency" },
       { slug: "security", label: "Security & Trust Center", href: "/security" },
       { slug: "data-retention", label: "Data Retention & Deletion", href: "/data-retention" },
-      { slug: "sla", label: "Service Level Agreement", href: "/sla" },
       { slug: "intellectual-property", label: "Intellectual Property Policy", href: "/intellectual-property" },
       { slug: "integrations", label: "Third-Party Integration Terms", href: "/integrations" },
       { slug: "law-enforcement-requests", label: "Government & Law Enforcement", href: "/law-enforcement-requests" },

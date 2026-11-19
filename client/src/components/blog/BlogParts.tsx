@@ -237,8 +237,8 @@ export function BlogCta() {
           <Link href="/signup" className={b.btnWhite}>
             Start Free Trial <IconArrowRight size={16} stroke={2.2} />
           </Link>
-          <Link href="/request-demo" className={b.btnOutline}>
-            Request a Demo
+          <Link href="/contact" className={b.btnOutline}>
+            Talk to Sales
           </Link>
         </div>
       </div>

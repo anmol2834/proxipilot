@@ -23,7 +23,6 @@ export default function B2BBusinessesSolutionPage() {
         { value: "4x", label: "Faster response to RFPs & procurement" },
         { value: "0", label: "Commercial term discrepancies" },
         { value: "100%", label: "Compliance with corporate governance" },
-        { value: "Delaware", label: "Governing law standard compliance" },
       ]}
       painPointsTitle="Commercial hazards in enterprise email communication"
       painPoints={[
@@ -99,11 +98,6 @@ export default function B2BBusinessesSolutionPage() {
           question: "Can ProxiPilot ensure our reps never quote unapproved discounts?",
           answer:
             "Yes. ProxiPilot’s evidence-gated drafting strictly limits pricing to your indexed price lists, refusing to fabricate discounts without explicit manager instructions.",
-        },
-        {
-          question: "How does ProxiPilot handle NDAs and confidential commercial data?",
-          answer:
-            "ProxiPilot is governed under Delaware corporate law with complete tenant-isolated encryption. Data is never shared or used to train external models.",
         },
         {
           question: "Can our legal or operations team review drafted responses before sending?",

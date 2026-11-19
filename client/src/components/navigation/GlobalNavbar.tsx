@@ -439,22 +439,6 @@ export function GlobalNavbar() {
         {/* Right CTA Actions */}
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <Link
-            href="/contact"
-            style={{
-              fontSize: 13.5,
-              fontWeight: 500,
-              color: "#475569",
-              textDecoration: "none",
-              padding: "6px 10px",
-              borderRadius: 6,
-              transition: "color 140ms ease",
-            }}
-            className="hidden-mobile"
-          >
-            Contact
-          </Link>
-
-          <Link
             href="/signin"
             style={{
               fontSize: 13.5,
@@ -471,7 +455,7 @@ export function GlobalNavbar() {
           </Link>
 
           <Link
-            href="/request-demo"
+            href="/contact"
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -488,7 +472,7 @@ export function GlobalNavbar() {
             }}
             className="hidden-mobile"
           >
-            Request Demo
+            Contact
           </Link>
 
           <Link
@@ -743,7 +727,7 @@ export function GlobalNavbar() {
           {/* Quick Actions at Bottom of Mobile Drawer */}
           <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: "auto", paddingTop: 20 }}>
             <Link
-              href="/request-demo"
+              href="/contact"
               style={{
                 textAlign: "center",
                 padding: "10px",
@@ -755,7 +739,7 @@ export function GlobalNavbar() {
                 textDecoration: "none",
               }}
             >
-              Request a Product Demo
+              Contact
             </Link>
             <Link
               href="/signup"

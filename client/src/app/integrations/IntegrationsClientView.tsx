@@ -702,7 +702,7 @@ export function IntegrationsClientView() {
             </div>
 
             <p style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", margin: "0 0 18px", lineHeight: 1.45 }}>
-              Find source passages in your company&apos;s PDFs, CSV catalogs and FAQs.
+              Find the matching facts in your company&apos;s catalogs, price lists and FAQs.
             </p>
 
             {/* Checkmarks */}
@@ -1091,7 +1091,7 @@ export function IntegrationsClientView() {
             </Link>
 
             <Link
-              href="/demo"
+              href="/contact"
               style={{
                 fontSize: 14.5,
                 fontWeight: 700,
@@ -1102,7 +1102,7 @@ export function IntegrationsClientView() {
                 transition: "all 140ms ease",
               }}
             >
-              Request Demo
+              Talk to Sales
             </Link>
           </div>
         </div>

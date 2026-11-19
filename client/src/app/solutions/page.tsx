@@ -251,7 +251,7 @@ export default function SolutionsOverviewPage() {
             </p>
             <div style={{ display: "flex", justifyContent: "center", gap: 12 }}>
               <Link
-                href="/request-demo"
+                href="/contact"
                 style={{
                   padding: "9px 18px",
                   fontSize: 13.5,

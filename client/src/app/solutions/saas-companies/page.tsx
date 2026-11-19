@@ -18,7 +18,7 @@ export default function SaaSCompaniesSolutionPage() {
     <SolutionPageShell
       badge="SaaS Companies"
       title="Turn technical product and billing inquiries into precise, developer-grade replies."
-      subtitle="Free engineers from customer inbox interruptions. ProxiPilot indexes your API documentation, release notes, security compliance PDFs, and tier limits to draft technically flawless email replies."
+      subtitle="Free engineers from customer inbox interruptions. ProxiPilot grounds every reply in the facts you import, such as API limits, release notes, compliance answers, and plan tiers, to draft technically precise email replies."
       highlightStats={[
         { value: "85%", label: "First-contact resolution rate" },
         { value: "4 hrs", label: "Dev time saved per engineer weekly" },

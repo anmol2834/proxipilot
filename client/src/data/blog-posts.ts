@@ -216,7 +216,7 @@ export const BLOG_POSTS: BlogPost[] = [
       <p>Wholesale businesses often manage catalogues containing 5,000 to 50,000 SKUs. A typical commercial inquiry asks: <em>"Can you provide pricing for 200 units of DSDR0099, and does it include wall-mounting brackets?"</em> Sales reps must cross-reference ERP databases, technical spec sheets, and price books before typing each reply.</p>
 
       <h2>SKU Matching & Knowledge Synthesis</h2>
-      <p>With ProxiPilot, distributors upload product catalogues (PDFs, CSVs, or markdown tables). When an inquiry arrives:</p>
+      <p>With ProxiPilot, distributors import product catalogues as CSV or Excel spreadsheets. When an inquiry arrives:</p>
       <ul>
         <li>The AI identifies the exact SKU pattern (e.g. <code>DSDR0099</code>).</li>
         <li>It queries the vector index and pulls packaging specifications, unit weight, bulk tier discounts, and accessory inclusions.</li>

@@ -22,8 +22,7 @@ export default function OperationsTeamsSolutionPage() {
       highlightStats={[
         { value: "80%", label: "Faster operational inbox triage" },
         { value: "0", label: "Missed delivery or dock appointments" },
-        { value: "100%", label: "Adherence to company SOPs" },
-        { value: "Delaware", label: "Corporate compliance assurance" },
+        { value: "100%", label: "Adherence to company SOPs" }
       ]}
       painPointsTitle="Operational friction in multi-department email chains"
       painPoints={[

@@ -86,7 +86,7 @@ const PLANS: PlanItem[] = [
     subtitle: "For large organizations",
     description: "Custom setup, dedicated support, and flexible deployment.",
     price: "Let's talk",
-    buttonText: "Contact sales →",
+    buttonText: "Contact →",
     buttonHref: "/contact",
     iconBg: "#F1F5F9",
     iconColor: "#475569",

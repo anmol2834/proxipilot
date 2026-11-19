@@ -22,6 +22,19 @@ export function SigninAuthForm() {
   const googleOAuthUrl = `${env.NEXT_PUBLIC_API_URL}/auth/google`;
   const microsoftOAuthUrl = `${env.NEXT_PUBLIC_API_URL}/auth/microsoft`;
 
+  // Prefill the email carried over from the password-reset flow (same tab only).
+  useEffect(() => {
+    try {
+      const saved = window.sessionStorage.getItem("pp:authEmail");
+      if (saved) {
+        setEmail((cur) => cur || saved);
+        window.sessionStorage.removeItem("pp:authEmail");
+      }
+    } catch {
+      /* storage unavailable */
+    }
+  }, []);
+
   useEffect(() => {
     const errorParam = searchParams.get("error");
     if (errorParam) {
@@ -187,7 +200,17 @@ export function SigninAuthForm() {
               <label htmlFor="signin-password" className="pp-form-label">
                 Password
               </label>
-              <Link href="/forgot-password" className="pp-form-link">
+              <Link
+                href="/forgot-password"
+                className="pp-form-link"
+                onClick={() => {
+                  try {
+                    if (email.trim()) window.sessionStorage.setItem("pp:authEmail", email.trim());
+                  } catch {
+                    /* storage unavailable */
+                  }
+                }}
+              >
                 Forgot password?
               </Link>
             </div>
