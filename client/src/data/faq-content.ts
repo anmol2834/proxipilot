@@ -135,7 +135,7 @@ export const FAQ_TOPICS: FaqTopic[] = [
         q: "What business information can I add to ProxiPilot?",
         a: [
           "Anything your team looks up when answering customers: product details and specifications, price lists, SKU tables, stock and lead-time information, return and warranty policies, and standard answers.",
-          "Import it from spreadsheets in CSV, XLS or XLSX format into one of nine categories, such as Products & Services or Policies. ProxiPilot detects the columns in your file and shows a preview before import, and you can edit individual entries afterwards.",
+          "Import it from spreadsheets in CSV, XLS or XLSX format into one of six categories, such as Products & Services, Policies or Processes & Timelines. ProxiPilot detects the columns in your file and shows a preview before import, and you can edit individual entries afterwards.",
         ],
       },
       {

@@ -26,6 +26,27 @@ from app.core.logging import logger
 from app.services.context_resolver import ContextEnvelope, UnresolvedRequirement
 
 
+# "What happens next and how long does it take" questions. Generic wording only (no business
+# vocabulary): turnaround, lead time, confirmation/dispatch/delivery/processing times, next steps.
+_PROCESS_TIMELINE_RE = re.compile(
+    r"\bhow\s+(?:long|soon)\b|\bhow\s+many\s+(?:working\s+|business\s+)?(?:days|hours|weeks)\b|\bby\s+when\b"
+    r"|\bwhen\s+(?:will|would|can|could)\s+(?:i|we|you|it|they)\s+(?:get|receive|expect|ship|dispatch|deliver|confirm|process|refund)\b"
+    r"|\blead[\s-]?times?\b|\bturn[\s-]?around\b|\btat\b|\beta\b"
+    r"|\b(?:processing|confirmation|dispatch|delivery|shipping|transit|approval|response|refund)\s+(?:time|timeline|period|days)\b"
+    r"|\b(?:order|po|purchase\s+order)\s+confirmation\b|\bafter\s+(?:the\s+|our\s+|my\s+|we\s+(?:send|place|share)\s+(?:the\s+)?)?(?:po|purchase\s+order|payment|order|approval)\b"
+    r"|\bestimated\s+delivery\b|\btimelines?\b|\bwhat\s+happens\s+(?:next|after)\b|\bnext\s+steps?\b"
+    r"|\b(?:refund|return|replacement|exchange|onboarding|installation|approval|payment|ordering|order)\s+process\b"
+    r"|\bkitne\s+din\b|\bkab\s+tak\b",
+    re.IGNORECASE,
+)
+
+
+_CONTACT_WORDS_RE = re.compile(
+    r"\b(?:contact|phone|mobile|call|email|e-mail|address|located|location|office|hours|timings|reach)\b",
+    re.IGNORECASE,
+)
+
+
 class RequirementGroupDefinition:
     """Internal blueprint for an isolated requirement group."""
 
@@ -91,18 +112,27 @@ class RequirementGrouper:
                 if cat == "policies" or "policy" in intent_val or "warranty" in intent_val:
                     req_type = RequirementType.POLICY_QUERY
                     candidate_roles = {CandidateRole.POLICY_DOCUMENT}
-                elif cat == "contacts" or "contact" in intent_val:
+                elif cat == "processes_timelines":
+                    # "What happens next / how long does it take" is answered from the business's
+                    # own stated process - never treated as a booking that needs a live calendar.
+                    req_type = RequirementType.GENERAL_INQUIRY
+                    candidate_roles = {CandidateRole.PROCESS_TIMELINE}
+                elif "contact" in intent_val or (
+                    cat == "company_info"
+                    and _CONTACT_WORDS_RE.search(f"{req.description or ''} {req.query_text or ''}")
+                ):
+                    # The company's contact details (phone, email, address, hours) live in Company Info.
                     req_type = RequirementType.CONTACT_RESOLUTION
-                    candidate_roles = {CandidateRole.CONTACT_CARD}
+                    candidate_roles = {CandidateRole.CONTACT_CARD, CandidateRole.GENERAL_KNOWLEDGE}
                 elif cat == "support_faqs" or "support" in intent_val or "troubleshoot" in intent_val:
                     req_type = RequirementType.SUPPORT_TROUBLESHOOTING
                     candidate_roles = {CandidateRole.TROUBLESHOOTING_GUIDE}
-                elif cat in ("operations", "locations") or "delivery" in intent_val or "order" in intent_val:
+                elif "delivery" in intent_val or "order" in intent_val:
                     req_type = RequirementType.OPERATIONAL_SCHEDULING
                     candidate_roles = {CandidateRole.OPERATIONAL_AVAILABILITY, CandidateRole.GENERAL_KNOWLEDGE}
                     is_op = True
                     op_type = "operations_or_delivery"
-                elif cat in ("company_info", "brand_communication"):
+                elif cat == "company_info":
                     req_type = RequirementType.GENERAL_INQUIRY
                     candidate_roles = {CandidateRole.GENERAL_KNOWLEDGE}
                 elif "comparison" in intent_val:
@@ -303,8 +333,31 @@ class RequirementGrouper:
                     requested_targets=["billing", "escalation"],
                     requested_count=1,
                     required_attributes=["contact_email", "contact_phone"],
-                    applicable_candidate_roles={CandidateRole.CONTACT_CARD},
-                    target_category="contacts",
+                    # The company's contact details live in Company Info.
+                    applicable_candidate_roles={CandidateRole.CONTACT_CARD, CandidateRole.GENERAL_KNOWLEDGE},
+                    target_category="company_info",
+                )
+            )
+
+        # ---------------------------------------------------------------------
+        # 5b. Processes & Timelines Requirement ("after the PO, how long until confirmation?")
+        # ---------------------------------------------------------------------
+        has_process = (
+            any((r.category or "") == "processes_timelines" for r in (plan.requirements or []))
+            or bool(_PROCESS_TIMELINE_RE.search(text_lower))
+        )
+        if has_process:
+            groups.append(
+                RequirementGroupDefinition(
+                    requirement_id=f"req_process_{plan.plan_id[-6:]}",
+                    requirement_type=RequirementType.GENERAL_INQUIRY,
+                    intent="process_timeline",
+                    description="How the process works and how long it takes, as the business states it",
+                    requested_targets=[],
+                    requested_count=2,
+                    required_attributes=[],
+                    applicable_candidate_roles={CandidateRole.PROCESS_TIMELINE},
+                    target_category="processes_timelines",
                 )
             )
 

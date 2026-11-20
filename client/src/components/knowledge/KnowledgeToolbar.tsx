@@ -15,16 +15,12 @@ import { useKnowledgeStore } from "@/stores/knowledge.store";
 import { KnowledgeCategory, KnowledgeStatus, KnowledgeSortOption } from "@/types/knowledge.types";
 
 const CATEGORY_NAMES: Record<KnowledgeCategory, string> = {
-  all: "All knowledge",
-  "company-info": "Company Info",
   "products-services": "Products & Services",
-  contacts: "Contacts",
+  "company-info": "Company Info",
   policies: "Policies",
   "support-faqs": "Support & FAQs",
   "offers-promotions": "Offers & Promotions",
-  operations: "Operations",
-  locations: "Locations",
-  "brand-communication": "Brand & Communication",
+  "processes-timelines": "Processes & Timelines",
 };
 
 export function KnowledgeToolbar() {
@@ -62,7 +58,7 @@ export function KnowledgeToolbar() {
 
   const filteredCount = totalCount;
 
-  const currentCategoryTitle = CATEGORY_NAMES[selectedCategory] || "All knowledge";
+  const currentCategoryTitle = CATEGORY_NAMES[selectedCategory] ?? "Products & Services";
 
   return (
     <Box
@@ -379,15 +375,6 @@ export function KnowledgeToolbar() {
           <MenuItem
             onClick={() => {
               setAddMenuAnchorEl(null);
-              openAddDialog("contacts");
-            }}
-            sx={{ fontSize: "0.82rem", py: 0.85 }}
-          >
-            Add contact details
-          </MenuItem>
-          <MenuItem
-            onClick={() => {
-              setAddMenuAnchorEl(null);
               openAddDialog("policies");
             }}
             sx={{ fontSize: "0.82rem", py: 0.85 }}
@@ -415,20 +402,11 @@ export function KnowledgeToolbar() {
           <MenuItem
             onClick={() => {
               setAddMenuAnchorEl(null);
-              openAddDialog("operations");
+              openAddDialog("processes-timelines");
             }}
             sx={{ fontSize: "0.82rem", py: 0.85 }}
           >
-            Add operational process
-          </MenuItem>
-          <MenuItem
-            onClick={() => {
-              setAddMenuAnchorEl(null);
-              openAddDialog("locations");
-            }}
-            sx={{ fontSize: "0.82rem", py: 0.85 }}
-          >
-            Add service location
+            Add process or timeline
           </MenuItem>
           <MenuItem
             onClick={() => {

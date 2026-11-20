@@ -15,15 +15,12 @@ Categorical classification defining the business context and organizational role
 
 | Value | UI Label | Purpose & Semantic Scope |
 | :--- | :--- | :--- |
-| `company_info` | Company Info | Identity, mission, overview, founded year, registration facts. |
+| `company_info` | Company Info | Identity, overview, founded year, registration facts, and contact details (email, phone, address, business hours). |
 | `products_services` | Products & Services | Products, services, SKUs, specifications, availability, and **all pricing**. |
-| `contacts` | Contacts | Official communication channels, team emails, emergency numbers. |
 | `policies` | Policies | Terms of service, refund rules, SLA commitments, compliance standards. |
 | `support_faqs` | Support & FAQs | Frequently asked questions, customer problem resolution guides. |
 | `offers_promotions` | Offers & Promotions | Active discounts, promotional campaigns, seasonal sales, promo codes. |
-| `operations` | Operations | Fulfillment, delivery timelines, operational hours, business processes. |
-| `locations` | Locations | Physical branch offices, warehouses, service areas, geo-coordinates. |
-| `brand_communication` | Brand & Communication | Tone of voice, messaging guidelines, brand colors, PR stances. |
+| `processes_timelines` | Processes & Timelines | How things work and how long they take: order/PO confirmation, dispatch and delivery lead times, processing and refund times, onboarding steps. |
 
 > [!IMPORTANT]  
 > **No Standalone Pricing Category:** There is NO `pricing` category. All pricing facts (rates, tiers, hourly fees, currency) belong strictly inside `products_services`.
@@ -135,7 +132,7 @@ Represents the persistent logical identity of a business fact, product, FAQ, or 
 | `id` | `VARCHAR(64)` | Primary Key, Default `ki_<hex>` | Unique item identifier. |
 | `tenant_id` | `VARCHAR(64)` | Foreign Key `organizations.id` (CASCADE), NOT NULL | Owning organization boundary. |
 | `title` | `VARCHAR(255)` | NOT NULL | Canonical name / title (e.g. `"Enterprise Plan"`). |
-| `category` | `VARCHAR(64)` | Enum `KnowledgeCategory`, NOT NULL | One of the 9 frozen domain categories. |
+| `category` | `VARCHAR(64)` | Enum `KnowledgeCategory`, NOT NULL | One of the 6 frozen domain categories. |
 | `tags` | `ARRAY(VARCHAR(50))` | NOT NULL, Default `'{}'` | Fast filtering tags (`["pricing", "sla"]`). |
 | `business_entity_id` | `VARCHAR(64)` | Foreign Key `business_entities.id` (SET NULL), Nullable | Optional link to physical product/service entity. |
 | `source_id` | `VARCHAR(64)` | Foreign Key `knowledge_sources.id` (SET NULL), Nullable | Originating source descriptor. |

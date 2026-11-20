@@ -50,6 +50,7 @@ class CandidateRole(str, Enum):
     POLICY_DOCUMENT = "policy_document"
     CONTEXTUAL_PROPOSAL = "contextual_proposal"
     GENERAL_KNOWLEDGE = "general_knowledge"
+    PROCESS_TIMELINE = "process_timeline"      # Processes & Timelines: what happens next and how long it takes
 
 
 class RequirementType(str, Enum):

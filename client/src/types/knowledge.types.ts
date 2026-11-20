@@ -1,16 +1,31 @@
+/** The 6 knowledge categories. One is always selected on the Knowledge page (no "all" view). */
 export type KnowledgeCategory =
-  | "all"
-  | "company-info"
   | "products-services"
-  | "contacts"
+  | "company-info"
   | "policies"
   | "support-faqs"
   | "offers-promotions"
-  | "operations"
-  | "locations"
-  | "brand-communication";
+  | "processes-timelines";
 
-export type ConcreteKnowledgeCategory = Exclude<KnowledgeCategory, "all">;
+/** Kept as an alias for existing imports: every category is concrete now. */
+export type ConcreteKnowledgeCategory = KnowledgeCategory;
+
+/** The 6 knowledge categories, in display order (Products & Services first). */
+export const KNOWN_CATEGORIES = [
+  "products-services",
+  "company-info",
+  "policies",
+  "support-faqs",
+  "offers-promotions",
+  "processes-timelines",
+] as const satisfies readonly KnowledgeCategory[];
+
+/** Selected when the Knowledge page opens without a (valid) ?category= in the URL. */
+export const DEFAULT_KNOWLEDGE_CATEGORY: KnowledgeCategory = "products-services";
+
+export function isKnowledgeCategory(value: unknown): value is KnowledgeCategory {
+  return typeof value === "string" && (KNOWN_CATEGORIES as readonly string[]).includes(value);
+}
 
 export type KnowledgeStatus =
   | "Published"
@@ -29,12 +44,10 @@ export type KnowledgeSource =
 export type KnowledgeItemType =
   | "Service"
   | "Policy"
-  | "Contact"
   | "Offer"
   | "Information"
   | "FAQ"
-  | "Process"
-  | "Guideline";
+  | "Process";
 
 export interface BaseKnowledgeItem {
   id: string;
@@ -63,16 +76,6 @@ export interface ProductServiceKnowledge extends BaseKnowledgeItem {
   supportedModels?: string;
 }
 
-export interface ContactKnowledge extends BaseKnowledgeItem {
-  category: "contacts";
-  type: "Contact";
-  role?: string;
-  department?: string;
-  email?: string;
-  phone?: string;
-  location?: string;
-}
-
 export interface PolicyKnowledge extends BaseKnowledgeItem {
   category: "policies";
   type: "Policy";
@@ -97,28 +100,12 @@ export interface OfferKnowledge extends BaseKnowledgeItem {
   code?: string;
 }
 
-export interface OperationKnowledge extends BaseKnowledgeItem {
-  category: "operations";
+export interface ProcessTimelineKnowledge extends BaseKnowledgeItem {
+  category: "processes-timelines";
   type: "Process";
-  sopTitle?: string;
-  turnaroundTime?: string;
-}
-
-export interface LocationKnowledge extends BaseKnowledgeItem {
-  category: "locations";
-  type: "Information";
-  address?: string;
-  city?: string;
-  coverageRadius?: string;
-  hours?: string;
-}
-
-export interface BrandCommunicationKnowledge extends BaseKnowledgeItem {
-  category: "brand-communication";
-  type: "Guideline";
-  tone?: string;
-  preferredTerms?: string;
-  avoidedTerms?: string;
+  trigger?: string;
+  timeline?: string;
+  steps?: string;
 }
 
 export interface CompanyInfoKnowledge extends BaseKnowledgeItem {
@@ -131,13 +118,10 @@ export interface CompanyInfoKnowledge extends BaseKnowledgeItem {
 
 export type KnowledgeItem =
   | ProductServiceKnowledge
-  | ContactKnowledge
   | PolicyKnowledge
   | FAQKnowledge
   | OfferKnowledge
-  | OperationKnowledge
-  | LocationKnowledge
-  | BrandCommunicationKnowledge
+  | ProcessTimelineKnowledge
   | CompanyInfoKnowledge;
 
 export type KnowledgeSortOption =

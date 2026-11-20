@@ -192,7 +192,7 @@ class SemanticExpansion(BaseModel):
 class PlannedRequirement(BaseModel):
     """An independent requirement decomposed from a complex multi-intent query.
 
-    Supports 10+ independent requirements per message across all 9 knowledge categories.
+    Supports 10+ independent requirements per message across all 6 knowledge categories.
     """
 
     requirement_id: str = Field(default_factory=lambda: f"req_{uuid.uuid4().hex[:8]}")
@@ -300,7 +300,7 @@ class PlannerProposalDTO(BaseModel):
     intent: str = Field(description="Intent from approved taxonomy (e.g. service_lookup, product_comparison)")
     target_category: str = Field(
         default="products_services",
-        description="Target category from 9 canonical categories (e.g. products_services, policies, support_faqs)",
+        description="Target category from the 6 canonical categories (e.g. products_services, policies, processes_timelines)",
     )
     entities: List[Dict[str, str]] = Field(
         default_factory=list,

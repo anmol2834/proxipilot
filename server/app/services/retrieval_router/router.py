@@ -353,8 +353,7 @@ class RetrievalRouter:
             IntentType.SERVICE_COMPARISON,
             IntentType.PRODUCT_COMPARISON,
         )
-        is_contact_request = (intent == IntentType.OTHER and "contact" in (plan.query_text or "").lower()) or (
-            len(plan.requirements or []) == 1 and plan.requirements[0].category == "contacts")
+        is_contact_request = intent == IntentType.OTHER and "contact" in (plan.query_text or "").lower()
         if not is_contact_request:
             for e in plan.entities:
                 if e.entity_type in ("contact", "department", "person"):
@@ -480,9 +479,9 @@ class RetrievalRouter:
                     seen_keys: Set[str] = set()
                     merged_results: List[Tuple[KnowledgeItem, KnowledgeVersion]] = []
 
-                    # 1. Contacts
+                    # 1. Company contact details (they live in Company Info)
                     has_contact_req = any(
-                        r.category == "contacts" or "contact" in (r.query_text or "").lower()
+                        "contact" in (r.query_text or "").lower()
                         for r in plan.requirements
                     )
                     if has_contact_req:
@@ -523,7 +522,7 @@ class RetrievalRouter:
                     # 3. Fetch each distinct category represented in requirements
                     categories_to_fetch = set()
                     for r in plan.requirements:
-                        if r.category and r.category != "contacts":
+                        if r.category:
                             categories_to_fetch.add(r.category)
 
                     for req_cat in categories_to_fetch:

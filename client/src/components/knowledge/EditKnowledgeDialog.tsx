@@ -24,7 +24,8 @@ interface ExtendedItemProps {
   answer?: string;
   discount?: string;
   code?: string;
-  city?: string;
+  timeline?: string;
+  trigger?: string;
 }
 
 function EditKnowledgeForm({
@@ -49,7 +50,8 @@ function EditKnowledgeForm({
   const [answer, setAnswer] = useState(ext.answer || "");
   const [discount, setDiscount] = useState(ext.discount || "");
   const [code, setCode] = useState(ext.code || "");
-  const [city, setCity] = useState(ext.city || "");
+  const [timeline, setTimeline] = useState(ext.timeline || "");
+  const [trigger, setTrigger] = useState(ext.trigger || "");
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -81,7 +83,8 @@ function EditKnowledgeForm({
       answer: answer ? answer.trim() : undefined,
       discount: discount ? discount.trim() : undefined,
       code: code ? code.trim() : undefined,
-      city: city ? city.trim() : undefined,
+      timeline: timeline ? timeline.trim() : undefined,
+      trigger: trigger ? trigger.trim() : undefined,
     } as unknown as Partial<KnowledgeItem>);
   };
 
@@ -169,7 +172,7 @@ function EditKnowledgeForm({
           </Box>
         )}
 
-        {item.category === "contacts" && (
+        {item.category === "company-info" && (
           <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.5 }}>
             <Box>
               <Typography sx={{ fontSize: "0.8rem", fontWeight: 600, color: "#0F172A", mb: 0.5 }}>
@@ -275,18 +278,34 @@ function EditKnowledgeForm({
           </Box>
         )}
 
-        {item.category === "locations" && (
-          <Box>
-            <Typography sx={{ fontSize: "0.8rem", fontWeight: 600, color: "#0F172A", mb: 0.5 }}>
-              Coverage Area / Cities
-            </Typography>
-            <TextField
-              fullWidth
-              size="small"
-              value={city}
-              onChange={(e) => setCity(e.target.value)}
-              sx={{ "& .MuiOutlinedInput-root": { borderRadius: "9px" } }}
-            />
+        {item.category === "processes-timelines" && (
+          <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.5 }}>
+            <Box>
+              <Typography sx={{ fontSize: "0.8rem", fontWeight: 600, color: "#0F172A", mb: 0.5 }}>
+                Starts when
+              </Typography>
+              <TextField
+                fullWidth
+                size="small"
+                placeholder="e.g. After the PO is received"
+                value={trigger}
+                onChange={(e) => setTrigger(e.target.value)}
+                sx={{ "& .MuiOutlinedInput-root": { borderRadius: "9px" } }}
+              />
+            </Box>
+            <Box>
+              <Typography sx={{ fontSize: "0.8rem", fontWeight: 600, color: "#0F172A", mb: 0.5 }}>
+                Timeline
+              </Typography>
+              <TextField
+                fullWidth
+                size="small"
+                placeholder="e.g. Within 24 working hours"
+                value={timeline}
+                onChange={(e) => setTimeline(e.target.value)}
+                sx={{ "& .MuiOutlinedInput-root": { borderRadius: "9px" } }}
+              />
+            </Box>
           </Box>
         )}
 

@@ -186,7 +186,7 @@ def test_multi_intent_email_keeps_every_independent_requirement():
             "2. Delivery to Surat timeline?\n3. Any offers or discounts?\n4. Retailer contact for bulk orders\n"
             "5. Return policy?\nThanks,\nAmit\n\nOn Mon, X wrote:\n> old question about something else")
     cats = [r.category for r in MultiIntentDecomposer.decompose(body)]
-    assert cats == ["products_services", "policies", "operations", "offers_promotions", "contacts", "policies"]
+    assert cats == ["products_services", "policies", "processes_timelines", "offers_promotions", "company_info", "policies"]
 
 
 # ---------------------------------------------------------------- tenant isolation

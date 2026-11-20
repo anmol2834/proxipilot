@@ -4,7 +4,7 @@ Status: FROZEN & AUTHORITATIVE
 Phase: 7.1 (Knowledge Taxonomy + Category Schemas)  
 Last Updated: 2026-09-17  
 
-This document specifies the complete, typed canonical field contract for each of the nine knowledge categories. Every field is defined with its concrete data type, nullability, validation constraints, normalization rules, and its designated role in future AI retrieval (structured filter vs semantic narrative text).
+This document specifies the complete, typed canonical field contract for each of the six knowledge categories. Every field is defined with its concrete data type, nullability, validation constraints, normalization rules, and its designated role in future AI retrieval (structured filter vs semantic narrative text).
 
 ---
 
@@ -41,6 +41,8 @@ Every knowledge item belongs to a canonical category. A record within that categ
 | `phone` | `string` | No | Informational | `phone` | Digits & leading `+` | Main corporate switchboard telephone. |
 | `support_email`| `string` | No | Informational | `email` | RFC 5322 regex | Dedicated support team email. |
 | `sales_email` | `string` | No | Informational | `email` | RFC 5322 regex | Dedicated sales desk email. |
+| `address` | `text` | No | **Semantic Narrative** | `trim` | — | Office, store or factory address(es) customers may ask for. |
+| `business_hours` | `string` | No | Informational | `trim` | Max 128 chars | Working days and hours, e.g. "Mon–Sat, 10:00–18:30 IST". |
 
 ---
 
@@ -71,24 +73,7 @@ Every knowledge item belongs to a canonical category. A record within that categ
 
 ---
 
-## 4. Category 3: `contacts`
-
-| Field Name | Type | Req? | Retrieval Role | Normalization | Validation / Constraints | Description |
-| :--- | :--- | :---: | :--- | :--- | :--- | :--- |
-| `name` | `string` | **Yes** | Structured Filter | `trim` | 1–255 chars | Name of contact person, desk, or department. |
-| `contact_type` | `enum` | **Yes** | Structured Filter | `enum` | `sales`, `support`, `billing`, `operations`, `emergency`, `general` | Functional department/endpoint role. |
-| `role` | `string` | No | Informational | `trim` | Max 128 chars | Professional title or function. |
-| `department` | `string` | No | Structured Filter | `trim` | Max 128 chars | Organizational division. |
-| `email` | `string` | No | Informational | `email` | RFC 5322 regex | Direct or desk email address. |
-| `phone` | `string` | No | Informational | `phone` | Digits & leading `+` | Direct telephone number. |
-| `alternate_phone` | `string` | No | Informational | `phone` | Digits & leading `+` | Mobile or after-hours telephone number. |
-| `location` | `string` | No | Structured Filter | `trim` | Max 128 chars | Office floor, building, or branch desk. |
-| `availability` | `string` | No | Informational | `trim` | Max 128 chars | Working hours or dispatch schedule. |
-| `notes` | `text` | No | **Semantic Narrative** | `trim` | — | Internal routing or escalation guidelines. |
-
----
-
-## 5. Category 4: `policies`
+## 4. Category 3: `policies`
 
 | Field Name | Type | Req? | Retrieval Role | Normalization | Validation / Constraints | Description |
 | :--- | :--- | :---: | :--- | :--- | :--- | :--- |
@@ -104,7 +89,7 @@ Every knowledge item belongs to a canonical category. A record within that categ
 
 ---
 
-## 6. Category 5: `support_faqs`
+## 5. Category 4: `support_faqs`
 
 | Field Name | Type | Req? | Retrieval Role | Normalization | Validation / Constraints | Description |
 | :--- | :--- | :---: | :--- | :--- | :--- | :--- |
@@ -118,7 +103,7 @@ Every knowledge item belongs to a canonical category. A record within that categ
 
 ---
 
-## 7. Category 6: `offers_promotions`
+## 6. Category 5: `offers_promotions`
 
 | Field Name | Type | Req? | Retrieval Role | Normalization | Validation / Constraints | Description |
 | :--- | :--- | :---: | :--- | :--- | :--- | :--- |
@@ -139,56 +124,23 @@ Every knowledge item belongs to a canonical category. A record within that categ
 
 ---
 
-## 8. Category 7: `operations`
+## 7. Category 6: `processes_timelines`
+
+How things work and how long they take — answers "after the PO, what is the confirmation time?",
+dispatch / delivery lead times, quotation turnaround, payment and refund processing, onboarding and
+installation steps.
 
 | Field Name | Type | Req? | Retrieval Role | Normalization | Validation / Constraints | Description |
 | :--- | :--- | :---: | :--- | :--- | :--- | :--- |
-| `operation_name`| `string` | **Yes** | Structured Filter | `trim` | 1–255 chars | Procedure or workflow title. |
-| `description` | `text` | No | **Semantic Narrative** | `trim` | — | Summary of procedure objective. |
-| `procedure` | `text` | **Yes** | **Semantic Narrative** | `trim` | Non-empty | Step-by-step operational instructions. |
-| `owner` | `string` | No | Informational | `trim` | Max 128 chars | Responsible person or team lead. |
-| `department` | `string` | No | Structured Filter | `trim` | Max 128 chars | Operating department. |
-| `business_hours`| `string` | No | Informational | `trim` | Max 128 chars | Operational schedule (e.g. "24/7", "Mon-Fri 8-5"). |
-| `turnaround_time`| `string`| No | Informational | `trim` | Max 128 chars | Guaranteed resolution time window. |
-| `sla` | `string` | No | Informational | `trim` | Max 128 chars | SLA benchmark. |
-| `escalation_rules`| `text` | No | **Semantic Narrative** | `trim` | — | Ticket/incident escalation path. |
-| `region` | `string` | No | Structured Filter | `trim` | Max 128 chars | Geographic zone covered by procedure. |
-
----
-
-## 9. Category 8: `locations`
-
-| Field Name | Type | Req? | Retrieval Role | Normalization | Validation / Constraints | Description |
-| :--- | :--- | :---: | :--- | :--- | :--- | :--- |
-| `name` | `string` | **Yes** | Structured Filter | `trim` | 1–255 chars | Location name or branch identifier. |
-| `location_type` | `enum` | **Yes** | Structured Filter | `enum` | `headquarters`, `branch_office`, `warehouse`, `service_center`, `retail_store`, `remote_area` | Type of facility. |
-| `address_line_1`| `string` | No | Informational | `trim` | Max 255 chars | Street address line 1. |
-| `address_line_2`| `string` | No | Informational | `trim` | Max 255 chars | Suite, unit, or floor. |
-| `city` | `string` | No | Structured Filter | `trim` | Max 128 chars | City name. |
-| `state` | `string` | No | Structured Filter | `trim` | Max 128 chars | State or province. |
-| `country` | `string` | No | Structured Filter | `trim` | Max 128 chars | Country name or ISO country code. |
-| `postal_code` | `string` | No | Structured Filter | `trim` | Max 32 chars | Postal or ZIP code. |
-| `latitude` | `decimal`| No | Informational | `number` | $-90.0$ to $+90.0$ | GPS latitude coordinate. |
-| `longitude` | `decimal`| No | Informational | `number` | $-180.0$ to $+180.0$| GPS longitude coordinate. |
-| `phone` | `string` | No | Informational | `phone` | Digits & leading `+` | Direct facility telephone number. |
-| `email` | `string` | No | Informational | `email` | RFC 5322 regex | Facility direct contact email. |
-| `business_hours`| `string` | No | Informational | `trim` | Max 128 chars | Walk-in and counter operational hours. |
-| `service_area` | `string` | No | Structured Filter | `trim` | Max 255 chars | Operational dispatch radius or cities. |
-| `timezone` | `string` | No | Informational | `trim` | Max 64 chars | Local timezone identifier (e.g. `Asia/Kolkata`). |
-
----
-
-## 10. Category 9: `brand_communication`
-
-| Field Name | Type | Req? | Retrieval Role | Normalization | Validation / Constraints | Description |
-| :--- | :--- | :---: | :--- | :--- | :--- | :--- |
-| `title` | `string` | **Yes** | Structured Filter | `trim` | 1–255 chars | Guideline document title. |
-| `voice` | `enum` | **Yes** | Structured Filter | `enum` | `professional`, `friendly`, `formal`, `consultative`, `casual`, `empathetic` | Primary conversational persona. |
-| `tone` | `string` | No | **Semantic Narrative** | `trim` | Max 255 chars | Emotional tone descriptors. |
-| `style` | `text` | No | **Semantic Narrative** | `trim` | — | Stylistic messaging rules. |
-| `greeting_style`| `string` | No | Informational | `trim` | Max 255 chars | Standard opening greetings. |
-| `closing_style` | `string` | No | Informational | `trim` | Max 255 chars | Standard sign-off closings. |
-| `language_preferences`| `array`| No | Informational | `array` | List of strings | Dialects/languages supported (e.g. `['en-IN', 'hi']`). |
-| `preferred_phrases`| `array`| No | Informational | `array` | List of strings | Vocabulary to favor in responses. |
-| `do_not_say` | `array` | No | Informational | `array` | List of strings | Strictly forbidden words or claims. |
-| `example_responses`| `text` | No | **Semantic Narrative** | `trim` | — | Few-shot exemplary model responses. |
+| `process_name` | `string` | **Yes** | Structured Filter | `trim` | 1–255 chars | Name of the process, e.g. "Purchase order confirmation". |
+| `stage` | `string` | No | Structured Filter | `trim` | Max 128 chars | Journey stage: quotation, order, dispatch, delivery, payment, returns… |
+| `trigger` | `string` | No | **Semantic Narrative** | `trim` | — | What starts the clock, e.g. "After the PO is received". |
+| `timeline` | `string` | No | **Semantic Narrative** | `trim` | — | The commitment verbatim, e.g. "Within 24 working hours". |
+| `steps` | `text` | No | **Semantic Narrative** | `trim` | — | What happens, step by step. |
+| `description` | `text` | No | **Semantic Narrative** | `trim` | — | Overview of the process. |
+| `conditions` | `text` | No | **Semantic Narrative** | `trim` | — | Exceptions that change the timeline (bulk orders, holidays, custom items). |
+| `customer_action` | `text` | No | **Semantic Narrative** | `trim` | — | What the customer must provide or do (signed PO, advance payment, GST details). |
+| `applies_to` | `string` | No | Structured Filter | `trim` | Max 255 chars | Products, order sizes or customer types this applies to. |
+| `working_hours` | `string` | No | Informational | `trim` | Max 128 chars | Working days/hours the timeline is counted in. |
+| `owner` | `string` | No | Informational | `trim` | Max 128 chars | Team responsible. |
+| `region` | `string` | No | Structured Filter | `trim` | Max 128 chars | Territory where the process applies. |

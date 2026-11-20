@@ -517,7 +517,7 @@ async def test_audited_4_requirement_scenario_honest_partial_aggregation():
         title="Corporate Billing & Escalation Desk",
         price=0.0,
         role=CandidateRole.CONTACT_CARD,
-        category="contacts",
+        category="company_info",
     )
     c_contact.attributes = {
         "email": "billing-escalations@proxipilot.com",
@@ -674,7 +674,7 @@ async def test_5_requirement_unconfigured_category_scenario_with_honest_escalati
     c_clean = _make_candidate("ki_clean", "HA-020", "AC Deep Cleaning", 1199.00)
     c_contact = _make_candidate(
         "ki_cnt", "BILLING-ESCALATION", "Corporate Escalation Desk", 0.0,
-        role=CandidateRole.CONTACT_CARD, category="contacts"
+        role=CandidateRole.CONTACT_CARD, category="company_info"
     )
     c_contact.attributes = {"email": "escalations@proxipilot.com", "phone": "+91-9999988888"}
 

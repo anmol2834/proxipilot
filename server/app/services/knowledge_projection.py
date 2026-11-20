@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.contracts.events import DomainEventEnvelope, EventNames
-from app.contracts.knowledge import normalize_category_key
+from app.contracts.knowledge import stored_category_key
 from app.contracts.semantic_projection import (
     ProjectionBatchSummaryDTO,
     SemanticChunkDTO,
@@ -569,45 +569,6 @@ class _SupportFaqsProjector(_BaseCategoryProjector):
         return sections
 
 
-class _ContactsProjector(_BaseCategoryProjector):
-    def build_sections(
-        self,
-        item: KnowledgeItem,
-        version: KnowledgeVersion,
-        attrs: Dict[str, Any],
-        custom_attrs: Dict[str, Any],
-        consumed_keys: Optional[Set[str]] = None,
-    ) -> List[Tuple[str, str]]:
-        sections: List[Tuple[str, str]] = []
-
-        lines = [f"Contact: {item.title}"]
-        role = _format_value(attrs.get("role"))
-        if role:
-            lines.append(f"Role / Title: {role}")
-        dept = _format_value(attrs.get("department"))
-        if dept:
-            lines.append(f"Department: {dept}")
-        primary = _format_value(attrs.get("is_primary"))
-        if primary == "Yes":
-            lines.append("Primary Contact: Yes")
-        sections.append(("overview", "\n".join(lines)))
-
-        details = []
-        email = _format_value(attrs.get("email"))
-        if email:
-            details.append(f"Email: {email}")
-        phone = _format_value(attrs.get("phone"))
-        if phone:
-            details.append(f"Phone: {phone}")
-        loc = _format_value(attrs.get("office_location"))
-        if loc:
-            details.append(f"Location: {loc}")
-        if details:
-            sections.append(("contact_details", "\n".join(details)))
-
-        return sections
-
-
 class _OffersPromotionsProjector(_BaseCategoryProjector):
     def build_sections(
         self,
@@ -675,26 +636,29 @@ class _CompanyInfoProjector(_BaseCategoryProjector):
         if desc:
             sections.append(("description", f"Company Overview:\n{desc}"))
 
+        # Company Info is the single home of the company's contact details (there is no
+        # separate contacts / locations category): every one of them is projected.
         contact_lines = []
-        web = _format_value(attrs.get("website"))
-        if web:
-            contact_lines.append(f"Website: {web}")
-        email = _format_value(attrs.get("support_email"))
-        if email:
-            contact_lines.append(f"Support Email: {email}")
-        phone = _format_value(attrs.get("support_phone"))
-        if phone:
-            contact_lines.append(f"Phone: {phone}")
-        hq = _format_value(attrs.get("headquarters"))
-        if hq:
-            contact_lines.append(f"Headquarters: {hq}")
+        for key, label in (("website", "Website"), ("email", "Email"), ("phone", "Phone"),
+                           ("support_email", "Support Email"), ("support_phone", "Support Phone"),
+                           ("sales_email", "Sales Email"), ("headquarters", "Headquarters"),
+                           ("address", "Address"), ("business_hours", "Business Hours")):
+            val = _format_value(attrs.get(key))
+            if val:
+                contact_lines.append(f"{label}: {val}")
         if contact_lines:
             sections.append(("company_facts", "\n".join(contact_lines)))
 
+        if consumed_keys is not None:      # already stated above: never repeated as "Additional Attributes"
+            consumed_keys.update({"name", "company_name", "legal_name", "industry", "description", "website",
+                                  "email", "phone", "support_email", "support_phone", "sales_email",
+                                  "headquarters", "address", "business_hours"})
         return sections
 
 
-class _OperationsProjector(_BaseCategoryProjector):
+class _ProcessesTimelinesProjector(_BaseCategoryProjector):
+    """'What happens and how long it takes' - the timeline is stated verbatim, never paraphrased."""
+
     def build_sections(
         self,
         item: KnowledgeItem,
@@ -705,107 +669,33 @@ class _OperationsProjector(_BaseCategoryProjector):
     ) -> List[Tuple[str, str]]:
         sections: List[Tuple[str, str]] = []
 
-        lines = [f"Procedure: {item.title}"]
-        ptype = _format_value(attrs.get("procedure_type"))
-        if ptype:
-            lines.append(f"Operation Type: {ptype}")
+        lines = [f"Process: {_format_value(attrs.get('process_name')) or item.title}"]
+        for key, label in (("stage", "Stage"), ("applies_to", "Applies To"), ("region", "Region"),
+                           ("owner", "Handled By")):
+            val = _format_value(attrs.get(key))
+            if val:
+                lines.append(f"{label}: {val}")
         sections.append(("overview", "\n".join(lines)))
 
-        summary = _format_value(attrs.get("summary") or item.description)
-        if summary:
-            sections.append(("summary", f"Summary:\n{summary}"))
+        timing = []
+        for key, label in (("trigger", "Starts"), ("timeline", "Timeline"), ("working_hours", "Counted In")):
+            val = _format_value(attrs.get(key))
+            if val:
+                timing.append(f"{label}: {val}")
+        if timing:
+            sections.append(("timeline", "\n".join(timing)))
 
-        steps = _format_value(attrs.get("steps") or attrs.get("details"))
-        if steps:
-            sections.append(("procedures", f"Operating Steps:\n{steps}"))
+        for key, label, fallback in (("description", "Overview", item.description), ("steps", "Steps", None),
+                                     ("customer_action", "Customer Needs To", None),
+                                     ("conditions", "Conditions & Exceptions", None)):
+            val = _format_value(attrs.get(key) or fallback)
+            if val:
+                sections.append((key, f"{label}:\n{val}"))
 
-        sla_lines = []
-        sla = _format_value(attrs.get("sla_hours"))
-        if sla:
-            sla_lines.append(f"SLA Target: {sla} hours")
-        esc = _format_value(attrs.get("escalation_contact"))
-        if esc:
-            sla_lines.append(f"Escalation Contact: {esc}")
-        if sla_lines:
-            sections.append(("sla_escalation", "\n".join(sla_lines)))
-
-        return sections
-
-
-class _LocationsProjector(_BaseCategoryProjector):
-    def build_sections(
-        self,
-        item: KnowledgeItem,
-        version: KnowledgeVersion,
-        attrs: Dict[str, Any],
-        custom_attrs: Dict[str, Any],
-        consumed_keys: Optional[Set[str]] = None,
-    ) -> List[Tuple[str, str]]:
-        sections: List[Tuple[str, str]] = []
-
-        lines = [f"Location: {item.title}"]
-        ltype = _format_value(attrs.get("location_type"))
-        if ltype:
-            lines.append(f"Location Type: {ltype}")
-        sections.append(("overview", "\n".join(lines)))
-
-        addr_parts = []
-        for key in ("address_line1", "address_line2", "city", "state", "postal_code", "country"):
-            v = _format_value(attrs.get(key))
-            if v:
-                addr_parts.append(v)
-        if addr_parts:
-            sections.append(("address", f"Address:\n{', '.join(addr_parts)}"))
-
-        ops_lines = []
-        hours = _format_value(attrs.get("operating_hours"))
-        if hours:
-            ops_lines.append(f"Operating Hours: {hours}")
-        phone = _format_value(attrs.get("contact_phone"))
-        if phone:
-            ops_lines.append(f"Contact Phone: {phone}")
-        if ops_lines:
-            sections.append(("operations", "\n".join(ops_lines)))
-
-        return sections
-
-
-class _BrandCommunicationProjector(_BaseCategoryProjector):
-    def build_sections(
-        self,
-        item: KnowledgeItem,
-        version: KnowledgeVersion,
-        attrs: Dict[str, Any],
-        custom_attrs: Dict[str, Any],
-        consumed_keys: Optional[Set[str]] = None,
-    ) -> List[Tuple[str, str]]:
-        sections: List[Tuple[str, str]] = []
-
-        lines = [f"Brand Guidelines: {item.title}"]
-        voice = _format_value(attrs.get("brand_voice"))
-        if voice:
-            lines.append(f"Brand Voice: {voice}")
-        tone = _format_value(attrs.get("tone"))
-        if tone:
-            lines.append(f"Tone: {tone}")
-        sections.append(("voice_and_tone", "\n".join(lines)))
-
-        props = _format_value(attrs.get("key_value_propositions") or item.description)
-        if props:
-            sections.append(("key_messaging", f"Value Propositions:\n{props}"))
-
-        appr = _format_value(attrs.get("approved_phrases"))
-        if appr:
-            sections.append(("approved_phrases", f"Approved Phrases:\n{appr}"))
-
-        forbid = _format_value(attrs.get("forbidden_phrases"))
-        if forbid:
-            sections.append(("forbidden_phrases", f"Do Not Say / Forbidden Phrases:\n{forbid}"))
-
-        guide = _format_value(attrs.get("writing_guidelines"))
-        if guide:
-            sections.append(("guidelines", f"Writing Guidelines:\n{guide}"))
-
+        if consumed_keys is not None:      # already stated above: never repeated as "Additional Attributes"
+            consumed_keys.update({"name", "process_name", "stage", "applies_to", "region", "owner", "trigger",
+                                  "timeline", "working_hours", "description", "steps", "customer_action",
+                                  "conditions"})
         return sections
 
 
@@ -834,18 +724,12 @@ _PROJECTORS: Dict[str, _BaseCategoryProjector] = {
     "policies": _PoliciesProjector(),
     KnowledgeCategory.SUPPORT_FAQS.value: _SupportFaqsProjector(),
     "support-faqs": _SupportFaqsProjector(),
-    KnowledgeCategory.CONTACTS.value: _ContactsProjector(),
-    "contacts": _ContactsProjector(),
     KnowledgeCategory.OFFERS_PROMOTIONS.value: _OffersPromotionsProjector(),
     "offers-promotions": _OffersPromotionsProjector(),
     KnowledgeCategory.COMPANY_INFO.value: _CompanyInfoProjector(),
     "company-info": _CompanyInfoProjector(),
-    KnowledgeCategory.OPERATIONS.value: _OperationsProjector(),
-    "operations": _OperationsProjector(),
-    KnowledgeCategory.LOCATIONS.value: _LocationsProjector(),
-    "locations": _LocationsProjector(),
-    KnowledgeCategory.BRAND_COMMUNICATION.value: _BrandCommunicationProjector(),
-    "brand-communication": _BrandCommunicationProjector(),
+    KnowledgeCategory.PROCESSES_TIMELINES.value: _ProcessesTimelinesProjector(),
+    "processes-timelines": _ProcessesTimelinesProjector(),
 }
 
 
@@ -923,7 +807,7 @@ class KnowledgeProjectionService:
 
         # Build category sections
         consumed_keys: Set[str] = set()
-        clean_cat = normalize_category_key(item.category) if item.category else KnowledgeCategory.PRODUCTS_SERVICES.value
+        clean_cat = stored_category_key(item.category, KnowledgeCategory.PRODUCTS_SERVICES.value)
         projector = _PROJECTORS.get(clean_cat) or _PROJECTORS.get(item.category, _GenericProjector())
         try:
             sections = projector.build_sections(
@@ -1022,10 +906,6 @@ class KnowledgeProjectionService:
         structured_categories = {
             KnowledgeCategory.PRODUCTS_SERVICES.value,
             "products-services",
-            KnowledgeCategory.CONTACTS.value,
-            "contacts",
-            KnowledgeCategory.LOCATIONS.value,
-            "locations",
             KnowledgeCategory.OFFERS_PROMOTIONS.value,
             "offers-promotions",
             KnowledgeCategory.SUPPORT_FAQS.value,

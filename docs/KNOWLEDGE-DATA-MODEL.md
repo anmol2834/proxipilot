@@ -38,20 +38,7 @@ export interface ProductServiceKnowledgeItem extends BaseKnowledgeItem {
 }
 ```
 
-### 2.2 Contacts
-```typescript
-export interface ContactKnowledgeItem extends BaseKnowledgeItem {
-  category: "contacts";
-  type: "Contact";
-  role: string;
-  department?: string;
-  email: string;
-  phone?: string;
-  location?: string;
-}
-```
-
-### 2.3 Policies
+### 2.2 Policies
 ```typescript
 export interface PolicyKnowledgeItem extends BaseKnowledgeItem {
   category: "policies";
@@ -62,7 +49,7 @@ export interface PolicyKnowledgeItem extends BaseKnowledgeItem {
 }
 ```
 
-### 2.4 Support & FAQs
+### 2.3 Support & FAQs
 ```typescript
 export interface FAQKnowledgeItem extends BaseKnowledgeItem {
   category: "support-faqs";
@@ -73,7 +60,7 @@ export interface FAQKnowledgeItem extends BaseKnowledgeItem {
 }
 ```
 
-### 2.5 Offers & Promotions
+### 2.4 Offers & Promotions
 ```typescript
 export interface OfferKnowledgeItem extends BaseKnowledgeItem {
   category: "offers-promotions";
@@ -84,39 +71,18 @@ export interface OfferKnowledgeItem extends BaseKnowledgeItem {
 }
 ```
 
-### 2.6 Operations
+### 2.5 Processes & Timelines
 ```typescript
-export interface OperationKnowledgeItem extends BaseKnowledgeItem {
-  category: "operations";
-  type: "Process" | "Standard Operating Procedure";
-  workflowOwner?: string;
+export interface ProcessTimelineKnowledgeItem extends BaseKnowledgeItem {
+  category: "processes-timelines";
+  type: "Process";
+  trigger?: string;   // e.g. "After the PO is received"
+  timeline?: string;  // e.g. "Within 24 working hours"
+  steps?: string;
 }
 ```
 
-### 2.7 Locations
-```typescript
-export interface LocationKnowledgeItem extends BaseKnowledgeItem {
-  category: "locations";
-  type: "Information";
-  address: string;
-  city: string;
-  state?: string;
-  businessHours?: string;
-}
-```
-
-### 2.8 Brand & Communication
-```typescript
-export interface BrandCommunicationKnowledgeItem extends BaseKnowledgeItem {
-  category: "brand-communication";
-  type: "Guidelines";
-  tone: string;
-  preferredTerms?: string;
-  avoidedTerms?: string;
-}
-```
-
-### 2.9 Company Info
+### 2.6 Company Info
 ```typescript
 export interface CompanyInfoKnowledgeItem extends BaseKnowledgeItem {
   category: "company-info";

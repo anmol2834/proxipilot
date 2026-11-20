@@ -5,7 +5,7 @@ import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import Paper from "@mui/material/Paper";
 import { useKnowledgeStore } from "@/stores/knowledge.store";
-import { KnowledgeCategory } from "@/types/knowledge.types";
+import type { KnowledgeCategory } from "@/types/knowledge.types";
 import { useRouter, useSearchParams } from "next/navigation";
 
 interface CategoryDefinition {
@@ -19,16 +19,14 @@ interface CategoryDefinition {
 
 const CATEGORIES: CategoryDefinition[] = [
   {
-    id: "all",
-    name: "All",
-    subtitle: "All knowledge",
+    id: "products-services",
+    name: "Products & Services",
+    subtitle: "What you offer",
     iconBg: "#EFF6FF",
     iconColor: "#2563EB",
     renderIcon: () => (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <ellipse cx="12" cy="5" rx="9" ry="3" />
-        <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
-        <path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3" />
+        <path d="m21 7.5-9-5.25L3 7.5m18 0-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
       </svg>
     ),
   },
@@ -48,33 +46,6 @@ const CATEGORIES: CategoryDefinition[] = [
         <path d="M16 10h.01" />
         <path d="M8 14h.01" />
         <path d="M16 14h.01" />
-      </svg>
-    ),
-  },
-  {
-    id: "products-services",
-    name: "Products & Services",
-    subtitle: "What you offer",
-    iconBg: "#EFF6FF",
-    iconColor: "#2563EB",
-    renderIcon: () => (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="m21 7.5-9-5.25L3 7.5m18 0-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
-      </svg>
-    ),
-  },
-  {
-    id: "contacts",
-    name: "Contacts",
-    subtitle: "People and contact details",
-    iconBg: "#F0FDF4",
-    iconColor: "#16A34A",
-    renderIcon: () => (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-        <circle cx="9" cy="7" r="4" />
-        <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
       </svg>
     ),
   },
@@ -122,40 +93,17 @@ const CATEGORIES: CategoryDefinition[] = [
     ),
   },
   {
-    id: "operations",
-    name: "Operations",
-    subtitle: "Internal processes",
-    iconBg: "#F0FDF4",
-    iconColor: "#16A34A",
+    id: "processes-timelines",
+    name: "Processes & Timelines",
+    subtitle: "Steps and how long they take",
+    iconBg: "#ECFDF5",
+    iconColor: "#059669",
     renderIcon: () => (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="3" />
-        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-      </svg>
-    ),
-  },
-  {
-    id: "locations",
-    name: "Locations",
-    subtitle: "Addresses and coverage",
-    iconBg: "#FFF1F2",
-    iconColor: "#E11D48",
-    renderIcon: () => (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
-        <circle cx="12" cy="10" r="3" />
-      </svg>
-    ),
-  },
-  {
-    id: "brand-communication",
-    name: "Brand & Communication",
-    subtitle: "Tone, style and guidelines",
-    iconBg: "#EEF2FF",
-    iconColor: "#6366F1",
-    renderIcon: () => (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="m3 21 1.9-5.7a8.5 8.5 0 1 1 3.8 3.8z" />
+        <circle cx="12" cy="13" r="8" />
+        <path d="M12 9v4l2.5 2.5" />
+        <path d="M9 2h6" />
+        <path d="M12 2v3" />
       </svg>
     ),
   },
@@ -167,14 +115,13 @@ export function CategoryCardsGrid() {
   const { selectedCategory, setSelectedCategory, categoryCounts, categoryCountsLoaded } =
     useKnowledgeStore();
 
+  // Exactly one category is always selected (Products & Services by default); a card click
+  // switches to it. Clicking the selected card again does nothing.
   const handleCardClick = (catId: KnowledgeCategory) => {
+    if (catId === selectedCategory) return;
     setSelectedCategory(catId);
     const params = new URLSearchParams(searchParams?.toString());
-    if (catId === "all") {
-      params.delete("category");
-    } else {
-      params.set("category", catId);
-    }
+    params.set("category", catId);
     router.replace(`/dashboard/knowledge?${params.toString()}`);
   };
 
@@ -185,8 +132,7 @@ export function CategoryCardsGrid() {
         gridTemplateColumns: {
           xs: "1fr",
           sm: "repeat(2, 1fr)",
-          md: "repeat(3, 1fr)",
-          lg: "repeat(5, 1fr)",
+          md: "repeat(3, 1fr)", // 3 per row from tablet up: 2 rows of 3
         },
         gap: 2,
         mb: 4,
@@ -205,6 +151,9 @@ export function CategoryCardsGrid() {
             key={cat.id}
             elevation={0}
             onClick={() => handleCardClick(cat.id)}
+            role="button"
+            aria-pressed={isActive}
+            title={isActive ? `Showing ${cat.name}` : `Show ${cat.name}`}
             sx={{
               p: 2,
               borderRadius: "14px",

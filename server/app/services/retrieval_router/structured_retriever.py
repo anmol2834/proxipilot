@@ -3,7 +3,7 @@
 Provides authoritative, tenant-scoped structured retrieval from PostgreSQL for:
 1. Exact identifiers, product codes, and SKUs (KnowledgeItem.external_identity_key / canonical_data).
 2. Category-scoped queries with exact numeric boundaries (min_price, max_price, operators).
-3. Contact, office, and organization records (category == 'contacts').
+3. The company's contact details: Company Info records (category == 'company_info').
 4. Bounded catalogue discovery with stable pagination.
 
 All queries enforce:
@@ -444,7 +444,7 @@ class StructuredRetriever:
         limit: int = 5,
         as_of: Optional[datetime] = None,
     ) -> List[Tuple[KnowledgeItem, KnowledgeVersion]]:
-        """Fetch contact persons or office contact cards strictly scoped to tenant."""
+        """Fetch the company's contact details (Company Info records) strictly scoped to tenant."""
         ref_time = normalize_utc_timestamp(as_of)
         temporal_clause = build_current_version_filter(ref_time)
 
@@ -454,7 +454,7 @@ class StructuredRetriever:
             .where(
                 KnowledgeItem.tenant_id == tenant_id,
                 KnowledgeVersion.tenant_id == tenant_id,
-                KnowledgeItem.category == KnowledgeCategory.CONTACTS.value,
+                KnowledgeItem.category == KnowledgeCategory.COMPANY_INFO.value,
                 KnowledgeItem.is_active.is_(True),
                 temporal_clause,
             )

@@ -2,6 +2,8 @@
 
 import { create } from "zustand";
 import {
+  DEFAULT_KNOWLEDGE_CATEGORY,
+  isKnowledgeCategory,
   KnowledgeItem,
   KnowledgeCategory,
   KnowledgeStatus,
@@ -206,6 +208,8 @@ interface KnowledgeState {
 // Store
 // =============================================================================
 
+let fetchSeq = 0;
+
 export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
   // ── Initial State ─────────────────────────────────────────────────────────
   items: [],
@@ -219,7 +223,7 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
   categoryCounts: {},
   categoryCountsLoaded: false,
 
-  selectedCategory: "all",
+  selectedCategory: DEFAULT_KNOWLEDGE_CATEGORY,
   searchQuery: "",
   statusFilter: "All",
   sortOption: "updated-desc",
@@ -315,6 +319,9 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
 
   fetchItems: async (reset = false, targetPage?: number) => {
     const state = get();
+    // Only the newest request may write the list: a slower response for a category the user
+    // has already left must never replace the current one.
+    const seq = ++fetchSeq;
 
     // Prevent duplicate fetch unless forced reset (e.g. after upload/import or filter change)
     if (state.isLoading && !reset) return;
@@ -330,7 +337,7 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
 
     try {
       let result = await knowledgeService.listItems({
-        category: state.selectedCategory !== "all" ? state.selectedCategory : undefined,
+        category: state.selectedCategory,
         status: state.statusFilter !== "All" ? state.statusFilter : undefined,
         search: state.searchQuery.trim() || undefined,
         sort: state.sortOption,
@@ -342,7 +349,7 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
       if (result.items.length === 0 && get().upload.phase === "done") {
         await new Promise((r) => setTimeout(r, 600));
         result = await knowledgeService.listItems({
-          category: state.selectedCategory !== "all" ? state.selectedCategory : undefined,
+          category: state.selectedCategory,
           status: state.statusFilter !== "All" ? state.statusFilter : undefined,
           search: state.searchQuery.trim() || undefined,
           sort: state.sortOption,
@@ -351,6 +358,7 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
         });
       }
 
+      if (seq !== fetchSeq) return;
       set({
         items: result.items,
         totalCount: result.total,
@@ -362,6 +370,7 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
         upload: get().upload.phase === "done" ? INITIAL_UPLOAD_STATE : get().upload,
       });
     } catch (err) {
+      if (seq !== fetchSeq) return;
       const msg = err instanceof Error ? err.message : "Failed to load knowledge items";
       set({
         fetchError: msg,
@@ -571,8 +580,10 @@ async function trackImportJob(
     });
 
     saveActiveImport(null);
-    const targetCat = meta.category
-      ? (meta.category as KnowledgeCategory)
+    // Show the category the file was imported into (accepts "processes_timelines" or "processes-timelines").
+    const importedCat = (meta.category ?? "").replace(/_/g, "-");
+    const targetCat: KnowledgeCategory = isKnowledgeCategory(importedCat)
+      ? importedCat
       : getState().selectedCategory;
 
     setState((state) => ({
@@ -585,7 +596,7 @@ async function trackImportJob(
       },
       isLoading: true,
       isFetching: true,
-      selectedCategory: state.selectedCategory === "all" ? "all" : targetCat,
+      selectedCategory: targetCat,
       searchQuery: "",
       statusFilter: "All",
       currentPage: 1,

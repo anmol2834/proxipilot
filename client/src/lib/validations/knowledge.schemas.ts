@@ -17,15 +17,6 @@ export const productServiceSchema = baseKnowledgeSchema.extend({
   supportedModels: z.string().optional(),
 });
 
-export const contactSchema = baseKnowledgeSchema.extend({
-  category: z.literal("contacts").default("contacts"),
-  role: z.string().optional(),
-  department: z.string().optional(),
-  email: z.string().email("Please provide a valid email").optional().or(z.literal("")),
-  phone: z.string().optional(),
-  location: z.string().optional(),
-});
-
 export const policySchema = baseKnowledgeSchema.extend({
   category: z.literal("policies").default("policies"),
   policyType: z.string().optional(),
@@ -47,25 +38,11 @@ export const offerSchema = baseKnowledgeSchema.extend({
   code: z.string().optional(),
 });
 
-export const operationSchema = baseKnowledgeSchema.extend({
-  category: z.literal("operations").default("operations"),
-  sopTitle: z.string().optional(),
-  turnaroundTime: z.string().optional(),
-});
-
-export const locationSchema = baseKnowledgeSchema.extend({
-  category: z.literal("locations").default("locations"),
-  address: z.string().optional(),
-  city: z.string().optional(),
-  coverageRadius: z.string().optional(),
-  hours: z.string().optional(),
-});
-
-export const brandCommunicationSchema = baseKnowledgeSchema.extend({
-  category: z.literal("brand-communication").default("brand-communication"),
-  tone: z.string().optional(),
-  preferredTerms: z.string().optional(),
-  avoidedTerms: z.string().optional(),
+export const processTimelineSchema = baseKnowledgeSchema.extend({
+  category: z.literal("processes-timelines").default("processes-timelines"),
+  trigger: z.string().optional(),
+  timeline: z.string().optional(),
+  steps: z.string().optional(),
 });
 
 export const companyInfoSchema = baseKnowledgeSchema.extend({

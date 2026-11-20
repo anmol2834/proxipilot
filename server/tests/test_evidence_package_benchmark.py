@@ -511,7 +511,7 @@ def _build_benchmark_dataset() -> List[PackageBenchmarkCase]:
     # -------------------------------------------------------------------------
     # 8. Contacts & Troubleshooting: Contact Card Resolution
     # -------------------------------------------------------------------------
-    c_contact = _make_candidate("ent_cnt_01", "CNT-001", "Corporate Billing Desk", 0.0, category="contacts", role=CandidateRole.CONTACT_CARD)
+    c_contact = _make_candidate("ent_cnt_01", "CNT-001", "Corporate Billing Desk", 0.0, category="company_info", role=CandidateRole.CONTACT_CARD)
     f_contact = _make_fact("ent_cnt_01", "CNT-001", "contact_email", "billing@proxipilot.com", unit="")
     req8 = RequirementEvidenceGroup(
         requirement_id="req_cnt_08",

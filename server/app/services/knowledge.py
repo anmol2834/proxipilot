@@ -38,7 +38,7 @@ class KnowledgeService:
     """Enterprise domain service for knowledge taxonomy, canonical schemas, and custom attributes."""
 
     def list_categories(self) -> List[CategorySummaryDTO]:
-        """Return all 9 registered canonical categories with full schema metadata."""
+        """Return all 6 registered canonical categories with full schema metadata."""
         summaries: List[CategorySummaryDTO] = []
         for cat_def in category_registry.list_all():
             summaries.append(

@@ -40,10 +40,7 @@ _PHONE_CLEAN_REGEX = re.compile(r"[^\d+]")
 
 
 DEFAULT_CANONICAL_DEFAULTS: Dict[str, Dict[str, Any]] = {
-    "contacts": {"contact_type": "general"},
     "offers_promotions": {"offer_type": "percentage_discount"},
-    "locations": {"location_type": "branch_office"},
-    "brand_communication": {"voice": "professional"},
     "policies": {"policy_type": "general"},
 }
 

@@ -1,16 +1,13 @@
 """Multi-Intent Requirement Decomposer — Phase 3.
 
 Decomposes complex, multi-intent emails into discrete, independent PlannedRequirement
-objects spanning all 9 ProxiPilot Knowledge Dashboard categories:
-1. Company Info
+objects spanning all 6 ProxiPilot Knowledge Dashboard categories:
+1. Company Info (incl. the company's contact details, address and hours)
 2. Products & Services
-3. Contacts
-4. Policies
-5. Support & FAQs
-6. Offers & Promotions
-7. Operations
-8. Locations
-9. Brand & Communication
+3. Policies
+4. Support & FAQs
+5. Offers & Promotions
+6. Processes & Timelines
 
 Supports 10+ independent requirements per email with explicit dependencies,
 structured filters, category routing, and bounded resource limits.
@@ -37,6 +34,18 @@ from app.services.context_resolver import ContextEnvelope
 from app.services.requirement_planner.preprocessor import PreprocessedEmail
 
 
+# Segment-level "process / timeline" wording (generic; no business vocabulary).
+_PROCESS_TIMELINE_SEGMENT = re.compile(
+    r"\bhow\s+(?:long|soon)\b|\bhow\s+many\s+(?:working\s+|business\s+)?(?:days|hours|weeks)\b|\bby\s+when\b"
+    r"|\blead[\s-]?times?\b|\bturn[\s-]?around\b|\btat\b|\beta\b|\bestimated\s+delivery\b|\bdelivery\s+to\b"
+    r"|\b(?:processing|confirmation|dispatch|delivery|shipping|transit|approval|response|refund)\s+(?:time|timelines?|period|days)\b"
+    r"|\b(?:order|po|purchase\s+order)\s+confirmation\b"
+    r"|\bafter\s+(?:the\s+|our\s+|my\s+)?(?:po|purchase\s+order|payment|order|approval)\b"
+    r"|\bwhat\s+happens\s+(?:next|after)\b|\bnext\s+steps?\b|\bkitne\s+din\b|\bkab\s+tak\b",
+    re.IGNORECASE,
+)
+
+
 class MultiIntentDecomposer:
     """Deterministic, category-aware multi-intent decomposition engine."""
 
@@ -59,15 +68,6 @@ class MultiIntentDecomposer:
             ),
         ),
         (
-            "contacts",
-            re.compile(
-                r"(?:contact(?:\s+details|\s+number|\s+person)?|retailer\s+contact|sales\s+contact|"
-                r"billing\s+contact|bulk\s+orders?|dealer\s+enquir|phone\s+number|email\s+address|"
-                r"who\s+handles|escalation\s+contact|support\s+contact)",
-                re.IGNORECASE,
-            ),
-        ),
-        (
             "support_faqs",
             re.compile(
                 r"(?:overheating|troubleshoot|error\s+code|technical\s+issue|not\s+working|"
@@ -84,19 +84,12 @@ class MultiIntentDecomposer:
             ),
         ),
         (
-            "locations",
+            "processes_timelines",
             re.compile(
-                r"(?:service[- ]?center(?:\s+location)?|office\s+location|store\s+location|"
-                r"branch\s+location|address|where\s+are\s+you\s+located|nearby\s+center)",
-                re.IGNORECASE,
-            ),
-        ),
-        (
-            "operations",
-            re.compile(
-                r"(?:delivery\s+timeline[s]?|delivery\s+to|shipping\s+time|estimated\s+delivery|"
-                r"installation\s+process|operating\s+hours|working\s+hours|working\s+days|"
-                r"how\s+does\s+installation\s+work|fulfillment\s+procedure|technician\s+visit)",
+                r"(?:delivery\s+timeline[s]?|delivery\s+to|shipping\s+time|estimated\s+delivery|lead\s+time|"
+                r"turnaround|confirmation\s+time|order\s+confirmation|after\s+(?:the\s+)?(?:po|purchase\s+order|payment)|"
+                r"dispatch|processing\s+time|how\s+long|how\s+many\s+days|installation\s+process|"
+                r"how\s+does\s+installation\s+work|fulfillment\s+procedure|next\s+steps?|what\s+happens\s+(?:next|after))",
                 re.IGNORECASE,
             ),
         ),
@@ -104,15 +97,10 @@ class MultiIntentDecomposer:
             "company_info",
             re.compile(
                 r"(?:about\s+(?:your\s+)?company|legal\s+name|business\s+profile|company\s+profile|"
-                r"official\s+website|headquarters|management|business\s+type|certifications)",
-                re.IGNORECASE,
-            ),
-        ),
-        (
-            "brand_communication",
-            re.compile(
-                r"(?:brand\s+voice|brand\s+tone|communication\s+guideline[s]?|email\s+template|"
-                r"preferred\s+phrases|prohibited\s+phrases|escalation\s+wording)",
+                r"official\s+website|headquarters|management|business\s+type|certifications|"
+                r"contact(?:\s+details|\s+number|\s+person)?|phone\s+number|email\s+address|"
+                r"office\s+location|store\s+location|address|where\s+are\s+you\s+located|"
+                r"operating\s+hours|working\s+hours|business\s+hours)",
                 re.IGNORECASE,
             ),
         ),
@@ -335,11 +323,15 @@ class MultiIntentDecomposer:
         if any(w in text_lower for w in ("return policy", "cancellation policy", "refund policy", "exchange policy")):
             return "policies", IntentType.POLICY_QUESTION, RetrievalStrategy.HYBRID
 
-        if any(w in text_lower for w in ("delivery timeline", "delivery to", "shipping time", "estimated delivery")):
-            return "operations", IntentType.ORDER_OR_DELIVERY_QUESTION, RetrievalStrategy.HYBRID
+        # Processes & Timelines: "after the PO, what is the confirmation time?", lead / dispatch /
+        # delivery / processing times, "how long", "what happens next".
+        if _PROCESS_TIMELINE_SEGMENT.search(text_lower):
+            return "processes_timelines", IntentType.ORDER_OR_DELIVERY_QUESTION, RetrievalStrategy.HYBRID
 
-        if any(w in text_lower for w in ("contact", "retailer contact", "sales contact", "bulk orders", "billing contact", "who handles")):
-            return "contacts", IntentType.SERVICE_LOOKUP, RetrievalStrategy.EXACT_LOOKUP
+        # The company's own contact details live in Company Info.
+        if any(w in text_lower for w in ("contact", "retailer contact", "sales contact", "billing contact", "who handles",
+                                         "phone number", "email address")):
+            return "company_info", IntentType.SERVICE_LOOKUP, RetrievalStrategy.EXACT_LOOKUP
 
         if any(w in text_lower for w in ("offer", "promotion", "discount", "coupon", "special deal")):
             return "offers_promotions", IntentType.PRICE_QUERY, RetrievalStrategy.HYBRID
@@ -347,17 +339,15 @@ class MultiIntentDecomposer:
         if any(w in text_lower for w in ("overheating", "troubleshoot", "issue", "problem", "error code", "not working", "fix")):
             return "support_faqs", IntentType.SUPPORT_ISSUE, RetrievalStrategy.SEMANTIC_DISCOVERY
 
-        if any(w in text_lower for w in ("service-center", "service center", "location", "office address", "store address", "where are you")):
-            return "locations", IntentType.SERVICE_LOOKUP, RetrievalStrategy.EXACT_LOOKUP
+        if any(w in text_lower for w in ("service-center", "service center", "location", "office address", "store address",
+                                         "where are you", "operating hours", "working hours", "business hours")):
+            return "company_info", IntentType.SERVICE_LOOKUP, RetrievalStrategy.EXACT_LOOKUP
 
-        if any(w in text_lower for w in ("installation process", "operating hours", "operating procedure", "how to install")):
-            return "operations", IntentType.SUPPORT_ISSUE, RetrievalStrategy.HYBRID
+        if any(w in text_lower for w in ("installation process", "operating procedure", "how to install")):
+            return "processes_timelines", IntentType.SUPPORT_ISSUE, RetrievalStrategy.HYBRID
 
         if any(w in text_lower for w in ("about your company", "legal name", "company profile", "official website")):
             return "company_info", IntentType.CATALOGUE_REQUEST, RetrievalStrategy.SEMANTIC_DISCOVERY
-
-        if any(w in text_lower for w in ("brand voice", "communication policy", "tone", "email format")):
-            return "brand_communication", IntentType.OTHER, RetrievalStrategy.SEMANTIC_DISCOVERY
 
         if any(w in text_lower for w in ("compare", "versus", "vs", "difference")):
             return "products_services", IntentType.PRODUCT_COMPARISON, RetrievalStrategy.HYBRID
@@ -474,23 +464,19 @@ class MultiIntentDecomposer:
             return ["name", "price", "sku", "description", "warranty"]
         elif category == "policies":
             return ["policy_name", "details", "effective_from", "effective_until"]
-        elif category == "contacts":
-            return ["name", "role", "email", "phone", "department"]
         elif category == "support_faqs":
             return ["question", "answer", "category", "topic"]
         elif category == "offers_promotions":
             return ["title", "discount_percentage", "coupon_code", "valid_until"]
-        elif category == "locations":
-            return ["name", "address", "city", "phone"]
-        elif category == "operations":
-            return ["operation_name", "details", "schedule"]
+        elif category == "processes_timelines":
+            return ["process_name", "trigger", "timeline", "steps", "conditions"]
         elif category == "company_info":
-            return ["legal_name", "description", "website", "phone"]
+            return ["legal_name", "description", "website", "phone", "email", "address", "business_hours"]
         return ["title", "details"]
 
     @classmethod
     def _infer_requested_count(cls, category: str, text: str) -> int:
         """Assign sensible default requested result count."""
-        if category in ("contacts", "locations", "operations", "policies", "company_info"):
+        if category in ("policies", "company_info"):
             return 1
         return 3

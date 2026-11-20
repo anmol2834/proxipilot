@@ -143,7 +143,7 @@ def _build_synthetic_workload_item(idx: int, tenant_id: str) -> Tuple[Requiremen
         c_contact = VerifiedCandidate(
             candidate_id=f"cand_ct_{idx}", entity_id="ki_contact", tenant_id=tenant_id,
             external_identity_key="BILLING", title="Billing Escalations",
-            candidate_role=CandidateRole.CONTACT_CARD, category="contacts",
+            candidate_role=CandidateRole.CONTACT_CARD, category="company_info",
             attributes={"email": "billing@proxipilot.com", "phone": "1234567890"}, provenance=prov_01,
             verification_status=FactVerificationStatus.VERIFIED, composite_score=140.0,
         )

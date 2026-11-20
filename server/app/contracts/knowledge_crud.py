@@ -54,7 +54,7 @@ class KnowledgeItemCreateDTO(BaseModel):
 
     category: str = Field(..., description="Target category key (e.g. 'products-services', 'policies')")
     title: str = Field(..., min_length=1, max_length=512, description="Canonical title or entity name")
-    type: Optional[str] = Field(default="Information", description="UI type: Service, Policy, Contact, Offer, FAQ, etc.")
+    type: Optional[str] = Field(default="Information", description="UI type: Service, Policy, Offer, FAQ, Process, Information")
     description: Optional[str] = Field(default=None, description="Summary or excerpt")
     content: Optional[str] = Field(default=None, description="Full narrative content text")
     status: Optional[str] = Field(

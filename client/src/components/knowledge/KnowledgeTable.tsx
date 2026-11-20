@@ -50,20 +50,14 @@ export function KnowledgeTable({ currentPageItems }: KnowledgeTableProps) {
         return { bg: "#EFF6FF", color: "#2563EB", border: "#DBEAFE", label: "Products & Services" };
       case "policies":
         return { bg: "#F0FDFA", color: "#0D9488", border: "#CCFBF1", label: "Policies" };
-      case "contacts":
-        return { bg: "#F0FDF4", color: "#16A34A", border: "#DCFCE7", label: "Contacts" };
       case "offers-promotions":
         return { bg: "#FFFBEB", color: "#D97706", border: "#FEF3C7", label: "Offers & Promotions" };
-      case "locations":
-        return { bg: "#EEF2FF", color: "#6366F1", border: "#E0E7FF", label: "Locations" };
       case "company-info":
         return { bg: "#F1F5F9", color: "#475569", border: "#E2E8F0", label: "Company Info" };
       case "support-faqs":
         return { bg: "#F0F9FF", color: "#0284C7", border: "#E0F2FE", label: "Support & FAQs" };
-      case "operations":
-        return { bg: "#ECFDF5", color: "#059669", border: "#D1FAE5", label: "Operations" };
-      case "brand-communication":
-        return { bg: "#FFF1F2", color: "#E11D48", border: "#FFE4E6", label: "Brand & Communication" };
+      case "processes-timelines":
+        return { bg: "#ECFDF5", color: "#059669", border: "#D1FAE5", label: "Processes & Timelines" };
       default:
         return { bg: "#F1F5F9", color: "#475569", border: "#E2E8F0", label: category };
     }
@@ -87,15 +81,6 @@ export function KnowledgeTable({ currentPageItems }: KnowledgeTableProps) {
             <line x1="16" y1="17" x2="8" y2="17" />
           </svg>
         );
-      case "contacts":
-        return (
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#16A34A" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-            <circle cx="9" cy="7" r="4" />
-            <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-          </svg>
-        );
       case "offers-promotions":
         return (
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -106,11 +91,12 @@ export function KnowledgeTable({ currentPageItems }: KnowledgeTableProps) {
             <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" />
           </svg>
         );
-      case "locations":
+      case "processes-timelines":
         return (
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6366F1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
-            <circle cx="12" cy="10" r="3" />
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="13" r="8" />
+            <path d="M12 9v4l2.5 2.5" />
+            <path d="M9 2h6" />
           </svg>
         );
       default:

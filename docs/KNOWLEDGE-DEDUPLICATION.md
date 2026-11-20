@@ -24,14 +24,11 @@ Phase 8.4 introduces the `CategoryIdentityResolver` and `DeduplicationEngine`, p
 | Category | Primary Identity Attributes | Strategy & Precedence |
 | :--- | :--- | :--- |
 | **`products_services`** | `name`, `sku` | If `sku` is present: `sku:{norm_sku}\|name:{norm_name}`.<br>If `sku` absent: `name:{norm_name}`. |
-| **`contacts`** | `email`, `phone`, `name`, `contact_type` | Precedence order: Normalized `email` $\rightarrow$ `phone` $\rightarrow$ `name:{norm_name}\|type:{norm_type}`. |
 | **`policies`** | `policy_name`, `region` | `policy:{norm_policy_name}` combined with `region` if regionally scoped. |
 | **`support_faqs`** | `question` | Normalized customer question string: `q:{norm_question}`. |
 | **`offers_promotions`** | `promo_code`, `offer_name` | Normalized coupon/promo code if present; fallback to campaign `offer_name`. |
-| **`locations`** | `name`, `postal_code`, `address_line_1` | Location identifier combined with postal code or street address. |
 | **`company_info`** | `company_name` | Canonical trade name: `co:{norm_company_name}`. |
-| **`operations`** | `operation_name` | Standard operating procedure title: `op:{norm_operation_name}`. |
-| **`brand_communication`** | `title` | Tone/guideline document title: `brand:{norm_title}`. |
+| **`processes_timelines`** | `process_name`, `applies_to`, `region` | `proc:{norm_process_name}` plus `for:` (applies_to) and `region:` parts when present, so per-order-type or per-region timelines stay separate. |
 
 ---
 

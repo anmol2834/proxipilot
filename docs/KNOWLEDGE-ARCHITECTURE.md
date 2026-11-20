@@ -62,18 +62,15 @@ Phase 7.0 freezes the canonical data model, domain contracts, lifecycle state ma
   6. `manual`: General member manual entries.
   7. `external_source`: Unverified external web scrapes or third-party webhooks.
 
-### 3.4 KnowledgeCategory — Centralized 9-Category Taxonomy
-The system enforces a centralized, non-extensible 9-category taxonomy:
-1. `company_info`: Company-level facts, founding date, mission, industry, headquarters.
+### 3.4 KnowledgeCategory — Centralized 6-Category Taxonomy
+The system enforces a centralized, non-extensible 6-category taxonomy (see `KNOWLEDGE-TAXONOMY.md`):
+1. `company_info`: Company-level facts, industry, headquarters, and the company's contact details (email, phone, address, business hours).
 2. `products_services`: Products, services, specifications, tiers, availability, and **pricing**.
    > **CRITICAL RULE**: There is **NO** independent `pricing` category. Pricing is strictly an attribute of `products_services`.
-3. `contacts`: Business contacts, escalation emails, phone numbers, department leads.
-4. `policies`: Legal agreements, cancellation terms, refund policies, warranties.
-5. `support_faqs`: Frequently asked questions and canonical answers.
-6. `offers_promotions`: Active campaigns, discount percentages, promo codes, eligibility windows.
-7. `operations`: Standard operating procedures, business hours, SLA commitments.
-8. `locations`: Physical office addresses, branches, service coverage regions.
-9. `brand_communication`: Brand voice, messaging tone, preferred and prohibited terms.
+3. `policies`: Legal agreements, cancellation terms, refund policies, warranties.
+4. `support_faqs`: Frequently asked questions and canonical answers.
+5. `offers_promotions`: Active campaigns, discount percentages, promo codes, eligibility windows.
+6. `processes_timelines`: How things work and how long they take — PO/order confirmation, quotation turnaround, dispatch and delivery lead times, payment/refund processing, onboarding and installation steps.
 
 ### 3.5 KnowledgeAttribute — Strongly Typed Fact Storage
 To prevent the **giant unstructured JSONB anti-pattern**, attributes are stored as typed rows in `knowledge_attributes`:

@@ -158,13 +158,10 @@ function mapCategory(raw?: string | null): KnowledgeCategory {
   const MAP: Record<string, KnowledgeCategory> = {
     "products-services": "products-services",
     "company-info": "company-info",
-    contacts: "contacts",
     policies: "policies",
     "support-faqs": "support-faqs",
     "offers-promotions": "offers-promotions",
-    operations: "operations",
-    locations: "locations",
-    "brand-communication": "brand-communication",
+    "processes-timelines": "processes-timelines",
   };
   return MAP[normalized] ?? "company-info";
 }
@@ -206,12 +203,10 @@ function mapType(rawType?: string | null, category?: KnowledgeCategory): Knowled
   const validTypes: KnowledgeItemType[] = [
     "Service",
     "Policy",
-    "Contact",
     "Offer",
     "Information",
     "FAQ",
     "Process",
-    "Guideline",
   ];
   if (rawType && validTypes.includes(rawType as KnowledgeItemType)) {
     return rawType as KnowledgeItemType;
@@ -220,14 +215,10 @@ function mapType(rawType?: string | null, category?: KnowledgeCategory): Knowled
   const MAP: Record<KnowledgeCategory, KnowledgeItemType> = {
     "products-services": "Service",
     "company-info": "Information",
-    contacts: "Contact",
     policies: "Policy",
     "support-faqs": "FAQ",
     "offers-promotions": "Offer",
-    operations: "Process",
-    locations: "Information",
-    "brand-communication": "Guideline",
-    all: "Information",
+    "processes-timelines": "Process",
   };
   return MAP[cat] ?? "Information";
 }
@@ -331,7 +322,7 @@ class KnowledgeService {
     const limit = params.limit ?? 10;
     const res = await apiClient.get<BackendKnowledgeListResponse>(this.base, {
       params: {
-        ...(params.category && params.category !== "all" ? { category: params.category } : {}),
+        ...(params.category ? { category: params.category } : {}),
         ...(params.status && params.status !== "All" ? { status: params.status.toLowerCase() } : {}),
         ...(params.search ? { search: params.search } : {}),
         limit,
@@ -516,7 +507,7 @@ class KnowledgeService {
     const { title, category, excerpt, content, tags } = source;
     const res = await apiClient.post<BackendKnowledgeItem>(this.base, {
       title: `${title} (Copy)`,
-      category: category.replace("-", "_"),
+      category: category.replace(/-/g, "_"),
       description: excerpt,
       content,
       tags,

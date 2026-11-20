@@ -38,9 +38,9 @@ def test_cached_per_tenant_and_invalidated(monkeypatch):
         await fusion_mod.configured_categories_for("t_b", db)
         assert db.queries == 2                      # never shared across tenants
 
-        db.cats = ["products_services", "policies", "contacts"]
+        db.cats = ["products_services", "policies", "processes_timelines"]
         fusion_mod.invalidate_configured_categories("t_a")
-        assert "contacts" in await fusion_mod.configured_categories_for("t_a", db)
+        assert "processes_timelines" in await fusion_mod.configured_categories_for("t_a", db)
 
         monkeypatch.setattr(fusion_mod, "CONFIGURED_CATEGORIES_TTL_S", 0.0)
         await fusion_mod.configured_categories_for("t_a", db)

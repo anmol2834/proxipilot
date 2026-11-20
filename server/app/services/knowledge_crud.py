@@ -1482,16 +1482,12 @@ class KnowledgeCRUDService:
                 resolved_type = canonical_data.get("entity_type", "Service").capitalize()
             elif item.category == "policies":
                 resolved_type = "Policy"
-            elif item.category == "contacts":
-                resolved_type = "Contact"
             elif item.category == "offers_promotions":
                 resolved_type = "Offer"
             elif item.category == "support_faqs":
                 resolved_type = "FAQ"
-            elif item.category == "operations":
+            elif item.category == "processes_timelines":
                 resolved_type = "Process"
-            elif item.category == "brand_communication":
-                resolved_type = "Guideline"
             else:
                 resolved_type = "Information"
 

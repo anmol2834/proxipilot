@@ -17,22 +17,20 @@ The Knowledge page follows the reference interface strictly:
 - **Right Smart Banner**: Light indigo card (`bg-gradient-to-r from-blue-50/70 to-indigo-50/50`) highlighting AI retrieval value with sparkle icon, title `Better knowledge. Smarter replies.`, descriptive copy, and a dismiss action.
 
 ### 2.2 Category Cards Grid (`CategoryCardsGrid.tsx`)
-A 5-column responsive grid displaying the 10 core categories:
-1. **All** — All knowledge
-2. **Company Info** — About your organization
-3. **Products & Services** — What you offer (includes pricing)
-4. **Contacts** — People and contact details
-5. **Policies** — Refund, cancellation, etc.
-6. **Support & FAQs** — Common questions
-7. **Offers & Promotions** — Current campaigns
-8. **Operations** — Internal processes
-9. **Locations** — Addresses and coverage
-10. **Brand & Communication** — Tone, style and guidelines
+A responsive grid of the 6 knowledge categories: 1 column on phones, 2 on small screens and **3 per row**
+from tablets up (two rows of three). Exactly one card is always selected; the page opens on
+**Products & Services** and the list below shows the selected category's items.
+1. **Products & Services** — What you offer (includes pricing) — default
+2. **Company Info** — About your organization (incl. contact details, address, hours)
+3. **Policies** — Refund, cancellation, etc.
+4. **Support & FAQs** — Common questions
+5. **Offers & Promotions** — Current campaigns
+6. **Processes & Timelines** — Steps and how long they take
 
 *Note*: As specified by strict product requirements, there is **NO separate Pricing category**. Pricing is embedded inside *Products & Services*.
 
 ### 2.3 Knowledge Toolbar (`KnowledgeToolbar.tsx`)
-- **Category Header**: Displays current category name with dynamic count badge (e.g. `All knowledge 56 items`).
+- **Category Header**: Displays the selected category's name with its count badge (e.g. `Products & Services 5,103 items`).
 - **Subtitle**: `Manage all your business knowledge in one place.`
 - **Interactive Controls**:
   - `Search knowledge...` with search icon and clear button.

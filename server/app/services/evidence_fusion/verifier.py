@@ -23,7 +23,7 @@ from app.contracts.evidence_fusion import (
 from app.contracts.requirement_plan import PlannedRange, RequirementPlan
 from app.contracts.retrieval_result import FactVerificationStatus
 from app.core.logging import logger
-from app.services.evidence_fusion.normalizer import CandidateNormalizer
+from app.services.evidence_fusion.normalizer import CandidateNormalizer, provides_contact_details
 
 AUTHORITY_WEIGHTS: Dict[str, float] = {
     "operational_system": 1.00,
@@ -174,7 +174,7 @@ class EvidenceFactVerifier:
                 role_alignment = 0.0
                 if group.requirement_type == RequirementType.SUPPORT_TROUBLESHOOTING and cand.candidate_role == CandidateRole.TROUBLESHOOTING_GUIDE:
                     role_alignment = 100.0
-                elif group.requirement_type == RequirementType.CONTACT_RESOLUTION and cand.candidate_role == CandidateRole.CONTACT_CARD:
+                elif group.requirement_type == RequirementType.CONTACT_RESOLUTION and provides_contact_details(cand):
                     role_alignment = 100.0
                 elif group.requirement_type == RequirementType.POLICY_QUERY and cand.candidate_role == CandidateRole.POLICY_DOCUMENT:
                     role_alignment = 100.0
@@ -285,7 +285,7 @@ class EvidenceFactVerifier:
                 elif attr_lower == "troubleshooting_guidance" and (c.candidate_role == CandidateRole.TROUBLESHOOTING_GUIDE or c.semantic_passages):
                     found = True
                     break
-                elif attr_lower in ("contact_email", "contact_phone") and c.candidate_role == CandidateRole.CONTACT_CARD:
+                elif attr_lower in ("contact_email", "contact_phone") and provides_contact_details(c):
                     found = True
                     break
                 elif attr_lower == "policy_statement" and (c.candidate_role == CandidateRole.POLICY_DOCUMENT or c.semantic_passages):

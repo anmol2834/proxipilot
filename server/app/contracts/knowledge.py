@@ -1,15 +1,12 @@
 """Phase 7.1 — Knowledge Taxonomy & Centralized Category Registry.
 
-Defines the canonical enterprise data model for all 9 knowledge categories:
-1. company_info
+Defines the canonical enterprise data model for all 6 knowledge categories:
+1. company_info (includes the company's contact details, address and hours)
 2. products_services (includes all pricing; no standalone pricing category)
-3. contacts
-4. policies
-5. support_faqs
-6. offers_promotions
-7. operations
-8. locations
-9. brand_communication
+3. policies
+4. support_faqs
+5. offers_promotions
+6. processes_timelines (how things work and how long they take)
 
 Provides:
 - Strict canonical field definitions per category
@@ -80,47 +77,36 @@ CATEGORY_ALIASES: Dict[str, KnowledgeCategory] = {
     "services": KnowledgeCategory.PRODUCTS_SERVICES,
     "catalog": KnowledgeCategory.PRODUCTS_SERVICES,
     "catalogue": KnowledgeCategory.PRODUCTS_SERVICES,
-    # 3. contacts (Contacts / Team Directory)
-    "contacts": KnowledgeCategory.CONTACTS,
-    "team_directory": KnowledgeCategory.CONTACTS,
-    "team": KnowledgeCategory.CONTACTS,
-    "directory": KnowledgeCategory.CONTACTS,
-    "staff": KnowledgeCategory.CONTACTS,
-    # 4. policies (Policies)
+    # 3. policies (Policies)
     "policies": KnowledgeCategory.POLICIES,
     "legal_policies": KnowledgeCategory.POLICIES,
     "terms": KnowledgeCategory.POLICIES,
-    # 5. support_faqs (Support & FAQs / Troubleshooting Guides)
+    # 4. support_faqs (Support & FAQs / Troubleshooting Guides)
     "support_faqs": KnowledgeCategory.SUPPORT_FAQS,
     "troubleshooting_guides": KnowledgeCategory.SUPPORT_FAQS,
     "faqs": KnowledgeCategory.SUPPORT_FAQS,
     "faq": KnowledgeCategory.SUPPORT_FAQS,
     "support": KnowledgeCategory.SUPPORT_FAQS,
     "troubleshooting": KnowledgeCategory.SUPPORT_FAQS,
-    # 6. offers_promotions (Offers & Promotions)
+    # 5. offers_promotions (Offers & Promotions)
     "offers_promotions": KnowledgeCategory.OFFERS_PROMOTIONS,
     "promotions": KnowledgeCategory.OFFERS_PROMOTIONS,
     "discounts": KnowledgeCategory.OFFERS_PROMOTIONS,
     "coupons": KnowledgeCategory.OFFERS_PROMOTIONS,
     "deals": KnowledgeCategory.OFFERS_PROMOTIONS,
-    # 7. operations (Operations)
-    "operations": KnowledgeCategory.OPERATIONS,
-    "operational_procedures": KnowledgeCategory.OPERATIONS,
-    "sop": KnowledgeCategory.OPERATIONS,
-    "sops": KnowledgeCategory.OPERATIONS,
-    "procedures": KnowledgeCategory.OPERATIONS,
-    # 8. locations (Locations / Facilities)
-    "locations": KnowledgeCategory.LOCATIONS,
-    "locations_facilities": KnowledgeCategory.LOCATIONS,
-    "facilities": KnowledgeCategory.LOCATIONS,
-    "branches": KnowledgeCategory.LOCATIONS,
-    "offices": KnowledgeCategory.LOCATIONS,
-    # 9. brand_communication (Brand & Communication / General Reference)
-    "brand_communication": KnowledgeCategory.BRAND_COMMUNICATION,
-    "general_reference": KnowledgeCategory.BRAND_COMMUNICATION,
-    "brand_guidelines": KnowledgeCategory.BRAND_COMMUNICATION,
-    "communication_guidelines": KnowledgeCategory.BRAND_COMMUNICATION,
-    "brand": KnowledgeCategory.BRAND_COMMUNICATION,
+    # 6. processes_timelines (Processes & Timelines)
+    "processes_timelines": KnowledgeCategory.PROCESSES_TIMELINES,
+    "processes_and_timelines": KnowledgeCategory.PROCESSES_TIMELINES,
+    "processes": KnowledgeCategory.PROCESSES_TIMELINES,
+    "process": KnowledgeCategory.PROCESSES_TIMELINES,
+    "timelines": KnowledgeCategory.PROCESSES_TIMELINES,
+    "timeline": KnowledgeCategory.PROCESSES_TIMELINES,
+    "lead_times": KnowledgeCategory.PROCESSES_TIMELINES,
+    "turnaround_times": KnowledgeCategory.PROCESSES_TIMELINES,
+    "workflows": KnowledgeCategory.PROCESSES_TIMELINES,
+    "procedures": KnowledgeCategory.PROCESSES_TIMELINES,
+    "sop": KnowledgeCategory.PROCESSES_TIMELINES,
+    "sops": KnowledgeCategory.PROCESSES_TIMELINES,
 }
 
 
@@ -129,8 +115,8 @@ def normalize_category_key(key: str) -> str:
     
     Accepts kebab-case (e.g. 'company-info'), snake_case ('company_info'),
     UI display names ('Company Info', 'Products & Services'), or backend aliases
-    ('company_profile', 'pricing_plans', 'team_directory') and maps deterministically
-    to the 9 frozen domain categories.
+    ('company_profile', 'pricing_plans', 'lead_times') and maps deterministically
+    to the 6 frozen domain categories.
     """
     if not key or not isinstance(key, str):
         raise KnowledgeInvalidCategoryError("Category key must be a non-empty string.")
@@ -147,6 +133,18 @@ def normalize_category_key(key: str) -> str:
             f"Invalid category '{key}'. Must be one of: {', '.join(sorted(valid_keys))}."
         )
     return cleaned
+
+
+def stored_category_key(key: Optional[str], default: str = "products_services") -> str:
+    """Category of an already-stored item. Unlike ``normalize_category_key`` it never raises: an item
+    left in a retired category (contacts, operations, locations, brand_communication) keeps its raw
+    key, so indexing, embedding and reconciliation still work and simply treat it generically."""
+    if not key:
+        return default
+    try:
+        return normalize_category_key(key)
+    except KnowledgeInvalidCategoryError:
+        return str(key).strip().lower().replace("-", "_")
 
 
 def normalize_string(value: Any) -> Optional[str]:
@@ -482,14 +480,14 @@ class CategoryDefinition:
 
 
 class KnowledgeCategoryRegistry:
-    """Centralized, immutable registry for all 9 ProxiPilot Knowledge Categories."""
+    """Centralized, immutable registry for all 6 ProxiPilot Knowledge Categories."""
 
     def __init__(self):
         self._categories: Dict[str, CategoryDefinition] = {}
         self._initialize_registry()
 
     def _initialize_registry(self):
-        """Construct the frozen canonical definitions for all 9 categories."""
+        """Construct the frozen canonical definitions for all 6 categories."""
 
         # ---------------------------------------------------------------------
         # 1. company_info
@@ -587,6 +585,19 @@ class KnowledgeCategoryRegistry:
                         is_required=False,
                         description="Dedicated commercial sales desk email.",
                         normalization="email",
+                    ),
+                    CanonicalFieldDefinition(
+                        name="address",
+                        field_type=AttributeValueType.TEXT,
+                        is_required=False,
+                        description="Office, store or factory address(es) customers may ask for.",
+                        is_semantic=True,
+                    ),
+                    CanonicalFieldDefinition(
+                        name="business_hours",
+                        field_type=AttributeValueType.STRING,
+                        is_required=False,
+                        description="Working days and hours, e.g. 'Mon-Sat, 10:00-18:30 IST'.",
                     ),
                 ],
             )
@@ -743,94 +754,7 @@ class KnowledgeCategoryRegistry:
         )
 
         # ---------------------------------------------------------------------
-        # 3. contacts
-        # ---------------------------------------------------------------------
-        self._register(
-            CategoryDefinition(
-                category=KnowledgeCategory.CONTACTS,
-                display_name="Contacts",
-                description="Key personnel, department points of contact, support desks, and escalation numbers.",
-                purpose="Ground communication routing, escalation, and contact info delivery.",
-                entity_types=["PERSON", "DEPARTMENT", "HOTLINE"],
-                supports_temporal=False,
-                supports_regional=True,
-                retrieval_filter_fields=["contact_type", "department", "location"],
-                fields=[
-                    CanonicalFieldDefinition(
-                        name="name",
-                        field_type=AttributeValueType.STRING,
-                        is_required=True,
-                        description="Name of contact person, desk, or department.",
-                        is_filter=True,
-                    ),
-                    CanonicalFieldDefinition(
-                        name="contact_type",
-                        field_type=AttributeValueType.ENUM,
-                        is_required=True,
-                        description="Functional category of contact endpoint.",
-                        allowed_values=["sales", "support", "billing", "operations", "emergency", "general"],
-                        is_filter=True,
-                    ),
-                    CanonicalFieldDefinition(
-                        name="role",
-                        field_type=AttributeValueType.STRING,
-                        is_required=False,
-                        description="Job title or functional responsibility.",
-                    ),
-                    CanonicalFieldDefinition(
-                        name="department",
-                        field_type=AttributeValueType.STRING,
-                        is_required=False,
-                        description="Corporate department.",
-                        is_filter=True,
-                    ),
-                    CanonicalFieldDefinition(
-                        name="email",
-                        field_type=AttributeValueType.STRING,
-                        is_required=False,
-                        description="Direct or desk email address.",
-                        normalization="email",
-                    ),
-                    CanonicalFieldDefinition(
-                        name="phone",
-                        field_type=AttributeValueType.STRING,
-                        is_required=False,
-                        description="Direct telephone or mobile number.",
-                        normalization="phone",
-                    ),
-                    CanonicalFieldDefinition(
-                        name="alternate_phone",
-                        field_type=AttributeValueType.STRING,
-                        is_required=False,
-                        description="Backup or after-hours telephone number.",
-                        normalization="phone",
-                    ),
-                    CanonicalFieldDefinition(
-                        name="location",
-                        field_type=AttributeValueType.STRING,
-                        is_required=False,
-                        description="Physical desk, floor, or branch location.",
-                        is_filter=True,
-                    ),
-                    CanonicalFieldDefinition(
-                        name="availability",
-                        field_type=AttributeValueType.STRING,
-                        is_required=False,
-                        description="Working hours or on-call schedule.",
-                    ),
-                    CanonicalFieldDefinition(
-                        name="notes",
-                        field_type=AttributeValueType.TEXT,
-                        is_required=False,
-                        description="Additional instructions for routing or escalation.",
-                        is_semantic=True,
-                    ),
-                ],
-            )
-        )
-
-        # ---------------------------------------------------------------------
-        # 4. policies
+        # 3. policies
         # ---------------------------------------------------------------------
         self._register(
             CategoryDefinition(
@@ -920,7 +844,7 @@ class KnowledgeCategoryRegistry:
         )
 
         # ---------------------------------------------------------------------
-        # 5. support_faqs
+        # 4. support_faqs
         # ---------------------------------------------------------------------
         self._register(
             CategoryDefinition(
@@ -989,7 +913,7 @@ class KnowledgeCategoryRegistry:
         )
 
         # ---------------------------------------------------------------------
-        # 6. offers_promotions
+        # 5. offers_promotions
         # ---------------------------------------------------------------------
         self._register(
             CategoryDefinition(
@@ -1106,294 +1030,112 @@ class KnowledgeCategoryRegistry:
         )
 
         # ---------------------------------------------------------------------
-        # 7. operations
+        # 6. processes_timelines
         # ---------------------------------------------------------------------
         self._register(
             CategoryDefinition(
-                category=KnowledgeCategory.OPERATIONS,
-                display_name="Operations",
-                description="Standard Operating Procedures (SOPs), turnaround schedules, escalation rules, and logistics.",
-                purpose="Inform realistic commitments on turnaround times, field logistics, and SLAs.",
-                entity_types=["SOP", "PROCESS", "WORKFLOW"],
+                category=KnowledgeCategory.PROCESSES_TIMELINES,
+                display_name="Processes & Timelines",
+                description=(
+                    "How things work and how long they take: order and PO confirmation, quotation "
+                    "turnaround, dispatch and delivery lead times, payment processing, returns and "
+                    "refund processing, onboarding, installation and approval steps."
+                ),
+                purpose=(
+                    "Answer 'what happens next and when' questions with the business's own stated "
+                    "steps and timelines, so replies never invent a commitment."
+                ),
+                entity_types=["PROCESS", "WORKFLOW", "TIMELINE"],
                 supports_temporal=False,
                 supports_regional=True,
-                retrieval_filter_fields=["department", "region"],
+                retrieval_filter_fields=["process_name", "stage", "applies_to", "region"],
                 fields=[
                     CanonicalFieldDefinition(
-                        name="operation_name",
+                        name="process_name",
                         field_type=AttributeValueType.STRING,
                         is_required=True,
-                        description="Name of operational procedure or workflow.",
+                        description="Name of the process, e.g. 'Purchase order confirmation'.",
                         is_filter=True,
+                    ),
+                    CanonicalFieldDefinition(
+                        name="stage",
+                        field_type=AttributeValueType.STRING,
+                        is_required=False,
+                        description="Stage of the customer journey, e.g. quotation, order, dispatch, delivery, payment, returns.",
+                        is_filter=True,
+                    ),
+                    CanonicalFieldDefinition(
+                        name="trigger",
+                        field_type=AttributeValueType.STRING,
+                        is_required=False,
+                        description="What starts the clock, e.g. 'After the purchase order is received'.",
+                        is_semantic=True,
+                    ),
+                    CanonicalFieldDefinition(
+                        name="timeline",
+                        field_type=AttributeValueType.STRING,
+                        is_required=False,
+                        description="How long it takes, exactly as the business commits to it, e.g. 'Within 24 working hours'.",
+                        is_semantic=True,
+                    ),
+                    CanonicalFieldDefinition(
+                        name="steps",
+                        field_type=AttributeValueType.TEXT,
+                        is_required=False,
+                        description="What happens, step by step.",
+                        is_semantic=True,
                     ),
                     CanonicalFieldDefinition(
                         name="description",
                         field_type=AttributeValueType.TEXT,
                         is_required=False,
-                        description="Overview of procedure objective.",
+                        description="Overview of the process.",
                         is_semantic=True,
                     ),
                     CanonicalFieldDefinition(
-                        name="procedure",
+                        name="conditions",
                         field_type=AttributeValueType.TEXT,
-                        is_required=True,
-                        description="Step-by-step operational instructions.",
+                        is_required=False,
+                        description="Exceptions and conditions that change the timeline, e.g. bulk orders, holidays, custom items.",
                         is_semantic=True,
+                    ),
+                    CanonicalFieldDefinition(
+                        name="customer_action",
+                        field_type=AttributeValueType.TEXT,
+                        is_required=False,
+                        description="What the customer needs to provide or do, e.g. signed PO, advance payment, GST details.",
+                        is_semantic=True,
+                    ),
+                    CanonicalFieldDefinition(
+                        name="applies_to",
+                        field_type=AttributeValueType.STRING,
+                        is_required=False,
+                        description="Products, customer types or order sizes this applies to.",
+                        is_filter=True,
+                    ),
+                    CanonicalFieldDefinition(
+                        name="working_hours",
+                        field_type=AttributeValueType.STRING,
+                        is_required=False,
+                        description="Working days/hours the timeline is counted in.",
                     ),
                     CanonicalFieldDefinition(
                         name="owner",
                         field_type=AttributeValueType.STRING,
                         is_required=False,
-                        description="Responsible person or team lead.",
-                    ),
-                    CanonicalFieldDefinition(
-                        name="department",
-                        field_type=AttributeValueType.STRING,
-                        is_required=False,
-                        description="Operating unit.",
-                        is_filter=True,
-                    ),
-                    CanonicalFieldDefinition(
-                        name="business_hours",
-                        field_type=AttributeValueType.STRING,
-                        is_required=False,
-                        description="Operational hours for this procedure.",
-                    ),
-                    CanonicalFieldDefinition(
-                        name="turnaround_time",
-                        field_type=AttributeValueType.STRING,
-                        is_required=False,
-                        description="Guaranteed or expected completion time window.",
-                    ),
-                    CanonicalFieldDefinition(
-                        name="sla",
-                        field_type=AttributeValueType.STRING,
-                        is_required=False,
-                        description="Service Level Agreement target.",
-                    ),
-                    CanonicalFieldDefinition(
-                        name="escalation_rules",
-                        field_type=AttributeValueType.TEXT,
-                        is_required=False,
-                        description="Criteria and contacts for ticket or incident escalation.",
-                        is_semantic=True,
+                        description="Team responsible for this process.",
                     ),
                     CanonicalFieldDefinition(
                         name="region",
                         field_type=AttributeValueType.STRING,
                         is_required=False,
-                        description="Territory where procedure applies.",
+                        description="Territory where this process applies.",
                         is_filter=True,
                     ),
                 ],
             )
         )
 
-        # ---------------------------------------------------------------------
-        # 8. locations
-        # ---------------------------------------------------------------------
-        self._register(
-            CategoryDefinition(
-                category=KnowledgeCategory.LOCATIONS,
-                display_name="Locations",
-                description="Physical branch offices, facilities, service centers, and geographic coverage zones.",
-                purpose="Ground geographic dispatch, branch address inquiries, and localized availability.",
-                entity_types=["OFFICE", "WAREHOUSE", "BRANCH", "STORE"],
-                supports_temporal=False,
-                supports_regional=True,
-                retrieval_filter_fields=["location_type", "city", "state", "country", "postal_code", "service_area"],
-                fields=[
-                    CanonicalFieldDefinition(
-                        name="name",
-                        field_type=AttributeValueType.STRING,
-                        is_required=True,
-                        description="Location identifier or branch name.",
-                        is_filter=True,
-                    ),
-                    CanonicalFieldDefinition(
-                        name="location_type",
-                        field_type=AttributeValueType.ENUM,
-                        is_required=True,
-                        description="Type of physical facility.",
-                        allowed_values=["headquarters", "branch_office", "warehouse", "service_center", "retail_store", "remote_area"],
-                        is_filter=True,
-                    ),
-                    CanonicalFieldDefinition(
-                        name="address_line_1",
-                        field_type=AttributeValueType.STRING,
-                        is_required=False,
-                        description="Street address line 1.",
-                    ),
-                    CanonicalFieldDefinition(
-                        name="address_line_2",
-                        field_type=AttributeValueType.STRING,
-                        is_required=False,
-                        description="Suite, floor, or building unit.",
-                    ),
-                    CanonicalFieldDefinition(
-                        name="city",
-                        field_type=AttributeValueType.STRING,
-                        is_required=False,
-                        description="City name.",
-                        is_filter=True,
-                    ),
-                    CanonicalFieldDefinition(
-                        name="state",
-                        field_type=AttributeValueType.STRING,
-                        is_required=False,
-                        description="State or province.",
-                        is_filter=True,
-                    ),
-                    CanonicalFieldDefinition(
-                        name="country",
-                        field_type=AttributeValueType.STRING,
-                        is_required=False,
-                        description="Country name or ISO code.",
-                        is_filter=True,
-                    ),
-                    CanonicalFieldDefinition(
-                        name="postal_code",
-                        field_type=AttributeValueType.STRING,
-                        is_required=False,
-                        description="Postal or ZIP code.",
-                        is_filter=True,
-                    ),
-                    CanonicalFieldDefinition(
-                        name="latitude",
-                        field_type=AttributeValueType.DECIMAL,
-                        is_required=False,
-                        description="GPS latitude coordinate (-90 to +90).",
-                        min_value=-90.0,
-                        max_value=90.0,
-                    ),
-                    CanonicalFieldDefinition(
-                        name="longitude",
-                        field_type=AttributeValueType.DECIMAL,
-                        is_required=False,
-                        description="GPS longitude coordinate (-180 to +180).",
-                        min_value=-180.0,
-                        max_value=180.0,
-                    ),
-                    CanonicalFieldDefinition(
-                        name="phone",
-                        field_type=AttributeValueType.STRING,
-                        is_required=False,
-                        description="Branch direct telephone.",
-                        normalization="phone",
-                    ),
-                    CanonicalFieldDefinition(
-                        name="email",
-                        field_type=AttributeValueType.STRING,
-                        is_required=False,
-                        description="Branch local email.",
-                        normalization="email",
-                    ),
-                    CanonicalFieldDefinition(
-                        name="business_hours",
-                        field_type=AttributeValueType.STRING,
-                        is_required=False,
-                        description="Operating hours for walk-ins or service.",
-                    ),
-                    CanonicalFieldDefinition(
-                        name="service_area",
-                        field_type=AttributeValueType.STRING,
-                        is_required=False,
-                        description="Operational radius or geographic regions covered.",
-                        is_filter=True,
-                    ),
-                    CanonicalFieldDefinition(
-                        name="timezone",
-                        field_type=AttributeValueType.STRING,
-                        is_required=False,
-                        description="Local timezone identifier (e.g. 'Asia/Kolkata', 'America/New_York').",
-                    ),
-                ],
-            )
-        )
-
-        # ---------------------------------------------------------------------
-        # 9. brand_communication
-        # ---------------------------------------------------------------------
-        self._register(
-            CategoryDefinition(
-                category=KnowledgeCategory.BRAND_COMMUNICATION,
-                display_name="Brand & Communication",
-                description="Brand voice, communication persona, preferred terminology, and forbidden phrases.",
-                purpose="Govern the tone and style of AI-generated responses.",
-                entity_types=["VOICE_GUIDE", "MESSAGING", "STYLE_SHEET"],
-                supports_temporal=False,
-                supports_regional=True,
-                retrieval_filter_fields=["voice"],
-                fields=[
-                    CanonicalFieldDefinition(
-                        name="title",
-                        field_type=AttributeValueType.STRING,
-                        is_required=True,
-                        description="Guideline document title.",
-                        is_filter=True,
-                    ),
-                    CanonicalFieldDefinition(
-                        name="voice",
-                        field_type=AttributeValueType.ENUM,
-                        is_required=True,
-                        description="Primary conversational voice persona.",
-                        allowed_values=["professional", "friendly", "formal", "consultative", "casual", "empathetic"],
-                        is_filter=True,
-                    ),
-                    CanonicalFieldDefinition(
-                        name="tone",
-                        field_type=AttributeValueType.STRING,
-                        is_required=False,
-                        description="Tone descriptors (e.g. 'Helpful, reassuring, direct').",
-                        is_semantic=True,
-                    ),
-                    CanonicalFieldDefinition(
-                        name="style",
-                        field_type=AttributeValueType.TEXT,
-                        is_required=False,
-                        description="Narrative communication guidelines and rules.",
-                        is_semantic=True,
-                    ),
-                    CanonicalFieldDefinition(
-                        name="greeting_style",
-                        field_type=AttributeValueType.STRING,
-                        is_required=False,
-                        description="Standardized email/message opening style.",
-                    ),
-                    CanonicalFieldDefinition(
-                        name="closing_style",
-                        field_type=AttributeValueType.STRING,
-                        is_required=False,
-                        description="Standardized sign-off / sign-out closing style.",
-                    ),
-                    CanonicalFieldDefinition(
-                        name="language_preferences",
-                        field_type=AttributeValueType.ARRAY,
-                        is_required=False,
-                        description="Supported languages or dialect codes (e.g. ['en-US', 'en-IN']).",
-                    ),
-                    CanonicalFieldDefinition(
-                        name="preferred_phrases",
-                        field_type=AttributeValueType.ARRAY,
-                        is_required=False,
-                        description="Recommended brand vocabulary to incorporate in responses.",
-                    ),
-                    CanonicalFieldDefinition(
-                        name="do_not_say",
-                        field_type=AttributeValueType.ARRAY,
-                        is_required=False,
-                        description="Forbidden or taboo terms that AI must strictly avoid.",
-                    ),
-                    CanonicalFieldDefinition(
-                        name="example_responses",
-                        field_type=AttributeValueType.TEXT,
-                        is_required=False,
-                        description="Few-shot exemplary responses illustrating ideal brand expression.",
-                        is_semantic=True,
-                    ),
-                ],
-            )
-        )
 
     def _register(self, definition: CategoryDefinition):
         self._categories[definition.category.value] = definition
@@ -1406,7 +1148,7 @@ class KnowledgeCategoryRegistry:
         return self._categories[key]
 
     def list_all(self) -> List[CategoryDefinition]:
-        """Return all 9 registered category definitions."""
+        """Return all 6 registered category definitions."""
         return list(self._categories.values())
 
     def validate_record(

@@ -310,8 +310,8 @@ export const DOCS_ARTICLES: Record<string, DocArticle> = {
 
       <section id="document-tags">
         <h2>3. Organizing with Categories</h2>
-        <p>Knowledge is organized into nine categories: Company Info, Products &amp; Services, Contacts, Policies, Support &amp; FAQs, Offers &amp; Promotions, Operations, Locations, and Brand &amp; Communication.</p>
-        <p>Putting each fact in the right category, for example prices in Products &amp; Services and return terms in Policies, helps ProxiPilot retrieve the most relevant evidence for every draft.</p>
+        <p>Knowledge is organized into six categories: Company Info, Products &amp; Services, Policies, Support &amp; FAQs, Offers &amp; Promotions, and Processes &amp; Timelines.</p>
+        <p>Putting each fact in the right category, for example prices in Products &amp; Services, return terms in Policies, your phone, email, address and business hours in Company Info, and "after the PO, confirmation within 24 working hours" in Processes &amp; Timelines, helps ProxiPilot retrieve the most relevant evidence for every draft.</p>
       </section>
 
       <section id="updating-docs">

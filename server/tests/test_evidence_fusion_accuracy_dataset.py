@@ -298,7 +298,7 @@ def _build_benchmark_dataset() -> List[FusionBenchmarkCase]:
     # -------------------------------------------------------------------------
     c_contact = _make_candidate(
         "ki_cnt_01", "BILLING-CONTACT", "Billing Support Desk", 0.0,
-        role=CandidateRole.CONTACT_CARD, category="contacts"
+        role=CandidateRole.CONTACT_CARD, category="company_info"
     )
     c_contact.attributes = {"email": "billing@proxipilot.com", "phone": "+91-9876543210"}
 

@@ -27,6 +27,29 @@ from app.models.knowledge import KnowledgeItem, KnowledgeVersion
 from app.services.retrieval_router.semantic_retriever import SemanticCandidateHit
 
 
+# Company contact attributes -> contact facts. support/sales addresses are company emails too.
+_CONTACT_FACT_FIELDS = (
+    ("email", "contact_email"), ("support_email", "contact_email"), ("sales_email", "contact_email"),
+    ("phone", "contact_phone"), ("support_phone", "contact_phone"),
+    ("contact_person", "contact_contact_person"), ("department", "contact_department"),
+    ("escalation_tier", "contact_escalation_tier"),
+    ("address", "contact_address"), ("headquarters", "contact_address"),
+    ("business_hours", "contact_business_hours"),
+)
+_CONTACT_ATTRS = {f for f, _ in _CONTACT_FACT_FIELDS} - {"department", "escalation_tier"}
+
+
+def provides_contact_details(candidate: Any) -> bool:
+    """A candidate that can answer 'how do I reach you': a contact card, or a Company Info record
+    that actually carries an email, phone, address or business hours."""
+    if getattr(candidate, "candidate_role", None) == CandidateRole.CONTACT_CARD:
+        return True
+    if (getattr(candidate, "category", "") or "").lower() != "company_info":
+        return False
+    attrs = getattr(candidate, "attributes", None) or {}
+    return any(attrs.get(k) for k in _CONTACT_ATTRS)
+
+
 class CandidateNormalizer:
     """Normalizes heterogeneous retrieval candidates into uniform representations."""
 
@@ -166,19 +189,19 @@ class CandidateNormalizer:
         cat_lower = (category or "").lower().strip()
         text_corpus = f"{title or ''} {description or ''} {str(attributes or '')}".lower()
 
-        if cat_lower in ("contacts", "business_contacts", "directory"):
-            return CandidateRole.CONTACT_CARD
-
         if cat_lower in ("policies", "terms_of_service", "warranty_policies"):
             return CandidateRole.POLICY_DOCUMENT
 
         if cat_lower in ("products_services", "products", "services", "catalog", "offers_promotions", "offers"):
             return CandidateRole.PRODUCT_SERVICE
 
-        if cat_lower in ("operations", "operational_availability", "locations"):
+        if cat_lower == "processes_timelines":
+            return CandidateRole.PROCESS_TIMELINE
+
+        if cat_lower == "operational_availability":
             return CandidateRole.OPERATIONAL_AVAILABILITY
 
-        if cat_lower in ("company_info", "brand_communication"):
+        if cat_lower == "company_info":
             return CandidateRole.GENERAL_KNOWLEDGE
 
         # If it has explicit pricing or SKU in canonical attributes, it is a product/service
@@ -274,14 +297,14 @@ class CandidateNormalizer:
                     )
                 )
 
-        # Contact Details
-        if candidate.candidate_role == CandidateRole.CONTACT_CARD:
+        # Contact Details (Company Info is the home of the company's contact details)
+        if provides_contact_details(candidate):
             attrs = candidate.attributes or {}
-            for field in ("email", "phone", "contact_person", "department", "escalation_tier"):
+            for field, fact_name in _CONTACT_FACT_FIELDS:
                 if field in attrs and attrs[field]:
                     facts.append(
                         VerifiedFact(
-                            attribute_name=f"contact_{field}",
+                            attribute_name=fact_name,
                             entity_id=candidate.entity_id,
                             external_identity_key=candidate.external_identity_key,
                             typed_value=attrs[field],

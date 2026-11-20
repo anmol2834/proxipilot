@@ -39,7 +39,7 @@ Domain Event: knowledge.semantic_projection.ready
 ## 2. Invariants
 
 1. **Deterministic Projection:** Identical canonical inputs produce byte-identical semantic documents, chunk texts, chunk IDs, and document IDs.
-2. **Category-Aware Taxonomy:** Each of the 9 frozen domain categories adheres to a domain-specific projection template preserving narrative structure and structured facts.
+2. **Category-Aware Taxonomy:** Each of the 6 frozen domain categories adheres to a domain-specific projection template preserving narrative structure and structured facts.
 3. **Natural Word Boundaries:** Chunks never break words mid-character. Long sections split cleanly on line breaks or spaces with configurable overlap.
 4. **No Null Pollution:** Missing, null, empty, or placeholder values (`"None"`, `"null"`, `"n/a"`) are strictly omitted from the semantic document.
 5. **Strict Multi-Tenant Scoping:** Document IDs, chunk IDs, and stored database rows carry mandatory `tenant_id` partitioning. Same business content across different tenants yields distinct, isolated identifiers.
@@ -90,19 +90,16 @@ CREATE TABLE knowledge_semantic_chunks (
 
 ## 4. Category-Specific Projector Templates
 
-All 9 canonical categories feature specialized section builders:
+All 6 canonical categories feature specialized section builders:
 
 | Category | Logical Sections Generated | Key Canonical Fields Captured |
 |---|---|---|
 | `products_services` | `overview`, `description`, `pricing`, `availability`, `features`, `regional` | `sku`, `category_type`, `price`, `currency`, `pricing_model`, `availability`, `features`, `specifications`, `warranty_period`, `region` |
 | `policies` | `overview`, `summary`, `policy_details`, `applicability` | `policy_type`, `summary`, `body`, `applies_to_region`, `effective_date`, `expiration_date` |
 | `support_faqs` | `question`, `short_answer`, `answer`, `context` | `question`, `short_answer`, `answer`, `audience`, `category_tag` |
-| `contacts` | `overview`, `contact_details` | `role`, `department`, `is_primary`, `email`, `phone`, `office_location` |
 | `offers_promotions` | `overview`, `discount_details`, `terms`, `validity` | `promo_code`, `discount_value`, `discount_type`, `applicable_products`, `terms_and_conditions`, `valid_from`, `valid_until` |
-| `company_info` | `overview`, `description`, `company_facts` | `legal_name`, `industry`, `description`, `website`, `support_email`, `support_phone`, `headquarters` |
-| `operations` | `overview`, `summary`, `procedures`, `sla_escalation` | `procedure_type`, `summary`, `steps`, `sla_hours`, `escalation_contact` |
-| `locations` | `overview`, `address`, `operations` | `location_type`, `address_line1/2`, `city`, `state`, `postal_code`, `country`, `operating_hours`, `contact_phone` |
-| `brand_communication` | `voice_and_tone`, `key_messaging`, `approved_phrases`, `forbidden_phrases`, `guidelines` | `brand_voice`, `tone`, `key_value_propositions`, `approved_phrases`, `forbidden_phrases`, `writing_guidelines` |
+| `company_info` | `overview`, `description`, `company_facts` | `legal_name`, `industry`, `description`, `website`, `email`, `phone`, `support_email`, `support_phone`, `sales_email`, `headquarters`, `address`, `business_hours` |
+| `processes_timelines` | `overview`, `timeline`, `description`, `steps`, `customer_action`, `conditions` | `process_name`, `stage`, `applies_to`, `region`, `owner`, `trigger`, `timeline`, `working_hours`, `steps`, `customer_action`, `conditions` (projected as one chunk) |
 
 *Note:* Any tenant custom attributes or unmapped fields are seamlessly formatted and appended under an `additional_attributes` section.
 

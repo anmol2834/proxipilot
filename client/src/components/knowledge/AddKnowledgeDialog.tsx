@@ -25,26 +25,6 @@ interface CategoryOption {
 
 const CATEGORY_OPTIONS: CategoryOption[] = [
   {
-    id: "company-info",
-    name: "Company Info",
-    type: "Information",
-    desc: "Add details about your organization, mission, team, and background.",
-    iconBg: "#EEF2FF",
-    iconColor: "#3B82F6",
-    icon: (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2563EB" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect width="16" height="20" x="4" y="2" rx="2" />
-        <path d="M9 22v-4h6v4" />
-        <path d="M8 6h.01" />
-        <path d="M16 6h.01" />
-        <path d="M8 10h.01" />
-        <path d="M16 10h.01" />
-        <path d="M8 14h.01" />
-        <path d="M16 14h.01" />
-      </svg>
-    ),
-  },
-  {
     id: "products-services",
     name: "Products & Services",
     type: "Service",
@@ -58,18 +38,22 @@ const CATEGORY_OPTIONS: CategoryOption[] = [
     ),
   },
   {
-    id: "contacts",
-    name: "Contacts",
-    type: "Contact",
-    desc: "Add key people, team members, and contact details.",
-    iconBg: "#ECFDF5",
-    iconColor: "#10B981",
+    id: "company-info",
+    name: "Company Info",
+    type: "Information",
+    desc: "Add details about your organization, plus its contact details, address and business hours.",
+    iconBg: "#EEF2FF",
+    iconColor: "#3B82F6",
     icon: (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#10B981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-        <circle cx="9" cy="7" r="4" />
-        <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2563EB" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <rect width="16" height="20" x="4" y="2" rx="2" />
+        <path d="M9 22v-4h6v4" />
+        <path d="M8 6h.01" />
+        <path d="M16 6h.01" />
+        <path d="M8 10h.01" />
+        <path d="M16 10h.01" />
+        <path d="M8 14h.01" />
+        <path d="M16 14h.01" />
       </svg>
     ),
   },
@@ -120,46 +104,18 @@ const CATEGORY_OPTIONS: CategoryOption[] = [
     ),
   },
   {
-    id: "operations",
-    name: "Operations",
+    id: "processes-timelines",
+    name: "Processes & Timelines",
     type: "Process",
-    desc: "Add internal processes, workflows, and how things work.",
+    desc: "Add how things work and how long they take — e.g. order confirmation after a PO, dispatch and delivery lead times.",
     iconBg: "#ECFDF5",
-    iconColor: "#10B981",
+    iconColor: "#059669",
     icon: (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#10B981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="3" />
-        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-      </svg>
-    ),
-  },
-  {
-    id: "locations",
-    name: "Locations",
-    type: "Information",
-    desc: "Add your business locations, service areas, and coverage details.",
-    iconBg: "#F5F3FF",
-    iconColor: "#6366F1",
-    icon: (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6366F1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
-        <circle cx="12" cy="10" r="3" />
-      </svg>
-    ),
-  },
-  {
-    id: "brand-communication",
-    name: "Brand & Communication",
-    type: "Guideline",
-    desc: "Add your brand voice, tone, messaging guidelines, and communication preferences.",
-    iconBg: "#EFF6FF",
-    iconColor: "#3B82F6",
-    icon: (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-        <circle cx="8" cy="10" r="1" fill="#3B82F6" />
-        <circle cx="12" cy="10" r="1" fill="#3B82F6" />
-        <circle cx="16" cy="10" r="1" fill="#3B82F6" />
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="13" r="8" />
+        <path d="M12 9v4l2.5 2.5" />
+        <path d="M9 2h6" />
+        <path d="M12 2v3" />
       </svg>
     ),
   },

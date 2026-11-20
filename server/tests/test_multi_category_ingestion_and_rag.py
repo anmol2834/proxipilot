@@ -1,9 +1,9 @@
 """Enterprise Multi-Category Ingestion & Multi-Intent RAG Optimization Test Suite.
 
 Validates:
-1. Universal Category Schema Mapping across all 9 dashboard categories:
-   - company_info, products_services, contacts, policies, support_faqs,
-     offers_promotions, operations, locations, brand_communication.
+1. Universal Category Schema Mapping across all 6 dashboard categories:
+   - company_info, products_services, policies, support_faqs,
+     offers_promotions, processes_timelines.
 2. Token-aware Media Detection and Auto-Ignore:
    - Auto-classifies 'product_image', 'photo_url', 'thumbnail' as IGNORED (MEDIA_IGNORED).
    - Preserves essential business data ('website', 'tracking_url', 'manual_url', 'policy_document_url').
@@ -57,30 +57,27 @@ from app.services.requirement_planner.decomposer import MultiIntentDecomposer
 from app.services.row_quality_service import RowQualityService
 
 
-ALL_9_CATEGORIES = [
+ALL_CATEGORIES = [
     "company_info",
     "products_services",
-    "contacts",
     "policies",
     "support_faqs",
     "offers_promotions",
-    "operations",
-    "locations",
-    "brand_communication",
+    "processes_timelines",
 ]
 
 
 class TestUniversalCategoryMapping:
-    """Tests schema mapping across all 9 dashboard categories."""
+    """Tests schema mapping across all 6 dashboard categories."""
 
-    @pytest.mark.parametrize("category", ALL_9_CATEGORIES)
+    @pytest.mark.parametrize("category", ALL_CATEGORIES)
     def test_category_registry_has_canonical_fields(self, category: str):
         """Verify each category has registered canonical fields in KnowledgeCategoryRegistry."""
         cat_def = category_registry.get(category)
         assert cat_def is not None, f"Category {category} missing from category_registry"
         assert len(cat_def.fields) > 0, f"Category {category} has no canonical fields defined"
 
-    @pytest.mark.parametrize("category", ALL_9_CATEGORIES)
+    @pytest.mark.parametrize("category", ALL_CATEGORIES)
     def test_category_canonical_aliases_valid_targets(self, category: str):
         """Verify every alias in CATEGORY_CANONICAL_ALIASES points to a real canonical field."""
         cat_def = category_registry.get(category)
@@ -93,9 +90,9 @@ class TestUniversalCategoryMapping:
                 )
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("category", ALL_9_CATEGORIES)
+    @pytest.mark.parametrize("category", ALL_CATEGORIES)
     async def test_column_mapping_canonical_match(self, category: str):
-        """Verify ColumnMappingService correctly maps canonical fields for all 9 categories."""
+        """Verify ColumnMappingService correctly maps canonical fields for all 6 categories."""
         cat_def = category_registry.get(category)
         service = ColumnMappingService()
 
@@ -338,11 +335,10 @@ class TestMultiIntentDecomposition:
         categories_extracted = {r.category for r in requirements}
         assert "products_services" in categories_extracted
         assert "policies" in categories_extracted
-        assert "operations" in categories_extracted
-        assert "contacts" in categories_extracted
+        assert "processes_timelines" in categories_extracted   # delivery timelines, installation process
+        assert "company_info" in categories_extracted          # retailer contact, service-center location
         assert "offers_promotions" in categories_extracted
         assert "support_faqs" in categories_extracted
-        assert "locations" in categories_extracted
 
         # Verify numeric constraint (price <= 70,000 INR) on products_services requirement
         prod_req = next(r for r in requirements if r.category == "products_services" and r.range_semantics is not None)
@@ -351,7 +347,7 @@ class TestMultiIntentDecomposition:
         assert prod_req.range_semantics.currency == "INR"
 
         # Verify location entity ("Mumbai") on delivery requirement
-        ops_req = next(r for r in requirements if "mumbai" in (r.description or "").lower() or r.category == "operations")
+        ops_req = next(r for r in requirements if "mumbai" in (r.description or "").lower() or r.category == "processes_timelines")
         assert any(e.canonical_value == "Mumbai" for e in ops_req.entities)
 
         # Verify dependencies: policies/offers depend on products requirement
@@ -383,13 +379,13 @@ class TestMultiIntentDecomposition:
             PlannedRequirement(
                 requirement_id="req_4_ship",
                 intent=IntentType.ORDER_OR_DELIVERY_QUESTION,
-                category="operations",
+                category="processes_timelines",
                 description="Delivery timelines to Mumbai",
             ),
             PlannedRequirement(
                 requirement_id="req_5_cont",
                 intent=IntentType.SERVICE_LOOKUP,
-                category="contacts",
+                category="company_info",
                 description="Retailer contact for bulk orders",
             ),
             PlannedRequirement(
@@ -407,13 +403,13 @@ class TestMultiIntentDecomposition:
             PlannedRequirement(
                 requirement_id="req_8_loc",
                 intent=IntentType.SERVICE_LOOKUP,
-                category="locations",
+                category="company_info",
                 description="Service center location in Mumbai",
             ),
             PlannedRequirement(
                 requirement_id="req_9_oper",
                 intent=IntentType.SUPPORT_ISSUE,
-                category="operations",
+                category="processes_timelines",
                 description="Installation process and work schedule",
             ),
             PlannedRequirement(

@@ -71,6 +71,14 @@ class KnowledgeUploadService:
         - Tenant-scoped duplicate detection: Indexed lookup prevents duplicate ingestion.
         - Emits AuditAction.KNOWLEDGE_FILE_UPLOADED or KNOWLEDGE_FILE_REJECTED atomically.
         """
+        # Reject an unknown or retired category up front (e.g. "contacts" from a stale browser tab):
+        # silently importing it as Products & Services would misfile the customer's data.
+        if category:
+            from app.contracts.knowledge import KnowledgeInvalidCategoryError, normalize_category_key
+            try:
+                normalize_category_key(category)
+            except KnowledgeInvalidCategoryError as exc:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
         settings = get_settings()
         max_size_bytes = settings.storage.knowledge_max_upload_size_bytes
         now_utc = datetime.now(timezone.utc)

@@ -1,18 +1,15 @@
 """Category-Aware Deterministic Identity Resolver for ProxiPilot Deduplication.
 
 Computes stable, normalized identity keys tailored to the semantic structure of
-each of the 9 canonical Knowledge categories.
+each of the 6 canonical Knowledge categories.
 
 Identity Rules:
 - products_services: tenant + category + normalized SKU (if present) + normalized name
-- contacts: tenant + category + normalized email (if present) OR phone OR name + contact_type
 - policies: tenant + category + normalized policy_name + region (if present)
 - support_faqs: tenant + category + normalized question
 - offers_promotions: tenant + category + normalized promo_code (if present) OR offer_name
-- locations: tenant + category + normalized name + postal_code (if present) OR address_line_1
 - company_info: tenant + category + normalized company_name
-- operations: tenant + category + normalized operation_name
-- brand_communication: tenant + category + normalized title
+- processes_timelines: tenant + category + normalized process_name (+ applies_to, region)
 
 Complexity:
 - Time: O(K) where K is the length of the identity fields (sub-microsecond)
@@ -130,22 +127,6 @@ class CategoryIdentityResolver:
             else:
                 key_body = f"row:{row_number or 'unnamed'}"
 
-        elif cat == "contacts":
-            email = _normalize_identity_token(canonical_data.get("email"))
-            phone = _normalize_identity_token(canonical_data.get("phone"))
-            name = _normalize_identity_token(canonical_data.get("name"))
-            ctype = _normalize_identity_token(canonical_data.get("contact_type"))
-            if email:
-                key_body = f"email:{email}"
-            elif phone:
-                key_body = f"phone:{phone}"
-            elif name and ctype:
-                key_body = f"name:{name}|type:{ctype}"
-            elif name:
-                key_body = f"name:{name}"
-            else:
-                key_body = f"row:{row_number or 'unnamed'}"
-
         elif cat == "policies":
             p_name = _normalize_identity_token(canonical_data.get("policy_name"))
             region = _normalize_identity_token(canonical_data.get("region"))
@@ -173,30 +154,24 @@ class CategoryIdentityResolver:
             else:
                 key_body = f"row:{row_number or 'unnamed'}"
 
-        elif cat == "locations":
-            name = _normalize_identity_token(canonical_data.get("name"))
-            postal = _normalize_identity_token(canonical_data.get("postal_code"))
-            addr = _normalize_identity_token(canonical_data.get("address_line_1"))
-            if name and postal:
-                key_body = f"loc:{name}|postal:{postal}"
-            elif name and addr:
-                key_body = f"loc:{name}|addr:{addr}"
-            elif name:
-                key_body = f"loc:{name}"
-            else:
-                key_body = f"row:{row_number or 'unnamed'}"
-
         elif cat == "company_info":
             c_name = _normalize_identity_token(canonical_data.get("company_name"))
             key_body = f"co:{c_name}" if c_name else f"row:{row_number or 'unnamed'}"
 
-        elif cat == "operations":
-            op_name = _normalize_identity_token(canonical_data.get("operation_name"))
-            key_body = f"op:{op_name}" if op_name else f"row:{row_number or 'unnamed'}"
-
-        elif cat == "brand_communication":
-            title = _normalize_identity_token(canonical_data.get("title"))
-            key_body = f"brand:{title}" if title else f"row:{row_number or 'unnamed'}"
+        elif cat == "processes_timelines":
+            # The same process can have different timelines per product group, order size or
+            # region ("PO confirmation - bulk orders" vs "- standard"): those stay separate items.
+            p_name = _normalize_identity_token(canonical_data.get("process_name"))
+            applies = _normalize_identity_token(canonical_data.get("applies_to"))
+            region = _normalize_identity_token(canonical_data.get("region"))
+            if p_name:
+                key_body = f"proc:{p_name}"
+                if applies:
+                    key_body += f"|for:{applies}"
+                if region:
+                    key_body += f"|region:{region}"
+            else:
+                key_body = f"row:{row_number or 'unnamed'}"
 
         else:
             # Fallback for generic or custom category

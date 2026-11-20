@@ -15,7 +15,7 @@ Architectural rules:
    in KnowledgeVersion.canonical_data (JSONB) with GIN indexing (EAV knowledge_attributes decommissioned).
 5. Semantic/narrative projections live in knowledge_semantic_chunks and content_text
    for Phase 10 hybrid retrieval and candidate generation.
-6. Centralized 9-category taxonomy. There is NO standalone pricing category;
+6. Centralized 6-category taxonomy. There is NO standalone pricing category;
    pricing belongs inside products_services.
 7. Multi-tenant scoping: Every entity is strictly isolated by tenant_id (= organization_id).
 8. Source authority: All knowledge records track lineage and authority level.
@@ -50,20 +50,18 @@ from app.models.base import Base, TenantAwareMixin
 
 
 class KnowledgeCategory(str, Enum):
-    """Centralized taxonomy of 9 business knowledge categories.
-    
+    """Centralized taxonomy of the 6 business knowledge categories.
+
     CRITICAL: Pricing is embedded within PRODUCTS_SERVICES; there is NO separate pricing category.
+    Company contact details (phone, email, address, hours) live in COMPANY_INFO.
     """
 
     COMPANY_INFO = "company_info"
     PRODUCTS_SERVICES = "products_services"
-    CONTACTS = "contacts"
     POLICIES = "policies"
     SUPPORT_FAQS = "support_faqs"
     OFFERS_PROMOTIONS = "offers_promotions"
-    OPERATIONS = "operations"
-    LOCATIONS = "locations"
-    BRAND_COMMUNICATION = "brand_communication"
+    PROCESSES_TIMELINES = "processes_timelines"
 
 
 class KnowledgeSourceType(str, Enum):
@@ -541,7 +539,7 @@ class KnowledgeItem(Base, TenantAwareMixin):
         nullable=False,
         default=KnowledgeCategory.COMPANY_INFO.value,
         index=True,
-        comment="Frozen 9-category taxonomy",
+        comment="Frozen 6-category taxonomy",
     )
     description: Mapped[Optional[str]] = mapped_column(
         Text,

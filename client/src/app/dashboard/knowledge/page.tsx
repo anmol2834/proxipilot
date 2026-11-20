@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useEffect, Suspense } from "react";
+import React, { useMemo, useEffect, useRef, Suspense } from "react";
 import Box from "@mui/material/Box";
 import CircularProgress from "@mui/material/CircularProgress";
 import Skeleton from "@mui/material/Skeleton";
@@ -8,7 +8,7 @@ import Typography from "@mui/material/Typography";
 import Button from "@mui/material/Button";
 import { useSearchParams } from "next/navigation";
 import { useKnowledgeStore } from "@/stores/knowledge.store";
-import { KnowledgeCategory } from "@/types/knowledge.types";
+import { DEFAULT_KNOWLEDGE_CATEGORY, isKnowledgeCategory, KnowledgeCategory } from "@/types/knowledge.types";
 import {
   KnowledgeHeader,
   CategoryCardsGrid,
@@ -224,7 +224,6 @@ function KnowledgeContent() {
     isFetching,
     fetchError,
     upload,
-    selectedCategory,
     setSelectedCategory,
     searchQuery,
     setSearchQuery,
@@ -241,20 +240,37 @@ function KnowledgeContent() {
     upload.phase === "processing" ||
     upload.phase === "done";
 
-  // ── Fetch items on mount and refresh category counts ─────────────────────
+  // The URL decides the category: ?category=<one of the 6>, otherwise Products & Services. An old
+  // link to a removed category (e.g. ?category=operations) also opens Products & Services.
+  const urlCategoryParam = searchParams?.get("category") ?? null;
+  const categoryFromUrl = (param: string | null): KnowledgeCategory =>
+    isKnowledgeCategory(param) ? param : DEFAULT_KNOWLEDGE_CATEGORY;
+  const lastUrlCategory = useRef<string | null | undefined>(undefined);
+
+  // ── First load: ONE request, already scoped to the right category ─────────
   useEffect(() => {
-    fetchItems(true, 1);
+    lastUrlCategory.current = urlCategoryParam;
+    const initial = categoryFromUrl(urlCategoryParam);
+    if (initial !== useKnowledgeStore.getState().selectedCategory) {
+      setSelectedCategory(initial); // fetches
+    } else {
+      fetchItems(true, 1);
+    }
     fetchCategoryCounts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Sync URL params → store ───────────────────────────────────────────────
+  // ── Later URL changes (links, back/forward) ───────────────────────────────
+  // Reacts only when the URL's category itself changes; card clicks update the store directly.
   useEffect(() => {
-    const urlCategory = searchParams?.get("category") as KnowledgeCategory | null;
-    if (urlCategory && urlCategory !== selectedCategory) {
-      setSelectedCategory(urlCategory);
+    if (lastUrlCategory.current === urlCategoryParam) return;
+    lastUrlCategory.current = urlCategoryParam;
+    const next = categoryFromUrl(urlCategoryParam);
+    if (next !== useKnowledgeStore.getState().selectedCategory) {
+      setSelectedCategory(next);
     }
-  }, [searchParams, selectedCategory, setSelectedCategory]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlCategoryParam]);
 
   useEffect(() => {
     const urlSearch = searchParams?.get("search");

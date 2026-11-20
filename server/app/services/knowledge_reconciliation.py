@@ -26,7 +26,7 @@ from app.contracts.embeddings import (
     KnowledgeVectorPayload,
     NormalizationPolicy,
 )
-from app.contracts.knowledge import normalize_category_key
+from app.contracts.knowledge import stored_category_key
 from app.core.config import get_settings
 from app.core.database import db_manager
 from app.core.logging import logger
@@ -98,7 +98,7 @@ class KnowledgeReconciliationService:
             biz_domain_str = str(biz_domain).strip().lower().replace(" ", "_") if biz_domain else None
             subcat = attrs_dict.get("sub_category") or custom_attrs.get("category")
             subcat_str = str(subcat).strip().lower().replace(" ", "_") if subcat else None
-            norm_cat = normalize_category_key(item.category) if item.category else "products_services"
+            norm_cat = stored_category_key(item.category)
             authority = version.authority_level or "imported_data"
             projection_version = version.semantic_version or 2
 

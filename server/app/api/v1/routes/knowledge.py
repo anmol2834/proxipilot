@@ -1,7 +1,7 @@
 """Knowledge Taxonomy, Category Schemas & Custom Attributes API Routes.
 
 Endpoints:
-- GET  /api/v1/knowledge/categories: List all 9 canonical category definitions and field contracts.
+- GET  /api/v1/knowledge/categories: List all 6 canonical category definitions and field contracts.
 - GET  /api/v1/knowledge/categories/{category_key}: Get schema definition for a specific category.
 - GET  /api/v1/knowledge/categories/{category_key}/custom-attributes: List tenant-scoped custom attribute definitions.
 - POST /api/v1/knowledge/categories/{category_key}/custom-attributes: Create a tenant-scoped custom attribute definition (OWNER/ADMIN).
@@ -64,10 +64,10 @@ router = APIRouter(prefix="/knowledge", tags=["Knowledge Base & Taxonomy"])
     "/categories",
     response_model=List[CategorySummaryDTO],
     summary="List all canonical knowledge categories",
-    description="Returns schema definitions, canonical fields, and validation rules for all 9 frozen knowledge categories.",
+    description="Returns schema definitions, canonical fields, and validation rules for all 6 frozen knowledge categories.",
 )
 async def list_categories() -> List[CategorySummaryDTO]:
-    """Publicly inspectable schema definitions for the 9 knowledge categories."""
+    """Publicly inspectable schema definitions for the 6 knowledge categories."""
     return knowledge_service.list_categories()
 
 
