@@ -50,6 +50,11 @@ class FollowupPolicy(Base, TenantAwareMixin):
     max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3, server_default="3")
     min_spacing_hours: Mapped[int] = mapped_column(Integer, nullable=False, default=24, server_default="24")
     timezone: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # 'shadow' = observe only (assess + record, never act) | 'active'
+    mode: Mapped[str] = mapped_column(String(16), nullable=False, default="shadow", server_default="shadow")
+    # Workspace admins must allow automatic customer email before members can enable it per conversation.
+    customer_email_allowed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False,
+                                                         server_default=text("false"))
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     updated_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 

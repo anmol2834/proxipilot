@@ -8,6 +8,7 @@ import type {
   FollowupControlsPatch,
   FollowupPolicy,
   LeadFilter,
+  LeadSort,
   ThreadFollowup,
 } from "@/types/followup.types";
 
@@ -16,9 +17,18 @@ export const followupKeys = {
   all: (org: string | null) => ["followups", org ?? "none"] as const,
   thread: (org: string | null, threadId: string) => [...followupKeys.all(org), "thread", threadId] as const,
   policy: (org: string | null) => [...followupKeys.all(org), "policy"] as const,
-  leads: (org: string | null, filter: LeadFilter, page: number, temperature: string | null) =>
-    [...followupKeys.all(org), "leads", filter, page, temperature ?? "any"] as const,
+  summary: (org: string | null) => [...followupKeys.all(org), "summary"] as const,
+  leads: (org: string | null, filter: LeadFilter, page: number, temperature: string | null, q: string, sort: LeadSort) =>
+    [...followupKeys.all(org), "leads", filter, page, temperature ?? "any", q, sort] as const,
 };
+
+/** Human-readable message from an API error (409s explain a concurrent change). */
+export function followupError(e: unknown): string {
+  const err = e as { statusCode?: number; message?: string } | null;
+  if (err?.statusCode === 409) return err.message || "This changed in the meantime — refreshed, please try again.";
+  if (err?.statusCode === 403) return "You don't have permission to do that.";
+  return err?.message || "Something went wrong. Please try again.";
+}
 
 export function useThreadFollowup(threadId: string | null) {
   const { organizationId } = useTenant();
@@ -30,38 +40,66 @@ export function useThreadFollowup(threadId: string | null) {
   });
 }
 
+/** After any change: store the fresh panel, refresh Leads, the nav badge and the inbox list. */
 function useApplyPanel(threadId: string) {
   const qc = useQueryClient();
   const { organizationId } = useTenant();
   return (panel: ThreadFollowup) => {
     qc.setQueryData(followupKeys.thread(organizationId, threadId), panel);
     qc.invalidateQueries({ queryKey: [...followupKeys.all(organizationId), "leads"] });
+    qc.invalidateQueries({ queryKey: followupKeys.summary(organizationId) });
     qc.invalidateQueries({ queryKey: queryKeys.inbox.lists() });
+  };
+}
+
+function useRefetchOnConflict(threadId: string) {
+  const qc = useQueryClient();
+  const { organizationId } = useTenant();
+  return (e: unknown) => {
+    if ((e as { statusCode?: number })?.statusCode === 409) {
+      qc.invalidateQueries({ queryKey: followupKeys.thread(organizationId, threadId) });
+    }
   };
 }
 
 export function usePatchFollowupControls(threadId: string) {
   const apply = useApplyPanel(threadId);
+  const onError = useRefetchOnConflict(threadId);
   return useMutation({
     mutationFn: (patch: FollowupControlsPatch) => followupService.patchControls(threadId, patch),
     onSuccess: apply,
+    onError,
   });
 }
 
 export function useScheduleFollowup(threadId: string) {
   const apply = useApplyPanel(threadId);
+  const onError = useRefetchOnConflict(threadId);
   return useMutation({
     mutationFn: (body: { version: number; local_date: string; local_time: string; timezone?: string | null }) =>
       followupService.schedule(threadId, body),
     onSuccess: apply,
+    onError,
   });
 }
 
 export function useClearFollowupSchedule(threadId: string) {
   const apply = useApplyPanel(threadId);
+  const onError = useRefetchOnConflict(threadId);
   return useMutation({
     mutationFn: (version: number) => followupService.clearSchedule(threadId, version),
     onSuccess: apply,
+    onError,
+  });
+}
+
+export function useApplySuggestion(threadId: string) {
+  const apply = useApplyPanel(threadId);
+  const onError = useRefetchOnConflict(threadId);
+  return useMutation({
+    mutationFn: (version: number) => followupService.applySuggestion(threadId, version),
+    onSuccess: apply,
+    onError,
   });
 }
 
@@ -72,16 +110,6 @@ export function useLiftSuppression(threadId: string) {
     mutationFn: (id: string) => followupService.liftSuppression(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: followupKeys.thread(organizationId, threadId) }),
   });
-}
-
-/** After a Hot/Warm/Cold pill change (legacy route), refresh the panel so the source shows "manual". */
-export function useRefreshThreadFollowup() {
-  const qc = useQueryClient();
-  const { organizationId } = useTenant();
-  return (threadId: string) => {
-    qc.invalidateQueries({ queryKey: followupKeys.thread(organizationId, threadId) });
-    qc.invalidateQueries({ queryKey: [...followupKeys.all(organizationId), "leads"] });
-  };
 }
 
 export function useFollowupPolicy() {
@@ -98,17 +126,35 @@ export function usePatchFollowupPolicy() {
   const { organizationId } = useTenant();
   return useMutation({
     mutationFn: (patch: Partial<FollowupPolicy> & { version: number }) => followupService.patchPolicy(patch),
-    onSuccess: (policy) => qc.setQueryData(followupKeys.policy(organizationId), policy),
+    onSuccess: (policy) => {
+      qc.setQueryData(followupKeys.policy(organizationId), policy);
+      qc.invalidateQueries({ queryKey: followupKeys.all(organizationId) });
+    },
   });
 }
 
-export function useLeads(filter: LeadFilter, page: number, temperature: string | null, pageSize = 25) {
+/** Counts for the sidebar badge; refreshed every minute, never polls the full inbox. */
+export function useFollowupSummary() {
   const { organizationId } = useTenant();
   return useQuery({
-    queryKey: followupKeys.leads(organizationId, filter, page, temperature),
-    queryFn: () => followupService.leads({ filter, page, pageSize, temperature }),
+    queryKey: followupKeys.summary(organizationId),
+    queryFn: () => followupService.summary(),
+    enabled: Boolean(organizationId),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+    retry: false,
+  });
+}
+
+export function useLeads(filter: LeadFilter, page: number, temperature: string | null, q: string, sort: LeadSort,
+                         pageSize = 25) {
+  const { organizationId } = useTenant();
+  return useQuery({
+    queryKey: followupKeys.leads(organizationId, filter, page, temperature, q, sort),
+    queryFn: () => followupService.leads({ filter, page, pageSize, temperature, q, sort }),
     enabled: Boolean(organizationId),
     placeholderData: keepPreviousData,
     staleTime: 20_000,
+    refetchInterval: 60_000,
   });
 }

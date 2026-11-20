@@ -72,6 +72,23 @@ Tenant zone Asia/Kolkata, Mon–Fri, notice 1 business day at 10:00, customer em
 | T4 Thu 7 Jan 04:30Z | scheduler | 4 individual advance notices (owner, admin, member + generic one for the no-inbox role); removed / invited / suspended excluded |
 | T5 Fri 8 Jan 09:30Z | scheduler | 4 due notices stating the customer has **not** been emailed; 0 Gmail calls; occurrence `done`; `attempts_used` = 1 |
 
+## 3a. Workspace controls (dashboard)
+
+Settings → Follow-ups & reminders (owners/admins, `settings.update`):
+
+* **Automation mode** — *Observe only* (default for every workspace: AI #2 assesses and records, nothing
+  is scheduled, reminded or sent) or *Active*. Stored in `followup_policies.mode` (migration
+  `0f1a2b3c4d5e`). In an active workspace a conversation whose latest assessment was only recorded can
+  be applied from its panel ("Apply"), never retroactively in bulk.
+* **Allow automatic customer emails** — workspace allowance (`customer_email_allowed`, default off). A
+  member with send permission must still enable it per conversation and recipient (consent dialog).
+* Timing, working days, send hours, advance notice, limits and time zone.
+
+The UI surfaces: conversation Follow-up panel (inbox and Leads drawer), Leads workspace (KPIs,
+filters, search, sort, pagination), sidebar badge (due + needs review), inbox list badges.
+`FOLLOWUP_SHADOW_MODE=true` on the server still forces observe-only for every workspace, and
+`FOLLOWUP_CUSTOMER_SEND_ENABLED` remains the platform kill switch.
+
 ## 3. Rollout, startup, rollback
 
 Flags (process env, `services/followups/flags.py`):

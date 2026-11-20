@@ -59,8 +59,15 @@ def default_policy(tenant_id: str) -> FollowupPolicy:
         tenant_id=tenant_id, assessment_enabled=True, planning_enabled=True, cadence_hot_days=1,
         cadence_warm_days=3, cadence_cold_days=7, workdays="0,1,2,3,4", send_window_start="09:00",
         send_window_end="18:00", default_local_time="10:00", advance_notice_days=1, max_attempts=3,
-        min_spacing_hours=24, timezone=None, version=0,
+        min_spacing_hours=24, timezone=None, version=0, mode="shadow", customer_email_allowed=False,
     )
+
+
+def observe_only(policy: FollowupPolicy) -> bool:
+    """Workspace observe-only mode, or the platform-wide override (FOLLOWUP_SHADOW_MODE)."""
+    from app.services.followups.flags import get_flags
+
+    return bool(get_flags().shadow_mode) or (policy.mode or "shadow") != "active"
 
 
 async def load_policy(db: AsyncSession, tenant_id: str) -> FollowupPolicy:

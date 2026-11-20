@@ -106,6 +106,8 @@ class FollowupScheduler:
                 occ.lease_until = None
                 await db.commit()
                 return False
+            if await self._snoozed_until(db, occ, now):
+                return False
             cal = await engine.load_calendar(db, occ.tenant_id)
             done = await notify.deliver(db, occ=occ, kind="advance", thread=thread, state=state, cal=cal, now=now)
             occ = await db.get(FollowupOccurrence, oid)
@@ -128,6 +130,8 @@ class FollowupScheduler:
                 occ.customer_status = "not_applicable" if occ.customer_status == "pending" else occ.customer_status
                 await db.commit()
                 return "cancelled"
+            if await self._snoozed_until(db, occ, now):
+                return "snoozed"
             result = "notified"
             if occ.customer_status == "pending":
                 result = await self._customer_send(db, occ, now)
@@ -152,6 +156,19 @@ class FollowupScheduler:
                 occ.lease_until = None                     # keep a send-window wait lease, release otherwise
             await db.commit()
             return result
+
+    @staticmethod
+    async def _snoozed_until(db, occ: FollowupOccurrence, now: datetime) -> bool:
+        """A snoozed conversation defers its reminders (and customer email) until the snooze ends."""
+        from app.models.followup import ThreadFollowupControl
+
+        ctl = await db.get(ThreadFollowupControl, occ.thread_id)
+        until = _utc(ctl.snoozed_until) if ctl is not None and ctl.snoozed_until else None
+        if until and until > now:
+            occ.lease_until = until
+            await db.commit()
+            return True
+        return False
 
     async def _customer_send(self, db, occ: FollowupOccurrence, now: datetime) -> str:
         """Gate -> compose -> gate again on fresh state -> mark sending -> provider call."""

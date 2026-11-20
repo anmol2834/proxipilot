@@ -14,7 +14,9 @@ import { apiClient } from "@/lib/api/client";
 import type {
   FollowupControlsPatch,
   FollowupPolicy,
+  FollowupSummary,
   LeadFilter,
+  LeadSort,
   LeadsResponse,
   ThreadFollowup,
 } from "@/types/followup.types";
@@ -41,6 +43,18 @@ export const followupService = {
     ).data;
   },
 
+  async applySuggestion(threadId: string, version: number): Promise<ThreadFollowup> {
+    return (
+      await apiClient.post<ThreadFollowup>(`/followups/threads/${threadId}/apply-suggestion`, undefined, {
+        params: { version },
+      })
+    ).data;
+  },
+
+  async summary(): Promise<FollowupSummary> {
+    return (await apiClient.get<FollowupSummary>("/followups/summary")).data;
+  },
+
   async liftSuppression(id: string): Promise<{ id: string; lifted: boolean }> {
     return (await apiClient.delete<{ id: string; lifted: boolean }>(`/followups/suppressions/${id}`)).data;
   },
@@ -58,6 +72,8 @@ export const followupService = {
     page: number;
     pageSize: number;
     temperature?: string | null;
+    q?: string | null;
+    sort?: LeadSort;
   }): Promise<LeadsResponse> {
     return (
       await apiClient.get<LeadsResponse>("/followups/leads", {
@@ -66,6 +82,8 @@ export const followupService = {
           page: params.page,
           page_size: params.pageSize,
           temperature: params.temperature ?? undefined,
+          q: params.q || undefined,
+          sort: params.sort ?? "due",
         },
       })
     ).data;

@@ -1,6 +1,6 @@
-import React from "react";
+import React, { Suspense } from "react";
 import type { Metadata } from "next";
-import { LeadsQueue } from "@/components/leads/LeadsQueue";
+import { LeadsWorkspace } from "@/components/leads/LeadsWorkspace";
 
 export const metadata: Metadata = {
   title: "Leads — ProxiPilot",
@@ -8,5 +8,9 @@ export const metadata: Metadata = {
 };
 
 export default function LeadsPage() {
-  return <LeadsQueue />;
+  return (
+    <Suspense fallback={null}>
+      <LeadsWorkspace />
+    </Suspense>
+  );
 }

@@ -776,6 +776,94 @@ async def test_api_rbac_versions_and_participant_validation(w):
         assert (await cl.patch("/followups/policy", json={"version": pol["version"], "max_attempts": 4})).status_code == 409
 
 
+async def test_observe_only_workspace_records_then_admin_activates_and_applies(w):
+    await w.sql("SELECT 1")
+    async with db_manager.session_factory() as db:
+        await db.execute(text("UPDATE followup_policies SET mode='shadow' WHERE tenant_id=:t"), {"t": w.tenant_id})
+        await db.commit()
+    th = await w.thread("Observe")
+    mid = await w.msg(th, "inbound", "Call me Friday 11am", utc(2026, 12, 1, 6, 0))
+    w.script(mid, HOT_SCHEDULED)
+    assert await w.assess(mid, th, utc(2026, 12, 1, 6, 1)) == "shadow"
+    assert await w.live(th) == [] and w.spies.team_mail == []
+    async with api(w, "member") as cl:
+        panel = (await cl.get(f"/followups/threads/{th}")).json()
+        assert panel["workspace"]["mode"] == "shadow"
+        assert panel["latest_suggestion"]["decision"] == "schedule" and panel["latest_suggestion"]["is_latest_message"]
+        r = await cl.post(f"/followups/threads/{th}/apply-suggestion", params={"version": panel["version"]})
+        assert r.status_code == 409                                         # observe-only: nothing applies
+        assert (await cl.get("/followups/summary")).json()["mode"] == "shadow"
+        assert (await cl.patch("/followups/policy", json={"version": 1, "mode": "active"})).status_code == 403
+    async with api(w, "admin") as cl:
+        pol = (await cl.get("/followups/policy")).json()
+        assert pol["mode"] == "shadow" and pol["platform"]["customer_send_enabled"] is False
+        r = await cl.patch("/followups/policy", json={"version": pol["version"], "mode": "active"})
+        assert r.status_code == 200 and r.json()["mode"] == "active"
+    async with api(w, "member") as cl:
+        panel = (await cl.get(f"/followups/threads/{th}")).json()
+        r = await cl.post(f"/followups/threads/{th}/apply-suggestion", params={"version": panel["version"]})
+        assert r.status_code == 200, r.text
+        assert r.json()["status"] == "scheduled" and r.json()["due"]["at"].startswith("2026-12-04T05:30")
+    assert len(await w.live(th)) == 1
+
+
+async def test_customer_email_needs_workspace_allowance(w, monkeypatch):
+    enable_customer_send(monkeypatch)
+    th = await w.thread("Allowance")
+    await w.say(th, "inbound", "Check with me Friday 11am.", utc(2026, 12, 1, 6, 0), HOT_SCHEDULED)
+    async with db_manager.session_factory() as db:
+        await db.execute(text("UPDATE followup_policies SET customer_email_allowed=false WHERE tenant_id=:t"),
+                         {"t": w.tenant_id})
+        await db.commit()
+    async with api(w, "member") as cl:
+        panel = (await cl.get(f"/followups/threads/{th}")).json()
+        assert panel["workspace"]["customer_email_allowed"] is False
+        r = await cl.patch(f"/followups/threads/{th}/controls", json={
+            "version": panel["version"], "customer_email_enabled": True, "customer_recipient_email": CUSTOMER})
+        assert r.status_code == 409 and "Settings" in r.json().get("detail", r.text)
+    await permit_customer_email(w, th)                                     # consent set behind the API's back
+    [occ] = await w.live(th)
+    async with db_manager.session_factory() as db:
+        g = await gate.evaluate(db, await db.get(FollowupOccurrence, occ.id), utc(2026, 12, 4, 5, 30))
+        assert not g.ok and g.reason == "workspace_disallows_customer_email"
+    await FollowupScheduler().run_once(now=utc(2026, 12, 4, 5, 30), tenant_id=w.tenant_id)
+    assert w.spies.gmail_calls == []
+
+
+async def test_snooze_defers_reminders_until_it_ends(w):
+    th = await w.thread("Snooze")
+    await w.say(th, "inbound", "Book 15 December, call me at 3 PM IST.", utc(2026, 12, 1, 6, 0), KAVYA)
+    async with db_manager.session_factory() as db:
+        c = await engine.get_or_create_control(db, w.tenant_id, th)
+        c.snoozed_until = utc(2026, 12, 16, 0, 0)
+        await db.commit()
+    sch = FollowupScheduler()
+    await sch.run_once(now=utc(2026, 12, 14, 4, 30), tenant_id=w.tenant_id)     # advance notice time
+    await sch.run_once(now=utc(2026, 12, 15, 9, 30), tenant_id=w.tenant_id)     # due time
+    assert w.spies.team_mail == []                                              # snoozed: nothing sent
+    await sch.run_once(now=utc(2026, 12, 16, 0, 1), tenant_id=w.tenant_id)      # snooze over
+    kinds = {m["subject"].split(":")[0] for m in w.spies.team_mail if m["to"] != w.emails["viewer"]}
+    assert kinds == {"Follow-up due now"} and len(w.spies.team_mail) == 4      # one due notice each, no stale advance
+
+
+async def test_summary_search_and_sort(w):
+    t = utc(2026, 12, 1, 6, 0)
+    a = await w.thread("Alpha quotation")
+    await w.say(a, "inbound", "Call Friday", t, HOT_SCHEDULED)
+    b = await w.thread("Beta enquiry")
+    await w.say(b, "inbound", "Maybe", t, R(temperature="cold", decision="schedule", timing={"kind": "cadence"}))
+    async with api(w, "member") as cl:
+        s = (await cl.get("/followups/summary")).json()
+        assert s["active"] == 2 and s["mode"] == "active"
+        found = (await cl.get("/followups/leads", params={"q": "alpha"})).json()
+        assert [i["thread_id"] for i in found["items"]] == [a] and found["total"] == 1
+        by_temp = (await cl.get("/followups/leads", params={"sort": "temperature"})).json()["items"]
+        assert [i["thread_id"] for i in by_temp] == [a, b]
+        body = (await cl.get("/followups/leads")).json()
+        assert body["kpis"]["hot"] == 1 and body["timezone"] == "Asia/Kolkata"
+        assert (await cl.get("/followups/leads", params={"sort": "bogus"})).status_code == 422
+
+
 async def test_leads_filters_are_distinct(w):
     t = utc(2026, 12, 1, 6, 0)
     a = await w.thread("Scheduled")

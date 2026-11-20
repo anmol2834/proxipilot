@@ -137,7 +137,7 @@ async def process_assessment(*, tenant_id: str, thread_id: str, message_id: str,
                 row.buying_interest, row.outcome = result.buying_interest, result.outcome
                 row.next_actor, row.decision = result.next_actor, result.decision
                 row.explanation, row.result = result.explanation, result.to_json()
-                if flags.shadow_mode:
+                if engine.observe_only(policy):
                     row.not_applied_reason = "shadow_mode"
                     st = await db.get(ThreadFollowupState, thread_id)
                     if st is not None and st.last_message_id == message_id:

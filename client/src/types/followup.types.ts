@@ -1,5 +1,24 @@
 /** Conversation intelligence & follow-ups — API contracts (mirrors server/app/api/v1/routes/followups.py). */
 
+export type WorkspaceMode = "shadow" | "active";
+
+export interface FollowupSuggestion {
+  assessment_id: string;
+  message_id: string;
+  created_at: string | null;
+  temperature: FollowupTemperature | null;
+  decision: string | null;
+  outcome: string | null;
+  next_actor: string | null;
+  next_action: string | null;
+  explanation: string | null;
+  timing_phrase: string | null;
+  timing_date: string | null;
+  applied: boolean;
+  not_applied_reason: string | null;
+  is_latest_message: boolean;
+}
+
 export type FollowupTemperature = "hot" | "warm" | "cold" | "unknown";
 export type FollowupStatus =
   | "none"
@@ -91,6 +110,8 @@ export interface ThreadFollowup {
     snoozed_until: string | null;
     completed: boolean;
   };
+  latest_suggestion: FollowupSuggestion | null;
+  workspace: { mode: WorkspaceMode; configured_mode: WorkspaceMode; customer_email_allowed: boolean };
   participants: string[];
   suppressions: { id: string; recipient_email: string; scope: string; until_at: string | null; quote: string | null }[];
   capabilities: {
@@ -137,6 +158,14 @@ export interface FollowupPolicy {
   min_spacing_hours: number;
   timezone: string | null;
   effective_timezone: string;
+  mode: WorkspaceMode;
+  customer_email_allowed: boolean;
+  platform: {
+    observe_only_forced: boolean;
+    assessment_enabled: boolean;
+    reminders_enabled: boolean;
+    customer_send_enabled: boolean;
+  };
 }
 
 export type LeadFilter =
@@ -175,5 +204,17 @@ export interface LeadsResponse {
   page_size: number;
   total: number;
   counts: Record<LeadFilter, number>;
+  kpis: { due_today: number; hot: number };
+  mode: WorkspaceMode;
+  timezone: string;
   items: LeadItem[];
+}
+
+export type LeadSort = "due" | "recent" | "temperature";
+
+export interface FollowupSummary {
+  due: number;
+  needs_review: number;
+  active: number;
+  mode: WorkspaceMode;
 }

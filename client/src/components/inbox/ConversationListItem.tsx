@@ -58,6 +58,21 @@ function guessCategory(subject: string, senderName: string): { label: string; bg
   return null;
 }
 
+/** Compact follow-up badge for the list (server already filters to active follow-up states). */
+function followupBadge(status: string | null, dueAt: string | null): { label: string; title: string; color: string; bg: string } | null {
+  if (!status) return null;
+  const due = dueAt ? new Date(dueAt) : null;
+  const overdue = due ? due.getTime() <= Date.now() : false;
+  if (status === "needs_review") return { label: "Review", title: "Follow-up needs a decision", color: "#B91C1C", bg: "#FEE2E2" };
+  if (due && overdue) return { label: "Follow-up due", title: `Due ${due.toLocaleString()}`, color: "#B91C1C", bg: "#FEE2E2" };
+  if (due) {
+    return { label: `Follow up ${due.toLocaleDateString(undefined, { day: "numeric", month: "short" })}`,
+             title: `Due ${due.toLocaleString()}`, color: "#1D4ED8", bg: "#DBEAFE" };
+  }
+  if (status === "waiting_team") return { label: "Team owes reply", title: "Your team owes the next step", color: "#B45309", bg: "#FEF3C7" };
+  return null;
+}
+
 export function ConversationListItem({
   conversation,
   isSelected,
@@ -66,6 +81,7 @@ export function ConversationListItem({
   const { sender, subject, snippet, latestMessageAt, unread, leadTemperature, threadCount } = conversation;
   const avatarStyle = getAvatarStyle(sender.name);
   const tempChip = leadTemperature ? TEMP_CHIP[leadTemperature] : null;
+  const followupChip = followupBadge(conversation.followupStatus ?? null, conversation.followupDueAt ?? null);
   const categoryChip = guessCategory(subject, sender.name);
 
   return (
@@ -278,6 +294,23 @@ export function ConversationListItem({
             >
               <span style={{ fontSize: 10 }}>{tempChip.icon}</span>
               {tempChip.label}
+            </span>
+          )}
+
+          {/* Follow-up state (due / needs review / scheduled) */}
+          {followupChip && (
+            <span
+              title={followupChip.title}
+              style={{
+                fontSize: 10.5,
+                fontWeight: 700,
+                color: followupChip.color,
+                background: followupChip.bg,
+                borderRadius: 5,
+                padding: "1px 6px",
+              }}
+            >
+              {followupChip.label}
             </span>
           )}
 

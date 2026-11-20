@@ -103,9 +103,14 @@ async def evaluate(db: AsyncSession, occ: FollowupOccurrence, now: Optional[date
         return GateResult(False, "marked_completed")
     if control.snoozed_until and _utc(control.snoozed_until) > now:
         return GateResult(False, "snoozed")
-    _, planning_on = engine.effective_switches(await engine.load_policy(db, occ.tenant_id), control)
+    ws_policy = await engine.load_policy(db, occ.tenant_id)
+    _, planning_on = engine.effective_switches(ws_policy, control)
     if not planning_on:
         return GateResult(False, "planning_off")
+    if not ws_policy.customer_email_allowed:
+        return GateResult(False, "workspace_disallows_customer_email")
+    if engine.observe_only(ws_policy):
+        return GateResult(False, "workspace_observe_only")
     if not await user_has_permission(db, occ.tenant_id, control.customer_email_enabled_by, "inbox.send"):
         return GateResult(False, "permitting_user_lacks_send_authority")
     recipient = engine.norm_email(control.customer_recipient_email)

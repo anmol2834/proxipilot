@@ -133,7 +133,8 @@ class World:
             return list((await db.execute(text(q), params)).all())
 
 
-async def build_world(tag: str, *, org_tz: str = "Asia/Kolkata (GMT +5:30)") -> World:
+async def build_world(tag: str, *, org_tz: str = "Asia/Kolkata (GMT +5:30)", mode: str = "active",
+                      customer_email_allowed: bool = True) -> World:
     from app.core.rbac_seed import ensure_system_rbac
 
     db_manager.initialize()
@@ -162,6 +163,8 @@ async def build_world(tag: str, *, org_tz: str = "Asia/Kolkata (GMT +5:30)") -> 
             await db.flush()
             db.add(OrganizationMember(organization_id=tenant, user_id=uid,
                                       role_id=roles[role] if role else viewer_role, status=status))
+        from app.models.followup import FollowupPolicy
+        db.add(FollowupPolicy(tenant_id=tenant, mode=mode, customer_email_allowed=customer_email_allowed))
         db.add(ConnectedIntegrationAccount(id=account, tenant_id=tenant, provider="gmail", email_address=mailbox,
                                            display_name="Sales", status="active", connection_status="healthy",
                                            sync_enabled=False, automation_enabled=True))

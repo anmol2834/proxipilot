@@ -96,6 +96,20 @@ async def _panel(db: AsyncSession, ctx: TenantContext, thread: EmailThread) -> D
         MessageAssessment.tenant_id == tid, MessageAssessment.thread_id == thread.id,
     ).order_by(MessageAssessment.created_at.desc()).limit(10))).scalars().all()
     flags = get_flags()
+    latest_valid = next((a for a in history if a.status == "valid"), None)
+    suggestion = None
+    if latest_valid is not None:
+        res = latest_valid.result or {}
+        suggestion = {
+            "assessment_id": latest_valid.id, "message_id": latest_valid.message_id,
+            "created_at": _iso(latest_valid.created_at), "temperature": latest_valid.suggested_temperature,
+            "decision": latest_valid.decision, "outcome": latest_valid.outcome, "next_actor": latest_valid.next_actor,
+            "next_action": res.get("next_action"), "explanation": latest_valid.explanation,
+            "timing_phrase": (res.get("timing") or {}).get("phrase"),
+            "timing_date": (res.get("timing") or {}).get("local_date"),
+            "applied": latest_valid.applied, "not_applied_reason": latest_valid.not_applied_reason,
+            "is_latest_message": bool(state and state.last_message_id == latest_valid.message_id),
+        }
 
     def local(dt, zone_name=None):
         if not dt:
@@ -147,6 +161,9 @@ async def _panel(db: AsyncSession, ctx: TenantContext, thread: EmailThread) -> D
             "snoozed_until": _iso(control.snoozed_until) if control else None,
             "completed": bool(control and control.completed),
         },
+        "latest_suggestion": suggestion,
+        "workspace": {"mode": "shadow" if engine.observe_only(policy) else "active",
+                      "configured_mode": policy.mode, "customer_email_allowed": bool(policy.customer_email_allowed)},
         "participants": participants,
         "suppressions": [{"id": s.id, "recipient_email": s.recipient_email, "scope": s.scope,
                           "until_at": _iso(s.until_at), "quote": s.quote, "created_at": _iso(s.created_at)} for s in sups],
@@ -237,6 +254,9 @@ async def patch_controls(thread_id: str, body: ControlsPatch, db: AsyncSession =
             else engine.norm_email(control.customer_recipient_email)
         enable = body.customer_email_enabled if "customer_email_enabled" in fields else control.customer_email_enabled
         if enable:
+            if not (await engine.load_policy(db, tid)).customer_email_allowed:
+                raise HTTPException(status_code=409, detail="Automatic customer email is not allowed in this workspace. "
+                                                            "An admin can allow it in Settings → Follow-ups.")
             if not recipient:
                 raise HTTPException(status_code=422, detail="Choose the customer participant to email")
             if recipient not in participants:
@@ -353,6 +373,54 @@ async def clear_schedule(thread_id: str, version: int = Query(..., ge=0), db: As
     return await _panel(db, ctx, thread)
 
 
+@router.post("/threads/{thread_id}/apply-suggestion")
+async def apply_suggestion(thread_id: str, version: int = Query(..., ge=0), db: AsyncSession = Depends(get_db),
+                           ctx: TenantContext = Depends(require_permission("inbox.reply"))) -> Dict[str, Any]:
+    """Apply the latest AI #2 assessment that was only recorded (observe-only mode) to this conversation.
+    Allowed only in an active workspace and only while that assessment is for the newest message."""
+    from app.services.followups.contracts import from_json
+
+    thread = await _thread(db, ctx, thread_id)
+    tid = ctx.organization_id
+    policy = await engine.load_policy(db, tid)
+    if engine.observe_only(policy):
+        raise HTTPException(status_code=409, detail="The workspace is in observe-only mode; activate follow-ups in Settings first")
+    control = await engine.get_or_create_control(db, tid, thread.id)
+    if version != control.version:
+        raise HTTPException(status_code=409, detail="This conversation's follow-up settings changed; refresh and retry")
+    state = await engine.lock_state(db, tid, thread.id)
+    row = (await db.execute(select(MessageAssessment).where(
+        MessageAssessment.tenant_id == tid, MessageAssessment.thread_id == thread.id,
+        MessageAssessment.status == "valid").order_by(MessageAssessment.created_at.desc()).limit(1))).scalar_one_or_none()
+    if row is None or not row.result:
+        raise HTTPException(status_code=404, detail="There is no AI assessment to apply yet")
+    if state.last_message_id and state.last_message_id != row.message_id:
+        raise HTTPException(status_code=409, detail="A newer message is being assessed; try again in a moment")
+    out = await engine.apply_assessment(db, tenant_id=tid, row=row, result=from_json(row.result))
+    if not out.applied:
+        raise HTTPException(status_code=409, detail=f"Could not apply: {out.reason}")
+    control.version = (control.version or 0) + 1
+    await _audit(db, ctx, "FOLLOWUP_SUGGESTION_APPLIED", thread.id, {"assessment_id": row.id})
+    await db.commit()
+    return await _panel(db, ctx, thread)
+
+
+@router.get("/summary")
+async def summary(db: AsyncSession = Depends(get_db),
+                  ctx: TenantContext = Depends(require_permission("inbox.read"))) -> Dict[str, Any]:
+    """Cheap counts for navigation badges (no thread data)."""
+    tid, now = ctx.organization_id, datetime.now(timezone.utc)
+    S = ThreadFollowupState
+
+    async def n(clause) -> int:
+        return int((await db.execute(select(func.count()).select_from(S).where(S.tenant_id == tid, clause))).scalar_one())
+
+    policy = await engine.load_policy(db, tid)
+    return {"due": await n(_filter_clause("due", now)), "needs_review": await n(_filter_clause("needs_review", now)),
+            "active": await n(_filter_clause("active", now)),
+            "mode": "shadow" if engine.observe_only(policy) else "active"}
+
+
 @router.delete("/suppressions/{suppression_id}")
 async def lift_suppression(suppression_id: str, db: AsyncSession = Depends(get_db),
                            ctx: TenantContext = Depends(require_permission("settings.update"))) -> Dict[str, Any]:
@@ -381,6 +449,13 @@ def _policy_dto(p: FollowupPolicy, cal: tm.Calendar) -> Dict[str, Any]:
         "default_local_time": p.default_local_time, "advance_notice_days": p.advance_notice_days,
         "max_attempts": p.max_attempts, "min_spacing_hours": p.min_spacing_hours,
         "timezone": p.timezone, "effective_timezone": cal.zone.name,
+        "mode": p.mode or "shadow", "customer_email_allowed": bool(p.customer_email_allowed),
+        "platform": {
+            "observe_only_forced": bool(get_flags().shadow_mode),
+            "assessment_enabled": bool(get_flags().assessment_enabled),
+            "reminders_enabled": bool(get_flags().reminders_enabled),
+            "customer_send_enabled": bool(get_flags().customer_send_enabled),
+        },
     }
 
 
@@ -406,6 +481,8 @@ class PolicyPatch(BaseModel):
     max_attempts: Optional[int] = Field(default=None, ge=1, le=10)
     min_spacing_hours: Optional[int] = Field(default=None, ge=1, le=720)
     timezone: Optional[str] = Field(default=None, max_length=64)
+    mode: Optional[str] = Field(default=None, pattern=r"^(shadow|active)$")
+    customer_email_allowed: Optional[bool] = None
 
 
 @router.patch("/policy")
@@ -439,7 +516,7 @@ async def patch_policy(body: PolicyPatch, db: AsyncSession = Depends(get_db),
         p.timezone = None
     for f in ("assessment_enabled", "planning_enabled", "cadence_hot_days", "cadence_warm_days", "cadence_cold_days",
               "send_window_start", "send_window_end", "default_local_time", "advance_notice_days", "max_attempts",
-              "min_spacing_hours"):
+              "min_spacing_hours", "mode", "customer_email_allowed"):
         if f in fields and getattr(body, f) is not None:
             setattr(p, f, getattr(body, f))
     if p.send_window_start >= p.send_window_end:
@@ -471,29 +548,56 @@ def _filter_clause(name: str, now: datetime):
     }[name]
 
 
+LEAD_SORTS = ("due", "recent", "temperature")
+
+
 @router.get("/leads")
 async def leads(filter: str = Query("active"), page: int = Query(1, ge=1), page_size: int = Query(25, ge=1, le=100),
-                temperature: Optional[str] = Query(None), db: AsyncSession = Depends(get_db),
+                temperature: Optional[str] = Query(None), q: Optional[str] = Query(None, max_length=120),
+                sort: str = Query("due"), db: AsyncSession = Depends(get_db),
                 ctx: TenantContext = Depends(require_permission("inbox.read"))) -> Dict[str, Any]:
     if filter not in LEAD_FILTERS:
         raise HTTPException(status_code=422, detail=f"filter must be one of {', '.join(LEAD_FILTERS)}")
+    if sort not in LEAD_SORTS:
+        raise HTTPException(status_code=422, detail=f"sort must be one of {', '.join(LEAD_SORTS)}")
+    from sqlalchemy import case, or_
+
     tid, now = ctx.organization_id, datetime.now(timezone.utc)
     S, T = ThreadFollowupState, EmailThread
     base = and_(S.tenant_id == tid, T.tenant_id == tid, _filter_clause(filter, now))
     if temperature in ("hot", "warm", "cold", "unknown"):
         base = and_(base, S.effective_temperature == temperature)
+    term = (q or "").strip()
+    if term:
+        like = f"%{term.replace('%', '').replace('_', '')}%"
+        base = and_(base, or_(T.subject.ilike(like), T.sender_email.ilike(like), T.sender_name.ilike(like)))
+    temp_rank = case((S.effective_temperature == "hot", 0), (S.effective_temperature == "warm", 1),
+                     (S.effective_temperature == "cold", 2), else_=3)
+    order = {"due": (S.due_at.asc().nullslast(), S.updated_at.desc()),
+             "recent": (T.latest_message_at.desc().nullslast(),),
+             "temperature": (temp_rank, S.due_at.asc().nullslast())}[sort]
     total = (await db.execute(select(func.count()).select_from(S).join(T, T.id == S.thread_id).where(base))).scalar_one()
     rows = (await db.execute(
         select(S, T.subject, T.sender_name, T.sender_email, T.latest_message_at).join(T, T.id == S.thread_id)
-        .where(base).order_by(S.due_at.asc().nullslast(), S.updated_at.desc())
-        .offset((page - 1) * page_size).limit(page_size))).all()
+        .where(base).order_by(*order).offset((page - 1) * page_size).limit(page_size))).all()
     counts: Dict[str, int] = {}
     for name in LEAD_FILTERS:
         counts[name] = (await db.execute(select(func.count()).select_from(S).join(T, T.id == S.thread_id).where(
             S.tenant_id == tid, T.tenant_id == tid, _filter_clause(name, now)))).scalar_one()
     cal = await engine.load_calendar(db, tid)
+    local_now = now.astimezone(cal.zone.tz)
+    end_of_today, _ = tm.local_instant(local_now.date(), datetime.max.time().replace(microsecond=0), cal.zone)
+    actionable = S.status.in_(engine.ACTIVE_STATUSES)
+    kpis = {
+        "due_today": (await db.execute(select(func.count()).select_from(S).where(
+            S.tenant_id == tid, actionable, S.due_at.is_not(None), S.due_at <= end_of_today))).scalar_one(),
+        "hot": (await db.execute(select(func.count()).select_from(S).where(
+            S.tenant_id == tid, actionable, S.effective_temperature == "hot"))).scalar_one(),
+    }
+    policy = await engine.load_policy(db, tid)
     return {
-        "filter": filter, "page": page, "page_size": page_size, "total": total, "counts": counts,
+        "filter": filter, "page": page, "page_size": page_size, "total": total, "counts": counts, "kpis": kpis,
+        "mode": "shadow" if engine.observe_only(policy) else "active", "timezone": cal.zone.name,
         "items": [{
             "thread_id": s.thread_id, "subject": subject, "sender_name": sname, "sender_email": semail,
             "latest_message_at": _iso(latest), "temperature": s.effective_temperature,
