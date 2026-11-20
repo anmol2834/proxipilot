@@ -36,8 +36,8 @@ _CLEANUP_TABLES = (
     "contact_facts", "contacts", "commitments", "thread_memories", "draft_feedback", "response_outcomes",
     "feedback_lessons", "style_profiles", "org_practices",
     # conversation + reply state
-    "thread_presented_entities", "outbound_messages", "human_reviews", "ai_responses", "ai_runs",
-    "outbox_events", "email_messages", "email_threads", "connected_integration_accounts",
+    "thread_suppression_markers", "thread_presented_entities", "outbound_messages", "human_reviews",
+    "ai_responses", "ai_runs", "outbox_events", "email_messages", "email_threads", "connected_integration_accounts",
     # knowledge
     "knowledge_semantic_chunks", "knowledge_versions", "knowledge_items", "import_jobs",
     "knowledge_schema_profiles", "knowledge_attribute_definitions", "knowledge_sources", "audit_events",
@@ -48,11 +48,18 @@ async def _qdrant_delete_tenant(tenant_id: str) -> None:
     from app.core.config import get_settings
 
     url = str(get_settings().qdrant.url).rstrip("/")
-    async with httpx.AsyncClient(base_url=url, timeout=60) as c:
-        cols = (await c.get("/collections")).json()["result"]["collections"]
-        for col in cols:
-            await c.post(f"/collections/{col['name']}/points/delete?wait=true",
-                         json={"filter": {"must": [{"key": "organization_id", "match": {"value": tenant_id}}]}})
+    try:
+        async with httpx.AsyncClient(base_url=url, timeout=2.0) as c:
+            res = await c.get("/collections")
+            if res.status_code == 200:
+                cols = res.json().get("result", {}).get("collections", [])
+                for col in cols:
+                    await c.post(
+                        f"/collections/{col['name']}/points/delete?wait=true",
+                        json={"filter": {"must": [{"key": "organization_id", "match": {"value": tenant_id}}]}},
+                    )
+    except Exception:
+        pass
 
 
 async def purge_tenant(tenant_id: str) -> None:

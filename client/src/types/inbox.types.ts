@@ -64,7 +64,9 @@ export interface Conversation {
   /** Formatted display timestamp (e.g. "10:24 AM", "Yesterday", "Mon"). */
   latestMessageAt: string;
   leadTemperature: LeadTemperature;
-  starred: boolean;
+  hasFollowup?: boolean;
+  followupStatus?: string | null;
+  followupDueAt?: string | null;
   unread: boolean;
   createdAt: string;
   updatedAt: string;

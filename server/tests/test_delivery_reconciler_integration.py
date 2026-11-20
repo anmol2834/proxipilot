@@ -32,9 +32,9 @@ async def world(monkeypatch):
             VALUES (:a, :t, 'gmail', :e, 'active', 'connected', false, true, now(), now())"""),
             {"a": acc, "t": org, "e": f"sales-{tag}@itest.example"})
         await db.execute(text("""INSERT INTO email_threads (id, tenant_id, integration_account_id, external_thread_id,
-            subject, status, message_count, unread_count, is_read, is_starred, context_revision, first_message_at,
+            subject, status, message_count, unread_count, is_read, context_revision, first_message_at,
             latest_message_at, created_at, updated_at) VALUES (:th, :t, :a, :ext, 'Quote', 'open', 1, 1, false,
-            false, 1, :at, :at, now(), now())"""), {"th": th, "t": org, "a": acc, "ext": f"gth_{tag}", "at": now})
+            1, :at, :at, now(), now())"""), {"th": th, "t": org, "a": acc, "ext": f"gth_{tag}", "at": now})
         await db.execute(text("""INSERT INTO email_messages (id, tenant_id, thread_id, integration_account_id,
             external_message_id, direction, from_email, to_emails, body_text, sent_at, message_id_header,
             filter_reason, created_at, updated_at) VALUES (:id, :t, :th, :a, :ext, 'inbound', 'buyer@itest.example',

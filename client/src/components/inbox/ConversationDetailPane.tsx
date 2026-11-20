@@ -14,19 +14,11 @@ import {
   IconFlame,
   IconSun,
   IconSnowflake,
-  IconDots,
-  IconStar,
-  IconStarFilled,
   IconCornerUpLeft,
   IconSparkles,
-  IconTemplate,
   IconSend,
   IconChevronDown,
-  IconChevronRight,
-  IconMoodSmile,
   IconLink,
-  IconPlus,
-  IconCheck,
   IconX,
   IconArchive,
 } from "@tabler/icons-react";
@@ -44,7 +36,6 @@ interface ConversationDetailPaneProps {
   isLoadingOlder?: boolean;
   olderMessagesError?: boolean;
   onLoadOlder?: () => void;
-  onToggleStar: (starred: boolean) => void;
   onSetLeadTemperature: (temp: LeadTemperature) => void;
   onDeleteClick: () => void;
   onBackToList?: () => void;
@@ -138,20 +129,6 @@ function EmptyDetailPane() {
   );
 }
 
-function getSubjectTopic(subject: string, senderName: string): string {
-  const s = `${subject} ${senderName}`.toLowerCase();
-  if (s.includes("order") || s.includes("derma") || s.includes("zomato") || s.includes("delivery") || s.includes("myntra") || s.includes("bff")) {
-    return "Updates";
-  }
-  if (s.includes("quora") || s.includes("college") || s.includes("medical") || s.includes("education")) {
-    return "Education";
-  }
-  if (s.includes("job") || s.includes("career") || s.includes("indeed") || s.includes("trainer")) {
-    return "Careers";
-  }
-  return "Updates";
-}
-
 export function ConversationDetailPane({
   conversation,
   messages,
@@ -164,7 +141,6 @@ export function ConversationDetailPane({
   isLoadingOlder = false,
   olderMessagesError = false,
   onLoadOlder,
-  onToggleStar,
   onSetLeadTemperature,
   onDeleteClick,
   onBackToList,
@@ -263,7 +239,7 @@ export function ConversationDetailPane({
 
   if (!conversation) return <EmptyDetailPane />;
 
-  const { sender, subject, leadTemperature, starred, aiSummary } = conversation;
+  const { sender, subject, leadTemperature, aiSummary } = conversation;
   const messageCount = totalMessageCount ?? (messages.length || null);
   const mailboxLabel = mailbox ? (mailbox.name ? `${mailbox.name} <${mailbox.email}>` : mailbox.email) : null;
 
@@ -317,7 +293,7 @@ export function ConversationDetailPane({
           background: "#FFFFFF",
         }}
       >
-        {/* Left: Mobile back (if needed) + Delete + Mark as dropdown */}
+        {/* Left: Mobile back (if needed) + Delete */}
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           {onBackToList && (
             <ToolbarBtn onClick={onBackToList} title="Back to list">
@@ -328,32 +304,9 @@ export function ConversationDetailPane({
           <ToolbarBtn onClick={onDeleteClick} title="Delete conversation" danger>
             <IconTrash size={16} stroke={1.8} />
           </ToolbarBtn>
-
-          <div style={{ width: 1, height: 18, background: "#E8ECF0", margin: "0 2px" }} />
-
-          {/* Mark as button */}
-          <button
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 4,
-              padding: "5px 11px",
-              borderRadius: 7,
-              border: "1px solid #E2E8F0",
-              background: "#FFFFFF",
-              color: "#475569",
-              fontSize: 12.5,
-              fontWeight: 500,
-              cursor: "pointer",
-              fontFamily: "inherit",
-            }}
-          >
-            Mark as
-            <IconChevronDown size={13} stroke={2} />
-          </button>
         </div>
 
-        {/* Right: Hot / Warm / Cold pills + More */}
+        {/* Right: Hot / Warm / Cold pills */}
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <button
             onClick={() => onSetLeadTemperature(isHot ? null : "hot")}
@@ -420,10 +373,6 @@ export function ConversationDetailPane({
             <IconSnowflake size={13} stroke={2} color={isCold ? "#0284C7" : "#0284C7"} />
             Cold
           </button>
-
-          <ToolbarBtn title="More options">
-            <IconDots size={16} stroke={1.8} />
-          </ToolbarBtn>
         </div>
       </div>
 
@@ -455,78 +404,6 @@ export function ConversationDetailPane({
         >
           {subject}
         </h2>
-
-        {/* Label pills row */}
-        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: -6 }}>
-          {/* Inbox label */}
-          <span
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 5,
-              fontSize: 12,
-              fontWeight: 600,
-              color: "#2563EB",
-              background: "#EFF6FF",
-              border: "1px solid #BFDBFE",
-              borderRadius: 6,
-              padding: "2px 8px",
-            }}
-          >
-            <IconCheck size={11} stroke={3.5} color="#2563EB" />
-            Inbox
-          </span>
-
-          {/* Company pill */}
-          <span
-            style={{
-              fontSize: 12,
-              fontWeight: 500,
-              color: "#334155",
-              background: "#F1F5F9",
-              border: "1px solid #E2E8F0",
-              borderRadius: 6,
-              padding: "2px 9px",
-            }}
-          >
-            {sender.name.split(" ")[0]}
-          </span>
-
-          {/* Topic pill */}
-          <span
-            style={{
-              fontSize: 12,
-              fontWeight: 500,
-              color: "#0369A1",
-              background: "#E0F2FE",
-              border: "1px solid #BAE6FD",
-              borderRadius: 6,
-              padding: "2px 9px",
-            }}
-          >
-            {getSubjectTopic(subject, sender.name)}
-          </span>
-
-          {/* Plus button */}
-          <button
-            style={{
-              width: 22,
-              height: 22,
-              borderRadius: 6,
-              border: "1px solid #E2E8F0",
-              background: "#FFFFFF",
-              color: "#94A3B8",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              cursor: "pointer",
-              padding: 0,
-            }}
-            title="Add label"
-          >
-            <IconPlus size={13} stroke={2.5} />
-          </button>
-        </div>
 
         {/* Participants: who this conversation is between, plus thread actions */}
         <div
@@ -560,22 +437,6 @@ export function ConversationDetailPane({
                 {messageCount} message{messageCount === 1 ? "" : "s"}
               </span>
             ) : null}
-            <button
-              onClick={() => onToggleStar(!starred)}
-              style={{
-                background: "none",
-                border: "none",
-                cursor: "pointer",
-                padding: 2,
-                color: starred ? "#F59E0B" : "#94A3B8",
-                display: "flex",
-                alignItems: "center",
-              }}
-              title={starred ? "Unstar" : "Star"}
-              aria-label={starred ? "Unstar conversation" : "Star conversation"}
-            >
-              {starred ? <IconStarFilled size={16} color="#F59E0B" /> : <IconStar size={16} stroke={1.8} />}
-            </button>
             <button
               onClick={() => setIsReplyOpen(true)}
               style={{
@@ -629,25 +490,6 @@ export function ConversationDetailPane({
                 BETA
               </span>
             </div>
-            <button
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 4,
-                padding: "4px 10px",
-                borderRadius: 7,
-                border: "1px solid #E2E8F0",
-                background: "#FFFFFF",
-                color: "#475569",
-                fontSize: 12,
-                fontWeight: 500,
-                cursor: "pointer",
-                fontFamily: "inherit",
-              }}
-            >
-              View Key Points
-              <IconChevronRight size={13} stroke={2} />
-            </button>
           </div>
 
           {/* Summary text */}
@@ -793,28 +635,6 @@ export function ConversationDetailPane({
               </div>
 
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                {/* Templates button */}
-                <button
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 5,
-                    padding: "4px 10px",
-                    borderRadius: 6,
-                    border: "1px solid #E2E8F0",
-                    background: "#FFFFFF",
-                    color: "#475569",
-                    fontSize: 12,
-                    fontWeight: 500,
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                  }}
-                >
-                  <IconTemplate size={13} stroke={1.8} />
-                  Templates
-                  <IconChevronDown size={11} stroke={2} />
-                </button>
-
                 {/* Close / Collapse button */}
                 <button
                   onClick={handleCloseComposer}
@@ -888,7 +708,7 @@ export function ConversationDetailPane({
                 background: "#FFFFFF",
               }}
             >
-              {/* Left tools: ONLY Link and Emoji */}
+              {/* Left tools: Link */}
               <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                 <button
                   title="Insert Link"
@@ -907,24 +727,6 @@ export function ConversationDetailPane({
                   onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
                 >
                   <IconLink size={16} stroke={2} />
-                </button>
-                <button
-                  title="Insert Emoji"
-                  style={{
-                    background: "none",
-                    border: "none",
-                    cursor: "pointer",
-                    color: "#64748B",
-                    padding: "6px",
-                    borderRadius: 5,
-                    display: "flex",
-                    alignItems: "center",
-                    transition: "color 0.12s, background 0.12s",
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = "#F1F5F9")}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
-                >
-                  <IconMoodSmile size={16} stroke={2} />
                 </button>
               </div>
 

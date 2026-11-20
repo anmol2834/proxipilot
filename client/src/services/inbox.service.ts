@@ -8,7 +8,6 @@
  *   GET  /api/v1/inbox/threads                          → PaginatedThreadsResponse
  *   GET  /api/v1/inbox/threads/{id}                     → ThreadDTO
  *   GET  /api/v1/inbox/threads/{id}/messages            → PaginatedMessagesResponse
- *   PATCH /api/v1/inbox/threads/{id}/star               → { id, starred }
  *   PATCH /api/v1/inbox/threads/{id}/read               → { id, is_read }
  *   PATCH /api/v1/inbox/threads/{id}/lead-temperature   → { id, lead_temperature }
  *   DELETE /api/v1/inbox/threads/{id}                   → { id, status }
@@ -48,7 +47,9 @@ interface BackendThread {
   message_count: number;
   unread_count: number;
   is_unread: boolean;
-  is_starred: boolean;
+  has_followup?: boolean;
+  followup_status?: string | null;
+  followup_due_at?: string | null;
   lead_temperature: string | null;
   status: string;
   ai_summary: BackendAISummary | null;
@@ -174,7 +175,9 @@ function _threadToConversation(t: BackendThread): Conversation {
       ? _formatTimestamp(t.latest_message_at)
       : "",
     leadTemperature: (t.lead_temperature as LeadTemperature) ?? null,
-    starred: t.is_starred,
+    hasFollowup: Boolean(t.has_followup),
+    followupStatus: t.followup_status ?? null,
+    followupDueAt: t.followup_due_at ?? null,
     unread: t.is_unread,
     createdAt: t.created_at,
     updatedAt: t.updated_at,
@@ -224,7 +227,8 @@ class InboxService {
     limit?: number;
     integrationAccountId?: string;
     leadTemperature?: LeadTemperature;
-    starred?: boolean;
+    followup?: boolean;
+    status?: string;
   }): Promise<PaginatedConversationsResponse> {
     const queryParams: Record<string, string | number | boolean> = {
       limit: params.limit ?? 30,
@@ -234,8 +238,10 @@ class InboxService {
       queryParams.integration_account_id = params.integrationAccountId;
     if (params.leadTemperature)
       queryParams.lead_temperature = params.leadTemperature;
-    if (params.starred !== undefined)
-      queryParams.starred = params.starred;
+    if (params.followup !== undefined)
+      queryParams.followup = params.followup;
+    if (params.status)
+      queryParams.status = params.status;
 
     const response = await apiClient.get<BackendPaginatedThreads>(
       "/inbox/threads",
@@ -293,18 +299,6 @@ class InboxService {
   }
 
   /**
-   * Star or unstar a thread.
-   */
-  async toggleStar(id: string, starred: boolean): Promise<Conversation> {
-    await apiClient.patch<{ id: string; starred: boolean }>(
-      `/inbox/threads/${id}/star`,
-      { starred }
-    );
-    // Return a partial update — caller uses optimistic update pattern
-    return { id, isStarred: starred } as unknown as Conversation;
-  }
-
-  /**
    * Set lead temperature classification.
    */
   async setLeadTemperature(
@@ -321,12 +315,13 @@ class InboxService {
   }
 
   /**
-   * Archive (soft-delete) a thread.
+   * Permanently delete a thread.
    */
-  async deleteConversation(id: string): Promise<void> {
-    await apiClient.delete<{ id: string; status: string }>(
+  async deleteConversation(id: string): Promise<{ id: string; deleted: boolean }> {
+    const response = await apiClient.delete<{ id: string; deleted: boolean }>(
       `/inbox/threads/${id}`
     );
+    return response.data;
   }
 
   /**

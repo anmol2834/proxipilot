@@ -13,14 +13,13 @@ interface ConversationListProps {
   conversations: Conversation[];
   selectedId: string | null;
   onSelect: (id: string) => void;
-  onToggleStar: (id: string, currentStarred: boolean) => void;
   isLoading: boolean;
   isFetchingNextPage: boolean;
   hasNextPage: boolean;
   fetchNextPage: () => void;
 }
 
-type TabId = "all" | "unread" | "starred" | "priority";
+type TabId = "all" | "unread" | "followup" | "priority";
 
 interface Tab {
   id: TabId;
@@ -32,7 +31,6 @@ export function ConversationList({
   conversations,
   selectedId,
   onSelect,
-  onToggleStar,
   isLoading,
   isFetchingNextPage,
   hasNextPage,
@@ -44,7 +42,7 @@ export function ConversationList({
   const [searchQuery, setSearchQuery] = useState("");
 
   const unreadCount = conversations.filter((c) => c.unread).length;
-  const starredCount = conversations.filter((c) => c.starred).length;
+  const followupCount = conversations.filter((c) => c.hasFollowup).length;
   const priorityCount = conversations.filter(
     (c) => c.leadTemperature === "hot"
   ).length;
@@ -52,7 +50,7 @@ export function ConversationList({
   const tabs: Tab[] = [
     { id: "all", label: "All", count: conversations.length },
     { id: "unread", label: "Unread", count: unreadCount },
-    { id: "starred", label: "Starred", count: starredCount },
+    { id: "followup", label: "Follow-up", count: followupCount },
     { id: "priority", label: "Priority", count: priorityCount },
   ];
 
@@ -60,7 +58,7 @@ export function ConversationList({
     const matchesTab =
       activeTab === "all" ||
       (activeTab === "unread" && c.unread) ||
-      (activeTab === "starred" && c.starred) ||
+      (activeTab === "followup" && c.hasFollowup) ||
       (activeTab === "priority" && c.leadTemperature === "hot");
     const matchesSearch =
       !searchQuery ||
@@ -337,10 +335,12 @@ export function ConversationList({
               <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
             </svg>
             <p style={{ fontSize: 13.5, fontWeight: 600, color: "#475569", margin: "0 0 4px" }}>
-              No conversations
+              {activeTab === "followup" ? "No conversations requiring follow-up" : "No conversations"}
             </p>
             <p style={{ fontSize: 12.5, margin: 0 }}>
-              Incoming customer emails will appear here.
+              {activeTab === "followup"
+                ? "Conversations with active commitments or pending follow-ups will appear here."
+                : "Incoming customer emails will appear here."}
             </p>
           </div>
         ) : (
@@ -350,7 +350,6 @@ export function ConversationList({
               conversation={conversation}
               isSelected={selectedId === conversation.id}
               onSelect={() => onSelect(conversation.id)}
-              onToggleStar={(e) => onToggleStar(conversation.id, conversation.starred)}
             />
           ))
         )}

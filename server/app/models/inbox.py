@@ -166,7 +166,6 @@ class EmailThread(Base, TenantAwareMixin):
 
     # User-facing state (maintained in ProxiPilot, not synced to provider)
     is_read: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
-    is_starred: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # Counts (denormalized for O(1) list queries — updated on message ingestion)
     message_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -447,3 +446,54 @@ class TrustedSender(Base, TimestampMixin):
 
     def __repr__(self) -> str:
         return f"<TrustedSender tenant={self.tenant_id} email={self.email} domain={self.domain}>"
+
+
+class ThreadSuppressionMarker(Base, TenantAwareMixin):
+    """Minimal content-free tombstone for permanently deleted threads.
+
+    Prevents provider sync (Gmail/Outlook incremental sync, full sync, event replay)
+    from resurrecting deleted conversations, while keeping original mailboxes untouched.
+    """
+
+    __tablename__ = "thread_suppression_markers"
+
+    id: Mapped[str] = mapped_column(
+        String(64),
+        primary_key=True,
+        default=lambda: f"tsm_{uuid.uuid4().hex}",
+    )
+    # tenant_id comes from TenantAwareMixin
+    integration_account_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        index=True,
+    )
+    external_thread_id: Mapped[str] = mapped_column(
+        String(512),
+        nullable=False,
+        index=True,
+    )
+    deleted_thread_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        index=True,
+    )
+    deleted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "integration_account_id",
+            "external_thread_id",
+            name="uq_thread_suppression_tenant_account_ext",
+        ),
+        Index("ix_thread_suppression_lookup", "tenant_id", "deleted_thread_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ThreadSuppressionMarker tenant={self.tenant_id} ext_thread={self.external_thread_id}>"
+

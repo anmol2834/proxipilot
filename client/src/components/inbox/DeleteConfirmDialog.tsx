@@ -8,24 +8,34 @@ import DialogActions from "@mui/material/DialogActions";
 import Typography from "@mui/material/Typography";
 import Button from "@mui/material/Button";
 import Box from "@mui/material/Box";
+import CircularProgress from "@mui/material/CircularProgress";
+import Alert from "@mui/material/Alert";
 
 interface DeleteConfirmDialogProps {
   open: boolean;
   onClose: () => void;
   onConfirm: () => void;
+  conversationSubject?: string;
+  conversationSender?: string;
+  isPending?: boolean;
+  error?: string | null;
 }
 
 export function DeleteConfirmDialog({
   open,
   onClose,
   onConfirm,
+  conversationSubject,
+  conversationSender,
+  isPending = false,
+  error = null,
 }: DeleteConfirmDialogProps) {
   return (
     <Dialog
       open={open}
-      onClose={onClose}
+      onClose={isPending ? undefined : onClose}
       disableScrollLock
-      maxWidth="xs"
+      maxWidth="sm"
       fullWidth
       slotProps={{
         paper: {
@@ -67,20 +77,73 @@ export function DeleteConfirmDialog({
             </svg>
           </Box>
           <Typography sx={{ fontSize: "17px", fontWeight: 700, color: "#0F172A" }}>
-            Delete conversation?
+            Permanently delete conversation?
           </Typography>
         </Box>
       </DialogTitle>
 
       <DialogContent sx={{ px: 2.5, py: 1.5 }}>
-        <Typography sx={{ fontSize: "13.5px", color: "#64748B", lineHeight: 1.5 }}>
-          Are you sure you want to delete this conversation? This will remove it from your active inbox and conversation history.
+        {(conversationSubject || conversationSender) && (
+          <Box
+            sx={{
+              p: 1.5,
+              mb: 2,
+              borderRadius: "8px",
+              bgcolor: "#F8FAFC",
+              border: "1px solid #E2E8F0",
+            }}
+          >
+            {conversationSubject && (
+              <Typography
+                sx={{
+                  fontSize: "13.5px",
+                  fontWeight: 600,
+                  color: "#1E293B",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {conversationSubject}
+              </Typography>
+            )}
+            {conversationSender && (
+              <Typography
+                sx={{
+                  fontSize: "12px",
+                  color: "#64748B",
+                  mt: 0.25,
+                }}
+              >
+                From: {conversationSender}
+              </Typography>
+            )}
+          </Box>
+        )}
+
+        {error && (
+          <Alert severity="error" sx={{ mb: 2, borderRadius: "8px", fontSize: "13px" }}>
+            {error} — You can try deleting again, or cancel without losing your draft or selection.
+          </Alert>
+        )}
+
+        <Typography sx={{ fontSize: "13.5px", color: "#475569", lineHeight: 1.6, mb: 1.5 }}>
+          This will permanently remove this conversation and all associated data owned by it inside ProxiPilot (AI summaries, drafts, thread memory, commitments, and feedback).
+        </Typography>
+
+        <Typography sx={{ fontSize: "13px", color: "#64748B", lineHeight: 1.5, mb: 1 }}>
+          <strong>Note:</strong> Your original mailbox in Gmail or Outlook remains completely untouched.
+        </Typography>
+
+        <Typography sx={{ fontSize: "13px", color: "#DC2626", fontWeight: 600 }}>
+          This action cannot be undone.
         </Typography>
       </DialogContent>
 
       <DialogActions sx={{ px: 2.5, pb: 2, pt: 1, gap: 1 }}>
         <Button
           onClick={onClose}
+          disabled={isPending}
           variant="outlined"
           sx={{
             textTransform: "none",
@@ -101,7 +164,9 @@ export function DeleteConfirmDialog({
         </Button>
         <Button
           onClick={onConfirm}
+          disabled={isPending}
           variant="contained"
+          startIcon={isPending ? <CircularProgress size={16} color="inherit" /> : undefined}
           sx={{
             textTransform: "none",
             borderRadius: "9px",
@@ -115,9 +180,13 @@ export function DeleteConfirmDialog({
             "&:hover": {
               bgcolor: "#DC2626",
             },
+            "&.Mui-disabled": {
+              bgcolor: "#FCA5A5",
+              color: "#FFFFFF",
+            },
           }}
         >
-          Delete
+          {isPending ? "Deleting..." : "Permanently Delete"}
         </Button>
       </DialogActions>
     </Dialog>

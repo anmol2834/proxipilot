@@ -41,6 +41,7 @@ from app.models.inbox import (
     LeadIntent,
     MessageDirection,
     ThreadStatus,
+    ThreadSuppressionMarker,
 )
 from app.models.integration import (
     ConnectedIntegrationAccount,
@@ -968,6 +969,23 @@ class GmailSyncEngine:
         external_message_id = msg_data.get("id", "")
         external_thread_id = msg_data.get("threadId", external_message_id)
 
+        # Non-negotiable requirement: Do not resurrect permanently deleted provider threads
+        suppressed = (await db.execute(
+            select(ThreadSuppressionMarker.id).where(
+                ThreadSuppressionMarker.tenant_id == account.tenant_id,
+                ThreadSuppressionMarker.integration_account_id == account.id,
+                ThreadSuppressionMarker.external_thread_id == external_thread_id,
+            ).limit(1)
+        )).first()
+        if suppressed:
+            logger.info(
+                "Message ignored: provider thread suppressed by permanent deletion marker",
+                external_thread_id=external_thread_id,
+                external_message_id=external_message_id,
+                tenant_id=account.tenant_id,
+            )
+            return False
+
         # ---- Parse MIME ----
         parse_result: MimeParseResult = email_parser.parse_gmail_payload(msg_data)
 
@@ -1254,6 +1272,16 @@ class GmailSyncEngine:
         if not external_thread_id:
             return False
         try:
+            suppressed = (await db.execute(
+                select(ThreadSuppressionMarker.id).where(
+                    ThreadSuppressionMarker.tenant_id == account.tenant_id,
+                    ThreadSuppressionMarker.integration_account_id == account.id,
+                    ThreadSuppressionMarker.external_thread_id == external_thread_id,
+                ).limit(1)
+            )).first()
+            if suppressed:
+                return False
+
             row = await db.execute(
                 select(EmailMessage.id)
                 .join(EmailThread, EmailThread.id == EmailMessage.thread_id)
@@ -1291,7 +1319,6 @@ class GmailSyncEngine:
             status=ThreadStatus.PENDING_TRIAGE.value,
             lead_intent=LeadIntent.UNKNOWN.value,
             is_read=False,
-            is_starred=False,
             message_count=0,  # Updated by _normalize_and_store after message insert
             unread_count=0,
             first_message_at=sent_at,

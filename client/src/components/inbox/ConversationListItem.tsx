@@ -7,7 +7,6 @@ interface ConversationListItemProps {
   conversation: Conversation;
   isSelected: boolean;
   onSelect: () => void;
-  onToggleStar: (e: React.MouseEvent) => void;
 }
 
 // Brand-aware or deterministic palette for avatars
@@ -63,9 +62,8 @@ export function ConversationListItem({
   conversation,
   isSelected,
   onSelect,
-  onToggleStar,
 }: ConversationListItemProps) {
-  const { sender, subject, snippet, latestMessageAt, unread, starred, leadTemperature, threadCount } = conversation;
+  const { sender, subject, snippet, latestMessageAt, unread, leadTemperature, threadCount } = conversation;
   const avatarStyle = getAvatarStyle(sender.name);
   const tempChip = leadTemperature ? TEMP_CHIP[leadTemperature] : null;
   const categoryChip = guessCategory(subject, sender.name);
@@ -205,7 +203,7 @@ export function ConversationListItem({
           </span>
         </div>
 
-        {/* Row 2: Subject + Star */}
+        {/* Row 2: Subject */}
         <div
           style={{
             display: "flex",
@@ -229,40 +227,6 @@ export function ConversationListItem({
           >
             {subject}
           </p>
-
-          {/* Star Button */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleStar(e);
-            }}
-            style={{
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              padding: 0,
-              color: starred ? "#F59E0B" : "#CBD5E1",
-              flexShrink: 0,
-              display: "flex",
-              alignItems: "center",
-              lineHeight: 1,
-              transition: "color 0.12s",
-            }}
-            title={starred ? "Unstar" : "Star"}
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill={starred ? "#F59E0B" : "none"}
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-            </svg>
-          </button>
         </div>
 
         {/* Row 3: Snippet */}

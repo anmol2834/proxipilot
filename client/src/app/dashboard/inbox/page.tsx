@@ -5,7 +5,6 @@ import { useSearchParams, useRouter } from "next/navigation";
 import {
   useInfiniteConversations,
   useConversationMessages,
-  useToggleStar,
   useSetLeadTemperature,
   useDeleteConversation,
   useMarkAsRead,
@@ -59,7 +58,6 @@ function InboxContent() {
   }, [refetchMessages]);
 
   // Mutations
-  const toggleStarMutation = useToggleStar();
   const setLeadTempMutation = useSetLeadTemperature();
   const deleteMutation = useDeleteConversation();
   const markAsReadMutation = useMarkAsRead();
@@ -67,6 +65,7 @@ function InboxContent() {
   // Mobile state
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // AI Prompt Box state (isolated to currently opened conversation)
   const [isAiPromptOpen, setIsAiPromptOpen] = useState(false);
@@ -95,27 +94,29 @@ function InboxContent() {
     setInjectedDraftText(null);
   };
 
-  const handleToggleStar = (id: string, currentStarred: boolean) => {
-    toggleStarMutation.mutate({ id, starred: !currentStarred });
-  };
-
   const handleSetLeadTemperature = (leadTemperature: LeadTemperature) => {
     if (!selectedConversation) return;
     setLeadTempMutation.mutate({ id: selectedConversation.id, leadTemperature });
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!selectedConversation) return;
-    const currentId = selectedConversation.id;
-    deleteMutation.mutate(currentId);
-    setIsDeleteDialogOpen(false);
+    const targetId = selectedConversation.id;
+    setDeleteError(null);
+    try {
+      await deleteMutation.mutateAsync(targetId);
+      setIsDeleteDialogOpen(false);
 
-    const remaining = allConversations.filter((c) => c.id !== currentId);
-    if (remaining.length > 0) {
-      router.replace(`/dashboard/inbox?conversation=${remaining[0].id}`, { scroll: false });
-    } else {
-      router.replace(`/dashboard/inbox`, { scroll: false });
-      setMobileDetailOpen(false);
+      const remaining = allConversations.filter((c) => c.id !== targetId);
+      if (remaining.length > 0) {
+        router.replace(`/dashboard/inbox?conversation=${remaining[0].id}`, { scroll: false });
+      } else {
+        router.replace(`/dashboard/inbox`, { scroll: false });
+        setMobileDetailOpen(false);
+      }
+    } catch (err: any) {
+      const msg = err?.response?.data?.detail || err?.message || "Failed to delete conversation. Please try again.";
+      setDeleteError(msg);
     }
   };
 
@@ -139,8 +140,6 @@ function InboxContent() {
       } else if (e.key === "k" || e.key === "ArrowUp") {
         if (currentIndex > 0)
           handleSelectConversation(allConversations[currentIndex - 1].id);
-      } else if (e.key === "s") {
-        handleToggleStar(selectedConversation.id, selectedConversation.starred);
       }
     };
 
@@ -243,7 +242,6 @@ function InboxContent() {
               conversations={allConversations}
               selectedId={selectedConversation?.id || null}
               onSelect={handleSelectConversation}
-              onToggleStar={handleToggleStar}
               isLoading={isLoading}
               isFetchingNextPage={isFetchingNextPage}
               hasNextPage={Boolean(hasNextPage)}
@@ -279,11 +277,11 @@ function InboxContent() {
             isLoadingOlder={thread.isFetchingNextPage}
             olderMessagesError={thread.isFetchNextPageError}
             onLoadOlder={loadOlderMessages}
-            onToggleStar={(starred) => {
-              if (selectedConversation) handleToggleStar(selectedConversation.id, !starred);
-            }}
             onSetLeadTemperature={handleSetLeadTemperature}
-            onDeleteClick={() => setIsDeleteDialogOpen(true)}
+            onDeleteClick={() => {
+              setDeleteError(null);
+              setIsDeleteDialogOpen(true);
+            }}
             onBackToList={() => setMobileDetailOpen(false)}
             isAiPromptOpen={isAiPromptOpen}
             onToggleAiPrompt={() => setIsAiPromptOpen((prev) => !prev)}
@@ -340,8 +338,17 @@ function InboxContent() {
 
       <DeleteConfirmDialog
         open={isDeleteDialogOpen}
-        onClose={() => setIsDeleteDialogOpen(false)}
+        onClose={() => {
+          if (!deleteMutation.isPending) {
+            setIsDeleteDialogOpen(false);
+            setDeleteError(null);
+          }
+        }}
         onConfirm={handleConfirmDelete}
+        conversationSubject={selectedConversation?.subject}
+        conversationSender={selectedConversation?.sender?.name}
+        isPending={deleteMutation.isPending}
+        error={deleteError}
       />
     </>
   );

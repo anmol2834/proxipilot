@@ -20,19 +20,29 @@ from __future__ import annotations
 
 import base64
 import json
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, func, select, text, tuple_, update
+from sqlalchemy import and_, delete, func, select, text, tuple_, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.context import TenantContext, get_tenant_context
+from app.core.context import TenantContext, get_tenant_context, require_permission
 from app.core.database import get_db
 from app.core.logging import logger
-from app.models.inbox import EmailMessage, EmailThread, LeadIntent, ThreadStatus
+from app.models.audit import AuditAction, AuditActorType
+from app.models.commitment import Commitment
+from app.models.contact import ContactFact
+from app.models.feedback import DraftFeedback, ResponseOutcome
+from app.models.followup import ContactSuppression, ThreadFollowupState
+from app.models.inbox import EmailMessage, EmailThread, LeadIntent, ThreadStatus, ThreadSuppressionMarker
 from app.models.integration import ConnectedIntegrationAccount
+from app.models.outbox import OutboxEvent
+from app.models.thread_memory import ThreadMemory
+from app.services.audit import audit_service
 
 router = APIRouter(prefix="/inbox", tags=["Inbox"])
 
@@ -62,11 +72,13 @@ class ThreadDTO(BaseModel):
     message_count: int
     unread_count: int
     is_unread: bool
-    is_starred: bool
     lead_temperature: Optional[str] = None
     status: str
     ai_summary: Optional[AISummaryDTO] = None
     integration_account_id: str
+    has_followup: bool = False
+    followup_status: Optional[str] = None
+    followup_due_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
@@ -194,11 +206,13 @@ def _thread_to_dto(thread: EmailThread) -> ThreadDTO:
         message_count=thread.message_count,
         unread_count=thread.unread_count,
         is_unread=not thread.is_read,
-        is_starred=thread.is_starred,
         lead_temperature=thread.lead_intent,
         status=thread.status,
         ai_summary=ai_summary,
         integration_account_id=thread.integration_account_id,
+        has_followup=False,
+        followup_status=None,
+        followup_due_at=None,
         created_at=thread.created_at,
         updated_at=thread.updated_at,
     )
@@ -255,7 +269,8 @@ async def list_threads(
     cursor: Optional[str] = Query(default=None),
     integration_account_id: Optional[str] = Query(default=None),
     lead_temperature: Optional[str] = Query(default=None),
-    starred: Optional[bool] = Query(default=None),
+    status: Optional[str] = Query(default=None),
+    followup: Optional[bool] = Query(default=None),
     db: AsyncSession = Depends(get_db),
     context: TenantContext = Depends(get_tenant_context),
 ) -> PaginatedThreadsResponse:
@@ -269,12 +284,24 @@ async def list_threads(
     # Build base filters
     filters: List[Any] = [EmailThread.tenant_id == org_id]
 
+    # Exclude archived threads by default unless explicitly filtered
+    if status is not None:
+        filters.append(EmailThread.status == status)
+    else:
+        filters.append(EmailThread.status != ThreadStatus.ARCHIVED.value)
+
     if integration_account_id:
         filters.append(EmailThread.integration_account_id == integration_account_id)
     if lead_temperature:
         filters.append(EmailThread.lead_intent == lead_temperature)
-    if starred is not None:
-        filters.append(EmailThread.is_starred == starred)
+
+    active_followup_statuses = ["open", "scheduled", "waiting_team", "needs_review", "deferred"]
+    if followup is True:
+        followup_threads = select(ThreadFollowupState.thread_id).where(
+            ThreadFollowupState.tenant_id == org_id,
+            ThreadFollowupState.status.in_(active_followup_statuses),
+        )
+        filters.append(EmailThread.id.in_(followup_threads))
 
     # Apply cursor if provided (keyset: WHERE (latest_message_at, id) < (cursor_ts, cursor_id))
     if cursor:
@@ -307,6 +334,7 @@ async def list_threads(
 
     items = [_thread_to_dto(t) for t in rows]
     await _overlay_memory_summaries(db, org_id, items)
+    await _overlay_followup_states(db, org_id, items)
 
     logger.info(
         "Inbox thread list",
@@ -321,6 +349,31 @@ async def list_threads(
         has_more=has_more,
         total_returned=len(items),
     )
+
+
+async def _overlay_followup_states(db: AsyncSession, org_id: str, items: List[ThreadDTO]) -> None:
+    """Overlay active follow-up state (due date, status) from ThreadFollowupState onto ThreadDTOs."""
+    if not items:
+        return
+    thread_ids = [i.id for i in items]
+    active_followup_statuses = ["open", "scheduled", "waiting_team", "needs_review", "deferred"]
+    stmt = select(
+        ThreadFollowupState.thread_id,
+        ThreadFollowupState.status,
+        ThreadFollowupState.due_at,
+    ).where(
+        ThreadFollowupState.tenant_id == org_id,
+        ThreadFollowupState.thread_id.in_(thread_ids),
+        ThreadFollowupState.status.in_(active_followup_statuses),
+    )
+    rows = (await db.execute(stmt)).all()
+    by_thread = {r[0]: (r[1], r[2]) for r in rows}
+    for item in items:
+        if item.id in by_thread:
+            st, due = by_thread[item.id]
+            item.has_followup = True
+            item.followup_status = st
+            item.followup_due_at = due
 
 
 async def _overlay_memory_summaries(db: AsyncSession, org_id: str, items: List[ThreadDTO]) -> None:
@@ -377,6 +430,7 @@ async def get_thread(
 
     dto = _thread_to_dto(thread)
     await _overlay_memory_summaries(db, org_id, [dto])
+    await _overlay_followup_states(db, org_id, [dto])
     return dto
 
 
@@ -495,10 +549,6 @@ async def list_thread_messages(
 # =============================================================================
 
 
-class StarRequest(BaseModel):
-    starred: bool
-
-
 class ReadRequest(BaseModel):
     is_read: bool = True
 
@@ -508,33 +558,6 @@ class LeadTemperatureRequest(BaseModel):
         None,
         description="hot | warm | cold | null to clear",
     )
-
-
-@router.patch("/threads/{thread_id}/star", status_code=status.HTTP_200_OK)
-@router.patch("/conversations/{thread_id}/star", status_code=status.HTTP_200_OK)
-async def toggle_star(
-    thread_id: str,
-    body: StarRequest,
-    db: AsyncSession = Depends(get_db),
-    context: TenantContext = Depends(get_tenant_context),
-) -> Dict[str, Any]:
-    """Star or unstar a thread."""
-    org_id = context.organization_id
-    now = datetime.now(timezone.utc)
-
-    stmt = (
-        update(EmailThread)
-        .where(EmailThread.id == thread_id, EmailThread.tenant_id == org_id)
-        .values({EmailThread.is_starred: body.starred, EmailThread.updated_at: now})
-        .returning(EmailThread.id)
-    )
-    result = await db.execute(stmt)
-    updated = result.scalar_one_or_none()
-    if not updated:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Thread not found")
-
-    await db.commit()
-    return {"id": thread_id, "starred": body.starred}
 
 
 @router.patch("/threads/{thread_id}/read", status_code=status.HTTP_200_OK)
@@ -634,26 +657,147 @@ async def set_lead_temperature(
 async def delete_thread(
     thread_id: str,
     db: AsyncSession = Depends(get_db),
-    context: TenantContext = Depends(get_tenant_context),
+    context: TenantContext = Depends(require_permission("inbox.delete")),
 ) -> Dict[str, Any]:
-    """Archive/delete a thread (soft delete via status=ARCHIVED)."""
+    """Permanently delete a conversation and all owned data inside ProxiPilot.
+
+    Enforces inbox.delete permission and strictly scopes by tenant_id.
+    Atomic relational deletion cleanly removes thread messages, attachments,
+    summaries, memory, commitments, reviews, drafts, and follow-ups.
+    Stores a minimal tombstone suppression marker to prevent provider sync
+    from resurrecting the conversation on incremental/full sync or replay.
+    """
     org_id = context.organization_id
     now = datetime.now(timezone.utc)
 
-    stmt = (
-        update(EmailThread)
-        .where(EmailThread.id == thread_id, EmailThread.tenant_id == org_id)
-        .values({
-            EmailThread.status: ThreadStatus.ARCHIVED.value,
-            EmailThread.updated_at: now,
-        })
-        .returning(EmailThread.id)
+    # 1. Look up the thread scoped to this tenant
+    stmt = select(EmailThread).where(
+        EmailThread.id == thread_id,
+        EmailThread.tenant_id == org_id,
     )
-    result = await db.execute(stmt)
-    updated = result.scalar_one_or_none()
-    if not updated:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Thread not found")
+    res = await db.execute(stmt)
+    thread = res.scalar_one_or_none()
+
+    if not thread:
+        # Check if already permanently deleted (idempotent contract)
+        suppressed = (await db.execute(
+            select(ThreadSuppressionMarker.id).where(
+                ThreadSuppressionMarker.tenant_id == org_id,
+                ThreadSuppressionMarker.deleted_thread_id == thread_id,
+            ).limit(1)
+        )).first()
+        if suppressed:
+            return {"id": thread_id, "deleted": True, "message": "Conversation already permanently deleted"}
+
+        # Thread never existed or belongs to another tenant (avoid leak)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found",
+        )
+
+    integration_account_id = thread.integration_account_id
+    external_thread_id = thread.external_thread_id
+    sender_email = thread.sender_email
+
+    # 2. Record minimal provider suppression marker in same transaction
+    marker_stmt = pg_insert(ThreadSuppressionMarker).values(
+        id=f"tsm_{uuid.uuid4().hex}",
+        tenant_id=org_id,
+        integration_account_id=integration_account_id,
+        external_thread_id=external_thread_id,
+        deleted_thread_id=thread_id,
+        deleted_at=now,
+        created_at=now,
+        updated_at=now,
+    ).on_conflict_do_nothing(
+        index_elements=["tenant_id", "integration_account_id", "external_thread_id"]
+    )
+    await db.execute(marker_stmt)
+
+    # 3. Explicit ordered cleanup for exclusively owned records without FK cascades
+    # Thread memory
+    await db.execute(
+        delete(ThreadMemory).where(
+            ThreadMemory.tenant_id == org_id,
+            ThreadMemory.thread_id == thread_id,
+        )
+    )
+    # Commitments owned by this thread
+    await db.execute(
+        delete(Commitment).where(
+            Commitment.tenant_id == org_id,
+            Commitment.thread_id == thread_id,
+        )
+    )
+    # Draft feedback and response outcomes
+    await db.execute(
+        delete(DraftFeedback).where(
+            DraftFeedback.tenant_id == org_id,
+            DraftFeedback.thread_id == thread_id,
+        )
+    )
+    await db.execute(
+        delete(ResponseOutcome).where(
+            ResponseOutcome.tenant_id == org_id,
+            ResponseOutcome.thread_id == thread_id,
+        )
+    )
+    # Outbox events
+    await db.execute(
+        delete(OutboxEvent).where(
+            OutboxEvent.tenant_id == org_id,
+            OutboxEvent.aggregate_id == thread_id,
+        )
+    )
+    # Contact suppressions: preserve contact-level restriction, clear thread linkage
+    await db.execute(
+        update(ContactSuppression)
+        .where(
+            ContactSuppression.tenant_id == org_id,
+            ContactSuppression.thread_id == thread_id,
+        )
+        .values(thread_id=None)
+    )
+    # Contact facts derived from messages in this thread
+    msg_ids_res = await db.execute(
+        select(EmailMessage.id).where(
+            EmailMessage.thread_id == thread_id,
+            EmailMessage.tenant_id == org_id,
+        )
+    )
+    msg_ids = [r[0] for r in msg_ids_res.fetchall()]
+    if msg_ids:
+        await db.execute(
+            delete(ContactFact).where(
+                ContactFact.tenant_id == org_id,
+                ContactFact.source_ref.in_(msg_ids),
+            )
+        )
+
+    # 4. Relational deletion of EmailThread (ORM cascades delete messages, attachments, AI runs, reviews, etc.)
+    await db.delete(thread)
+
+    # 5. Record minimal content-free audit event
+    await audit_service.record(
+        db=db,
+        action=AuditAction.THREAD_DELETED,
+        resource_type="email_thread",
+        resource_id=thread_id,
+        organization_id=org_id,
+        actor_user_id=context.user_id,
+        actor_type=AuditActorType.USER,
+        metadata={"integration_account_id": integration_account_id},
+    )
 
     await db.commit()
-    logger.info("Thread archived", thread_id=thread_id, org_id=org_id)
-    return {"id": thread_id, "status": ThreadStatus.ARCHIVED.value}
+
+    # 6. Recompute shared contact aggregates if applicable
+    if sender_email:
+        try:
+            from app.services.contact_memory import contact_memory_service
+            await contact_memory_service.rebuild_stats(org_id)
+        except Exception as ex:
+            logger.warn("Non-fatal: failed to rebuild contact stats after delete", error=str(ex))
+
+    logger.info("Conversation permanently deleted", thread_id=thread_id, org_id=org_id)
+    return {"id": thread_id, "deleted": True}

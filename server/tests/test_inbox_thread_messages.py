@@ -38,9 +38,9 @@ async def thread_fixture():
             {"a": ids["account"], "o": org_id, "e": ids["mailbox"]})
         await db.execute(text("""
             INSERT INTO email_threads (id, tenant_id, integration_account_id, external_thread_id, subject,
-                sender_email, sender_name, status, message_count, unread_count, is_read, is_starred,
+                sender_email, sender_name, status, message_count, unread_count, is_read,
                 context_revision, first_message_at, latest_message_at, created_at, updated_at)
-            VALUES (:th, :o, :a, :ext, 'Quote request', :c, 'Buyer', 'responded', 6, 0, true, false, 1,
+            VALUES (:th, :o, :a, :ext, 'Quote request', :c, 'Buyer', 'responded', 6, 0, true, 1,
                     :first, :latest, now(), now())"""),
             {"th": ids["thread"], "o": org_id, "a": ids["account"], "ext": f"ext_{tag}", "c": ids["customer"],
              "first": base, "latest": base + timedelta(minutes=N_MESSAGES)})

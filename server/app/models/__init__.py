@@ -57,6 +57,7 @@ from app.models.inbox import (
     LeadIntent,
     MessageDirection,
     ThreadStatus,
+    ThreadSuppressionMarker,
     TrustedSender,
 )
 
@@ -243,6 +244,7 @@ __all__ = [
     "EmailMessage",
     "AttachmentMetadata",
     "ThreadStatus",
+    "ThreadSuppressionMarker",
     "LeadIntent",
     "MessageDirection",
     "TrustedSender",

@@ -77,31 +77,6 @@ export function useConversationMessages(conversationId: string | null) {
   };
 }
 
-export function useToggleStar() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: ({ id, starred }: { id: string; starred: boolean }) =>
-      inboxService.toggleStar(id, starred),
-    onMutate: async ({ id, starred }) => {
-      await queryClient.cancelQueries({ queryKey: queryKeys.inbox.lists() });
-
-      queryClient.setQueriesData({ queryKey: queryKeys.inbox.lists() }, (oldData: any) => {
-        if (!oldData?.pages) return oldData;
-        return {
-          ...oldData,
-          pages: oldData.pages.map((page: any) => ({
-            ...page,
-            items: page.items.map((item: Conversation) =>
-              item.id === id ? { ...item, starred } : item
-            ),
-          })),
-        };
-      });
-    },
-  });
-}
-
 export function useSetLeadTemperature() {
   const queryClient = useQueryClient();
 
@@ -144,6 +119,7 @@ export function useDeleteConversation() {
     mutationFn: (id: string) => inboxService.deleteConversation(id),
     onMutate: async (id: string) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.inbox.lists() });
+      const previousLists = queryClient.getQueryData(queryKeys.inbox.lists());
 
       queryClient.setQueriesData({ queryKey: queryKeys.inbox.lists() }, (oldData: any) => {
         if (!oldData?.pages) return oldData;
@@ -155,6 +131,16 @@ export function useDeleteConversation() {
           })),
         };
       });
+
+      return { previousLists };
+    },
+    onError: (_err, _id, context) => {
+      if (context?.previousLists) {
+        queryClient.setQueryData(queryKeys.inbox.lists(), context.previousLists);
+      }
+    },
+    onSuccess: (_data, id) => {
+      queryClient.removeQueries({ queryKey: queryKeys.inbox.threads(id) });
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.inbox.lists() });
