@@ -1,17 +1,5 @@
-import React from "react";
-import type { Metadata } from "next";
-import { SubroutePlaceholder } from "@/components/dashboard";
-
-export const metadata: Metadata = {
-  title: "Billing & Plans — ProxiPilot",
-  description: "Subscription management, usage tracking, and invoice history.",
-};
+import { redirect } from "next/navigation";
 
 export default function BillingPage() {
-  return (
-    <SubroutePlaceholder
-      title="Billing & Subscription"
-      description="Manage your enterprise subscription, seat allocation, AI token consumption, and download invoices."
-    />
-  );
+  redirect("/dashboard/settings?tab=billing");
 }

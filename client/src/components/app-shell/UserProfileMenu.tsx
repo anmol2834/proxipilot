@@ -174,7 +174,7 @@ export function UserProfileMenu() {
         <MenuItem
           onClick={() => {
             handleClose();
-            router.push("/dashboard/billing");
+            router.push("/dashboard/settings?tab=billing");
           }}
           sx={{ borderRadius: "8px", fontSize: "0.82rem", color: "#334155" }}
         >

@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import List from "@mui/material/List";
@@ -10,6 +10,8 @@ import Divider from "@mui/material/Divider";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ProxiPilotLogo } from "@/components/ui/ProxiPilotLogo";
+import { useAuth } from "@/hooks/use-auth";
+import { useTenant } from "@/hooks/use-tenant";
 
 interface NavItem {
   label: string;
@@ -140,16 +142,6 @@ const BOTTOM_NAV: NavItem[] = [
     ),
   },
   {
-    label: "Billing",
-    href: "/dashboard/billing",
-    icon: (active) => (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill={active ? "#2563EB" : "none"} stroke={active ? "#2563EB" : "#64748B"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect width="20" height="14" x="2" y="5" rx="2" />
-        <line x1="2" y1="10" x2="22" y2="10" />
-      </svg>
-    ),
-  },
-  {
     label: "Help",
     href: "/dashboard/help",
     icon: (active) => (
@@ -168,6 +160,92 @@ interface AppSidebarProps {
 
 export function AppSidebar({ onItemClick }: AppSidebarProps) {
   const pathname = usePathname();
+  const { currentOrganization } = useTenant();
+  const { user } = useAuth();
+
+  const [activePlanOverride, setActivePlanOverride] = useState<string | null>(null);
+
+  useEffect(() => {
+    const readPlan = () => {
+      try {
+        const stored = localStorage.getItem("proxipilot_active_plan");
+        if (stored) setActivePlanOverride(stored.toLowerCase());
+      } catch {}
+    };
+    readPlan();
+    window.addEventListener("storage", readPlan);
+    window.addEventListener("plan-updated", readPlan);
+    return () => {
+      window.removeEventListener("storage", readPlan);
+      window.removeEventListener("plan-updated", readPlan);
+    };
+  }, []);
+
+  const rawPlan = (
+    activePlanOverride ||
+    ((currentOrganization as any)?.plan || (user as any)?.plan || "growth") as string
+  ).toLowerCase();
+
+  const nextPlanSuggestion = useMemo(() => {
+    if (rawPlan === "starter") {
+      return {
+        title: "Upgrade to Growth",
+        subtitle: "Unlock AI autopilot & 2,500 credits",
+        bg: "#F0F6FF",
+        border: "#DBEAFE",
+        hoverBg: "#E0EDFF",
+        badgeBg: "linear-gradient(135deg, #7C3AED 0%, #4F46E5 50%, #DB2777 100%)",
+        textColor: "#1E3A8A",
+        subColor: "#3B82F6",
+      };
+    }
+    if (rawPlan === "growth") {
+      return {
+        title: "Upgrade to Business",
+        subtitle: "Unlock custom AI tone & 10k credits",
+        bg: "#FFFBEB",
+        border: "#FDE68A",
+        hoverBg: "#FEF3C7",
+        badgeBg: "linear-gradient(135deg, #D97706 0%, #DC2626 50%, #7C3AED 100%)",
+        textColor: "#92400E",
+        subColor: "#B45309",
+      };
+    }
+    if (rawPlan === "business") {
+      return {
+        title: "Upgrade to Enterprise",
+        subtitle: "Dedicated cluster & custom SLA",
+        bg: "#EFF6FF",
+        border: "#BFDBFE",
+        hoverBg: "#DBEAFE",
+        badgeBg: "linear-gradient(135deg, #1D4ED8 0%, #4F46E5 100%)",
+        textColor: "#1E40AF",
+        subColor: "#2563EB",
+      };
+    }
+    if (rawPlan === "enterprise") {
+      return {
+        title: "Enterprise Active",
+        subtitle: "Dedicated SLA & 50k+ credits",
+        bg: "#ECFDF5",
+        border: "#A7F3D0",
+        hoverBg: "#DCFCE7",
+        badgeBg: "linear-gradient(135deg, #059669 0%, #0D9488 100%)",
+        textColor: "#065F46",
+        subColor: "#059669",
+      };
+    }
+    return {
+      title: "Upgrade to Growth",
+      subtitle: "Unlock AI autopilot & 2,500 credits",
+      bg: "#F0F6FF",
+      border: "#DBEAFE",
+      hoverBg: "#E0EDFF",
+      badgeBg: "linear-gradient(135deg, #7C3AED 0%, #4F46E5 50%, #DB2777 100%)",
+      textColor: "#1E3A8A",
+      subColor: "#3B82F6",
+    };
+  }, [rawPlan]);
 
   const isNavActive = (href: string) => {
     if (href === "/dashboard") {
@@ -272,24 +350,24 @@ export function AppSidebar({ onItemClick }: AppSidebarProps) {
       <Box sx={{ mt: 2 }}>
         {renderNavList(BOTTOM_NAV)}
 
-        {/* Upgrade to Pro Card */}
+        {/* Dynamic Tier Suggestion Card */}
         <Box
           component={Link}
-          href="/dashboard/billing"
+          href="/dashboard/settings?tab=billing"
+          onClick={onItemClick}
           sx={{
             mt: 2,
             p: 1.75,
             borderRadius: "14px",
-            backgroundColor: "#F0F6FF",
-            border: "1px solid #DBEAFE",
+            backgroundColor: nextPlanSuggestion.bg,
+            border: `1px solid ${nextPlanSuggestion.border}`,
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
             textDecoration: "none",
             transition: "all 150ms ease",
             "&:hover": {
-              backgroundColor: "#E0EDFF",
-              borderColor: "#BFDBFE",
+              backgroundColor: nextPlanSuggestion.hoverBg,
             },
           }}
         >
@@ -299,27 +377,27 @@ export function AppSidebar({ onItemClick }: AppSidebarProps) {
                 width: 32,
                 height: 32,
                 borderRadius: "9px",
-                backgroundColor: "#2563EB",
+                background: nextPlanSuggestion.badgeBg,
                 color: "#FFFFFF",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 flexShrink: 0,
-                boxShadow: "0 2px 6px rgba(37, 99, 235, 0.25)",
+                boxShadow: "0 2px 6px rgba(0, 0, 0, 0.15)",
               }}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" /></svg>
             </Box>
             <Box>
-              <Typography sx={{ fontSize: "0.8rem", fontWeight: 700, color: "#1E3A8A", lineHeight: 1.2 }}>
-                Upgrade to Pro
+              <Typography sx={{ fontSize: "0.8rem", fontWeight: 700, color: nextPlanSuggestion.textColor, lineHeight: 1.2 }}>
+                {nextPlanSuggestion.title}
               </Typography>
-              <Typography sx={{ fontSize: "0.68rem", color: "#3B82F6", lineHeight: 1.2 }}>
-                Unlock advanced AI automations
+              <Typography sx={{ fontSize: "0.68rem", color: nextPlanSuggestion.subColor, lineHeight: 1.2 }}>
+                {nextPlanSuggestion.subtitle}
               </Typography>
             </Box>
           </Box>
-          <Box sx={{ color: "#2563EB", display: "flex" }}>
+          <Box sx={{ color: nextPlanSuggestion.textColor, display: "flex" }}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6" /></svg>
           </Box>
         </Box>

@@ -2,9 +2,9 @@
 
 /**
  * Workspace follow-up policy editor.
- * Redesigned to match Untitled UI preference rows (title & description on left, controls on right).
+ * Redesigned to match the My Profile card architecture and Untitled UI design language.
  *
- * Faster and more reliable:
+ * Features:
  * - Lazy query loading when tab is active
  * - Checked error state before skeleton to prevent infinite loading on network errors
  * - Isolated draft state preserved across background refetches
@@ -24,9 +24,18 @@ import Skeleton from "@mui/material/Skeleton";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import {
+  IconBell,
+  IconBrain,
+  IconCheck,
+  IconClock,
   IconEye,
+  IconFlame,
+  IconMail,
   IconRefresh,
   IconRocket,
+  IconShieldCheck,
+  IconShieldLock,
+  IconSnowflake,
 } from "@tabler/icons-react";
 import { followupError, useFollowupPolicy, usePatchFollowupPolicy } from "@/hooks/useFollowups";
 import { useTenant } from "@/hooks/use-tenant";
@@ -37,6 +46,7 @@ import type { FollowupPolicy } from "@/types/followup.types";
 import { ConfirmDialog } from "@/components/ui/feedback/ConfirmDialog";
 import { WEEKDAYS, timeZones } from "@/components/followups/meta";
 import { UntitledSwitch } from "./SettingsHub";
+import { ModernClockTimePicker } from "./ModernClockTimePicker";
 
 type Editable = Omit<FollowupPolicy, "effective_timezone" | "platform" | "version">;
 
@@ -57,6 +67,33 @@ const EDITABLE_KEYS: (keyof Editable)[] = [
   "min_spacing_hours",
   "timezone",
 ];
+
+const cardSx = {
+  backgroundColor: "#FFFFFF",
+  borderRadius: "16px",
+  border: "1px solid #E5E7EB",
+  p: { xs: 2.5, sm: 3 },
+  boxShadow: "0px 1px 3px rgba(16, 24, 40, 0.04), 0px 1px 2px rgba(16, 24, 40, 0.02)",
+  transition: "all 0.2s ease-in-out",
+};
+
+const inputSx = {
+  "& .MuiOutlinedInput-root": {
+    borderRadius: "10px",
+    backgroundColor: "#FFFFFF",
+    fontSize: 13.5,
+    "& fieldset": { borderColor: "#D0D5DD" },
+    "&:hover fieldset": { borderColor: "#98A2B3" },
+    "&.Mui-focused fieldset": { borderColor: "#4F46E5", borderWidth: "1.5px" },
+  },
+  "& input::-webkit-outer-spin-button, & input::-webkit-inner-spin-button": {
+    WebkitAppearance: "none",
+    margin: 0,
+  },
+  "& input[type=number]": {
+    MozAppearance: "textfield",
+  },
+};
 
 interface FollowupSettingsProps {
   isTabActive?: boolean;
@@ -151,7 +188,7 @@ export function FollowupSettings({ isTabActive = true }: FollowupSettingsProps) 
   // Check initial error state BEFORE checking !draft || !baseline
   if (q.isError) {
     return (
-      <Box sx={{ py: 4, maxWidth: 960 }}>
+      <Box sx={{ py: 4, width: "100%" }}>
         <Alert
           severity="error"
           sx={{ borderRadius: "12px", border: "1px solid #FCA5A5" }}
@@ -173,28 +210,38 @@ export function FollowupSettings({ isTabActive = true }: FollowupSettingsProps) 
     );
   }
 
-  // Loading skeleton matching Untitled UI preference rows
+  // Loading skeleton matching card architecture
   if (q.isLoading || !draft || !baseline) {
     return (
-      <Box sx={{ display: "flex", flexDirection: "column", gap: 3, py: 2, maxWidth: 960 }}>
-        {[1, 2, 3, 4, 5].map((i) => (
+      <Box sx={{ display: "flex", flexDirection: "column", gap: 3, py: 2, width: "100%" }}>
+        <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1 }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1.75 }}>
+            <Skeleton variant="rounded" width={44} height={44} sx={{ borderRadius: "12px" }} />
+            <Box>
+              <Skeleton variant="text" width={220} height={28} />
+              <Skeleton variant="text" width={340} height={18} sx={{ mt: 0.5 }} />
+            </Box>
+          </Box>
+          <Skeleton variant="rounded" width={180} height={42} sx={{ borderRadius: "12px" }} />
+        </Box>
+        {[1, 2, 3, 4].map((i) => (
           <Box
             key={i}
             sx={{
-              display: "grid",
-              gridTemplateColumns: { xs: "1fr", md: "320px 1fr" },
-              gap: 2,
-              py: 2.5,
-              borderBottom: "1px solid #EAECF0",
+              backgroundColor: "#FFFFFF",
+              borderRadius: "16px",
+              border: "1px solid #E5E7EB",
+              p: 3,
             }}
           >
-            <Box>
-              <Skeleton variant="text" width="60%" height={24} />
-              <Skeleton variant="text" width="90%" height={18} sx={{ mt: 0.5 }} />
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, mb: 2 }}>
+              <Skeleton variant="rounded" width={36} height={36} sx={{ borderRadius: "10px" }} />
+              <Box>
+                <Skeleton variant="text" width={160} height={22} />
+                <Skeleton variant="text" width={280} height={16} />
+              </Box>
             </Box>
-            <Box sx={{ display: "flex", justifyContent: { xs: "flex-start", md: "flex-end" } }}>
-              <Skeleton variant="rounded" width={160} height={38} sx={{ borderRadius: "8px" }} />
-            </Box>
+            <Skeleton variant="rounded" width="100%" height={90} sx={{ borderRadius: "12px" }} />
           </Box>
         ))}
       </Box>
@@ -263,17 +310,108 @@ export function FollowupSettings({ isTabActive = true }: FollowupSettingsProps) 
     toast.info("Updated target version to latest. You may now click 'Save changes'.");
   };
 
+  const isModeActive = draft.mode === "active";
+
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 0, maxWidth: 960, pb: dirtyKeys.length ? 12 : 4 }}>
-      {/* Informational banners */}
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 3, width: "100%", pb: dirtyKeys.length ? 12 : 4 }}>
+      {/* Header Section */}
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: { xs: "flex-start", sm: "center" },
+          justifyContent: "space-between",
+          gap: 2,
+          flexWrap: "wrap",
+        }}
+      >
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1.75 }}>
+          <Box
+            sx={{
+              width: 44,
+              height: 44,
+              borderRadius: "12px",
+              background: "linear-gradient(135deg, #EEF2FF 0%, #E0E7FF 100%)",
+              color: "#4F46E5",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              border: "1px solid rgba(99, 102, 241, 0.15)",
+              boxShadow: "0px 1px 2px rgba(16, 24, 40, 0.05)",
+            }}
+          >
+            <IconRocket size={24} stroke={2.2} />
+          </Box>
+          <Box>
+            <Typography
+              sx={{
+                fontSize: { xs: 20, sm: 22 },
+                fontWeight: 700,
+                color: "#101828",
+                letterSpacing: "-0.02em",
+              }}
+            >
+              Follow-ups & AI Policy
+            </Typography>
+            <Typography sx={{ fontSize: 13.5, color: "#667085", mt: 0.25 }}>
+              Configure lead assessment triggers, automated sequence timing, cadence schedules, and safety limits.
+            </Typography>
+          </Box>
+        </Box>
+
+        {/* Engine Status Card */}
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            gap: 1.5,
+            px: 2,
+            py: 1.25,
+            borderRadius: "12px",
+            backgroundColor: "#FFFFFF",
+            border: "1px solid #E5E7EB",
+            boxShadow: "0px 1px 3px rgba(16, 24, 40, 0.04), 0px 1px 2px rgba(16, 24, 40, 0.02)",
+          }}
+        >
+          <Box
+            sx={{
+              width: 9,
+              height: 9,
+              borderRadius: "50%",
+              backgroundColor: isModeActive ? "#10B981" : "#6366F1",
+              boxShadow: isModeActive
+                ? "0 0 0 3px rgba(16, 185, 129, 0.2)"
+                : "0 0 0 3px rgba(99, 102, 241, 0.2)",
+            }}
+          />
+          <Box>
+            <Typography
+              sx={{
+                fontSize: 10.5,
+                fontWeight: 700,
+                color: "#667085",
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+                lineHeight: 1,
+              }}
+            >
+              Policy Engine
+            </Typography>
+            <Typography sx={{ fontSize: 13, fontWeight: 600, color: "#101828", mt: 0.35, lineHeight: 1.2 }}>
+              {isModeActive ? "Active Automation" : "Observe Only"} • v{baseline.version}
+            </Typography>
+          </Box>
+        </Box>
+      </Box>
+
+      {/* Informational Banners */}
       {!canEdit && (
-        <Alert severity="info" sx={{ mb: 3, borderRadius: "10px", fontSize: 13.5 }}>
+        <Alert severity="info" sx={{ borderRadius: "12px", fontSize: 13.5, border: "1px solid #BAE6FD" }}>
           You have read-only access to this workspace. Only workspace Owners and Admins can modify follow-up policies.
         </Alert>
       )}
 
       {baseline.platform.observe_only_forced && (
-        <Alert severity="warning" sx={{ mb: 3, borderRadius: "10px", fontSize: 13.5 }}>
+        <Alert severity="warning" sx={{ borderRadius: "12px", fontSize: 13.5, border: "1px solid #FDE68A" }}>
           Observe-only mode is temporarily enforced across the platform. Automated follow-up actions and reminders will remain paused until lifted by platform operations.
         </Alert>
       )}
@@ -281,13 +419,13 @@ export function FollowupSettings({ isTabActive = true }: FollowupSettingsProps) 
       {conflictError && (
         <Alert
           severity="error"
-          sx={{ mb: 3, borderRadius: "10px", fontSize: 13.5 }}
+          sx={{ borderRadius: "12px", fontSize: 13.5, border: "1px solid #FCA5A5" }}
           action={
             <Box sx={{ display: "flex", gap: 1 }}>
-              <Button size="small" color="inherit" onClick={handleAcceptServerVersion} sx={{ textTransform: "none" }}>
+              <Button size="small" color="inherit" onClick={handleAcceptServerVersion} sx={{ textTransform: "none", fontWeight: 600 }}>
                 Accept server version
               </Button>
-              <Button size="small" variant="outlined" color="inherit" onClick={handleForceReapplyDraft} sx={{ textTransform: "none" }}>
+              <Button size="small" variant="outlined" color="inherit" onClick={handleForceReapplyDraft} sx={{ textTransform: "none", fontWeight: 600 }}>
                 Keep my changes
               </Button>
             </Box>
@@ -297,15 +435,35 @@ export function FollowupSettings({ isTabActive = true }: FollowupSettingsProps) 
         </Alert>
       )}
 
-      {/* Section 1: Automation Engine Mode */}
-      <Box sx={{ pt: 1, pb: 3, borderBottom: "1px solid #EAECF0" }}>
-        <Typography sx={{ fontSize: 16, fontWeight: 700, color: "#101828" }}>Automation mode</Typography>
-        <Typography sx={{ fontSize: 13.5, color: "#475467", mt: 0.25 }}>
-          Choose whether AI assesses customer emails silently or activates scheduled follow-up notifications.
-        </Typography>
+      {/* CARD 1: Automation Engine Mode */}
+      <Box sx={cardSx}>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, mb: 2.5 }}>
+          <Box
+            sx={{
+              width: 36,
+              height: 36,
+              borderRadius: "10px",
+              backgroundColor: "#EEF2FF",
+              color: "#4F46E5",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <IconRocket size={20} stroke={2} />
+          </Box>
+          <Box>
+            <Typography sx={{ fontSize: 16, fontWeight: 700, color: "#101828" }}>
+              Automation Engine Mode
+            </Typography>
+            <Typography sx={{ fontSize: 13, color: "#667085", mt: 0.25 }}>
+              Choose whether AI assesses customer correspondence silently or activates scheduled follow-up notifications.
+            </Typography>
+          </Box>
+        </Box>
 
-        <Box sx={{ mt: 2.5, display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 2 }}>
-          {/* Card: Observe only */}
+        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 2 }}>
+          {/* Tile: Observe only */}
           <Box
             role="radio"
             aria-checked={draft.mode === "shadow"}
@@ -319,30 +477,67 @@ export function FollowupSettings({ isTabActive = true }: FollowupSettingsProps) 
             }}
             sx={{
               p: 2.5,
-              borderRadius: "12px",
+              borderRadius: "14px",
               cursor: canEdit ? "pointer" : "default",
-              border: `2px solid ${draft.mode === "shadow" ? "#2563EB" : "#EAECF0"}`,
-              backgroundColor: draft.mode === "shadow" ? "#F0F7FF" : "#FFFFFF",
-              transition: "all 120ms ease",
+              border: draft.mode === "shadow" ? "2px solid #4F46E5" : "1px solid #E5E7EB",
+              backgroundColor: draft.mode === "shadow" ? "#F8FAFC" : "#FFFFFF",
+              boxShadow: draft.mode === "shadow" ? "0px 4px 12px rgba(79, 70, 229, 0.08)" : "none",
+              transition: "all 0.15s ease",
               outline: "none",
-              "&:hover": canEdit ? { borderColor: draft.mode === "shadow" ? "#2563EB" : "#D0D5DD" } : {},
+              "&:hover": canEdit ? { borderColor: draft.mode === "shadow" ? "#4F46E5" : "#CBD5E1" } : {},
             }}
           >
-            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1 }}>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1, color: draft.mode === "shadow" ? "#2563EB" : "#344054" }}>
-                <IconEye size={18} />
-                <Typography sx={{ fontWeight: 600, fontSize: 14.5 }}>Observe only</Typography>
+            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1.5 }}>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1.25 }}>
+                <Box
+                  sx={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: "8px",
+                    backgroundColor: draft.mode === "shadow" ? "#EEF2FF" : "#F3F4F6",
+                    color: draft.mode === "shadow" ? "#4F46E5" : "#64748B",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <IconEye size={18} />
+                </Box>
+                <Typography sx={{ fontWeight: 700, fontSize: 15, color: "#101828" }}>
+                  Observe only
+                </Typography>
               </Box>
-              {draft.mode === "shadow" && (
-                <Chip size="small" label="Active" color="primary" sx={{ height: 22, fontSize: 11, fontWeight: 600 }} />
+              {draft.mode === "shadow" ? (
+                <Chip
+                  size="small"
+                  icon={<IconCheck size={12} color="#4F46E5" />}
+                  label="Selected"
+                  sx={{
+                    height: 24,
+                    fontSize: 11.5,
+                    fontWeight: 700,
+                    backgroundColor: "#EEF2FF",
+                    color: "#4F46E5",
+                    border: "1px solid rgba(79, 70, 229, 0.2)",
+                  }}
+                />
+              ) : (
+                <Box
+                  sx={{
+                    width: 18,
+                    height: 18,
+                    borderRadius: "50%",
+                    border: "1.5px solid #D0D5DD",
+                  }}
+                />
               )}
             </Box>
-            <Typography sx={{ fontSize: 13, color: "#475467", lineHeight: 1.5 }}>
-              AI #2 reads every new business email and records temperature assessments. Nothing is scheduled, no reminders go out, and customers are never contacted.
+            <Typography sx={{ fontSize: 13, color: "#667085", lineHeight: 1.55 }}>
+              AI reads inbound emails and grades lead temperature and deal intent silently. Nothing is scheduled, no reminders go out, and customers are never contacted.
             </Typography>
           </Box>
 
-          {/* Card: Active */}
+          {/* Tile: Active automation */}
           <Box
             role="radio"
             aria-checked={draft.mode === "active"}
@@ -356,166 +551,339 @@ export function FollowupSettings({ isTabActive = true }: FollowupSettingsProps) 
             }}
             sx={{
               p: 2.5,
-              borderRadius: "12px",
+              borderRadius: "14px",
               cursor: canEdit ? "pointer" : "default",
-              border: `2px solid ${draft.mode === "active" ? "#2563EB" : "#EAECF0"}`,
-              backgroundColor: draft.mode === "active" ? "#F0F7FF" : "#FFFFFF",
-              transition: "all 120ms ease",
+              border: draft.mode === "active" ? "2px solid #4F46E5" : "1px solid #E5E7EB",
+              backgroundColor: draft.mode === "active" ? "#F8FAFC" : "#FFFFFF",
+              boxShadow: draft.mode === "active" ? "0px 4px 12px rgba(79, 70, 229, 0.08)" : "none",
+              transition: "all 0.15s ease",
               outline: "none",
-              "&:hover": canEdit ? { borderColor: draft.mode === "active" ? "#2563EB" : "#D0D5DD" } : {},
+              "&:hover": canEdit ? { borderColor: draft.mode === "active" ? "#4F46E5" : "#CBD5E1" } : {},
             }}
           >
-            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1 }}>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1, color: draft.mode === "active" ? "#2563EB" : "#344054" }}>
-                <IconRocket size={18} />
-                <Typography sx={{ fontWeight: 600, fontSize: 14.5 }}>Active automation</Typography>
+            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1.5 }}>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1.25 }}>
+                <Box
+                  sx={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: "8px",
+                    backgroundColor: draft.mode === "active" ? "#EEF2FF" : "#F3F4F6",
+                    color: draft.mode === "active" ? "#4F46E5" : "#64748B",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <IconRocket size={18} />
+                </Box>
+                <Typography sx={{ fontWeight: 700, fontSize: 15, color: "#101828" }}>
+                  Active automation
+                </Typography>
               </Box>
-              {draft.mode === "active" && (
-                <Chip size="small" label="Active" color="primary" sx={{ height: 22, fontSize: 11, fontWeight: 600 }} />
+              {draft.mode === "active" ? (
+                <Chip
+                  size="small"
+                  icon={<IconCheck size={12} color="#4F46E5" />}
+                  label="Selected"
+                  sx={{
+                    height: 24,
+                    fontSize: 11.5,
+                    fontWeight: 700,
+                    backgroundColor: "#EEF2FF",
+                    color: "#4F46E5",
+                    border: "1px solid rgba(79, 70, 229, 0.2)",
+                  }}
+                />
+              ) : (
+                <Box
+                  sx={{
+                    width: 18,
+                    height: 18,
+                    borderRadius: "50%",
+                    border: "1.5px solid #D0D5DD",
+                  }}
+                />
               )}
             </Box>
-            <Typography sx={{ fontSize: 13, color: "#475467", lineHeight: 1.5 }}>
+            <Typography sx={{ fontSize: 13, color: "#667085", lineHeight: 1.55 }}>
               Assessments dynamically schedule follow-up occurrences and notify team members before due dates. Customer sending requires workspace allowance and explicit per-thread consent.
             </Typography>
           </Box>
         </Box>
       </Box>
 
-      {/* Section 2: Workspace Execution & Safety Allowances */}
-      <Box sx={{ py: 3, borderBottom: "1px solid #EAECF0" }}>
-        <Typography sx={{ fontSize: 16, fontWeight: 700, color: "#101828" }}>Execution & allowances</Typography>
-        <Typography sx={{ fontSize: 13.5, color: "#475467", mt: 0.25 }}>
-          Govern which automated actions ProxiPilot is permitted to take across this workspace.
-        </Typography>
-
-        {/* Row: Automatic assessment */}
-        <Box
-          sx={{
-            display: "grid",
-            gridTemplateColumns: { xs: "1fr", md: "380px 1fr" },
-            gap: 2,
-            py: 2.5,
-            borderBottom: "1px solid #F1F5F9",
-            alignItems: "center",
-          }}
-        >
-          <Box>
-            <Typography sx={{ fontSize: 14, fontWeight: 600, color: "#101828" }}>
-              Automatic lead assessment
-            </Typography>
-            <Typography sx={{ fontSize: 13, color: "#475467", mt: 0.25 }}>
-              Re-evaluates buying temperature, deal outcome, and next action upon receiving new customer emails.
-            </Typography>
+      {/* CARD 2: Execution & Safety Allowances */}
+      <Box sx={cardSx}>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, mb: 1.5 }}>
+          <Box
+            sx={{
+              width: 36,
+              height: 36,
+              borderRadius: "10px",
+              backgroundColor: "#ECFDF5",
+              color: "#059669",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <IconShieldCheck size={20} stroke={2} />
           </Box>
-          <Box sx={{ display: "flex", justifyContent: { xs: "flex-start", md: "flex-start" } }}>
-            <UntitledSwitch
-              checked={draft.assessment_enabled}
-              disabled={!canEdit}
-              onChange={(e) => set("assessment_enabled", e.target.checked)}
-              slotProps={{ input: { "aria-label": "Automatic lead assessment" } }}
-            />
+          <Box>
+            <Typography sx={{ fontSize: 16, fontWeight: 700, color: "#101828" }}>
+              Execution & Safety Allowances
+            </Typography>
+            <Typography sx={{ fontSize: 13, color: "#667085", mt: 0.25 }}>
+              Govern autonomous actions and safety gates permitted for automated workflows.
+            </Typography>
           </Box>
         </Box>
 
-        {/* Row: Planning & reminders */}
+        {/* Row 1: Automatic assessment */}
         <Box
           sx={{
-            display: "grid",
-            gridTemplateColumns: { xs: "1fr", md: "340px 1fr" },
-            gap: 2,
-            py: 2.5,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            py: 2,
             borderBottom: "1px solid #F1F5F9",
-            alignItems: "center",
-          }}
-        >
-          <Box>
-            <Typography sx={{ fontSize: 14, fontWeight: 600, color: "#101828" }}>
-              Follow-up planning & team reminders
-            </Typography>
-            <Typography sx={{ fontSize: 13, color: "#475467", mt: 0.25 }}>
-              Calculates due dates and sends team notification emails when action is required on high-value conversations.
-            </Typography>
-          </Box>
-          <Box sx={{ display: "flex", justifyContent: { xs: "flex-start", md: "flex-start" } }}>
-            <UntitledSwitch
-              checked={draft.planning_enabled}
-              disabled={!canEdit}
-              onChange={(e) => set("planning_enabled", e.target.checked)}
-              slotProps={{ input: { "aria-label": "Follow-up planning & team reminders" } }}
-            />
-          </Box>
-        </Box>
-
-        {/* Row: Customer sending allowance */}
-        <Box
-          sx={{
-            display: "grid",
-            gridTemplateColumns: { xs: "1fr", md: "340px 1fr" },
             gap: 2,
-            py: 2.5,
-            alignItems: "center",
           }}
         >
-          <Box>
-            <Typography sx={{ fontSize: 14, fontWeight: 600, color: "#101828" }}>
-              Allow automatic customer follow-up emails
-            </Typography>
-            <Typography sx={{ fontSize: 13, color: "#475467", mt: 0.25 }}>
-              Allows teammates with send authority to toggle automated AI follow-up sending on specific customer threads.
-            </Typography>
-          </Box>
-          <Box sx={{ display: "flex", justifyContent: { xs: "flex-start", md: "flex-start" } }}>
-            <UntitledSwitch
-              checked={draft.customer_email_allowed}
-              disabled={!canEdit}
-              onChange={(e) => {
-                if (e.target.checked) {
-                  setConfirmEmailDialog(true);
-                } else {
-                  set("customer_email_allowed", false);
-                }
+          <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1.5 }}>
+            <Box
+              sx={{
+                width: 36,
+                height: 36,
+                borderRadius: "10px",
+                backgroundColor: "#F3E8FF",
+                color: "#7E22CE",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+                mt: 0.25,
               }}
-              slotProps={{ input: { "aria-label": "Allow automatic customer emails" } }}
-            />
+            >
+              <IconBrain size={18} />
+            </Box>
+            <Box>
+              <Typography sx={{ fontSize: 14, fontWeight: 600, color: "#101828" }}>
+                Automatic lead assessment
+              </Typography>
+              <Typography sx={{ fontSize: 13, color: "#667085", mt: 0.25, maxWidth: 640 }}>
+                Re-evaluates buying temperature, deal outcome, and next action upon receiving new customer emails.
+              </Typography>
+            </Box>
           </Box>
+          <UntitledSwitch
+            checked={draft.assessment_enabled}
+            disabled={!canEdit}
+            onChange={(e) => set("assessment_enabled", e.target.checked)}
+            slotProps={{ input: { "aria-label": "Automatic lead assessment" } }}
+          />
+        </Box>
+
+        {/* Row 2: Planning & reminders */}
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            py: 2,
+            borderBottom: "1px solid #F1F5F9",
+            gap: 2,
+          }}
+        >
+          <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1.5 }}>
+            <Box
+              sx={{
+                width: 36,
+                height: 36,
+                borderRadius: "10px",
+                backgroundColor: "#FEF3C7",
+                color: "#D97706",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+                mt: 0.25,
+              }}
+            >
+              <IconBell size={18} />
+            </Box>
+            <Box>
+              <Typography sx={{ fontSize: 14, fontWeight: 600, color: "#101828" }}>
+                Follow-up planning & team reminders
+              </Typography>
+              <Typography sx={{ fontSize: 13, color: "#667085", mt: 0.25, maxWidth: 640 }}>
+                Calculates due dates and sends team notification emails when action is required on high-value conversations.
+              </Typography>
+            </Box>
+          </Box>
+          <UntitledSwitch
+            checked={draft.planning_enabled}
+            disabled={!canEdit}
+            onChange={(e) => set("planning_enabled", e.target.checked)}
+            slotProps={{ input: { "aria-label": "Follow-up planning & team reminders" } }}
+          />
+        </Box>
+
+        {/* Row 3: Customer sending allowance */}
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            py: 2,
+            gap: 2,
+          }}
+        >
+          <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1.5 }}>
+            <Box
+              sx={{
+                width: 36,
+                height: 36,
+                borderRadius: "10px",
+                backgroundColor: "#FEE2E2",
+                color: "#DC2626",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+                mt: 0.25,
+              }}
+            >
+              <IconMail size={18} />
+            </Box>
+            <Box>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                <Typography sx={{ fontSize: 14, fontWeight: 600, color: "#101828" }}>
+                  Allow automatic customer follow-up emails
+                </Typography>
+                <Chip
+                  size="small"
+                  label={draft.customer_email_allowed ? "Armed" : "Disabled"}
+                  sx={{
+                    height: 20,
+                    fontSize: 11,
+                    fontWeight: 700,
+                    backgroundColor: draft.customer_email_allowed ? "#ECFDF5" : "#F1F5F9",
+                    color: draft.customer_email_allowed ? "#059669" : "#64748B",
+                  }}
+                />
+              </Box>
+              <Typography sx={{ fontSize: 13, color: "#667085", mt: 0.25, maxWidth: 640 }}>
+                Allows teammates with send authority to toggle automated AI follow-up sending on specific customer threads.
+              </Typography>
+            </Box>
+          </Box>
+          <UntitledSwitch
+            checked={draft.customer_email_allowed}
+            disabled={!canEdit}
+            onChange={(e) => {
+              if (e.target.checked) {
+                setConfirmEmailDialog(true);
+              } else {
+                set("customer_email_allowed", false);
+              }
+            }}
+            slotProps={{ input: { "aria-label": "Allow automatic customer emails" } }}
+          />
         </Box>
 
         {draft.customer_email_allowed && !baseline.platform.customer_send_enabled && (
-          <Alert severity="info" sx={{ mt: 1.5, borderRadius: "10px", fontSize: 13 }}>
+          <Alert severity="info" sx={{ mt: 1.5, borderRadius: "10px", fontSize: 13, border: "1px solid #BAE6FD" }}>
             Customer sending is currently paused at the platform infrastructure level. Reminders will be generated, but external sends are held.
           </Alert>
         )}
       </Box>
 
-      {/* Section 3: Timing & Working Hours */}
-      <Box sx={{ py: 3, borderBottom: "1px solid #EAECF0" }}>
-        <Typography sx={{ fontSize: 16, fontWeight: 700, color: "#101828" }}>Timing & schedule</Typography>
-        <Typography sx={{ fontSize: 13.5, color: "#475467", mt: 0.25 }}>
-          Intervals and delivery hours applied when customer correspondence does not specify an explicit callback date.
-        </Typography>
+      {/* CARD 3: Timing, Cadence & Working Schedule */}
+      <Box sx={cardSx}>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, mb: 2 }}>
+          <Box
+            sx={{
+              width: 36,
+              height: 36,
+              borderRadius: "10px",
+              backgroundColor: "#EFF6FF",
+              color: "#2563EB",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <IconClock size={20} stroke={2} />
+          </Box>
+          <Box>
+            <Typography sx={{ fontSize: 16, fontWeight: 700, color: "#101828" }}>
+              Timing, Cadence & Working Schedule
+            </Typography>
+            <Typography sx={{ fontSize: 13, color: "#667085", mt: 0.25 }}>
+              Intervals and delivery hours applied when customer correspondence does not specify an explicit callback date.
+            </Typography>
+          </Box>
+        </Box>
 
-        {/* Row: Cadence by temperature */}
+        {/* Cadence by temperature */}
         <Box
           sx={{
             display: "grid",
-            gridTemplateColumns: { xs: "1fr", md: "380px 1fr" },
+            gridTemplateColumns: { xs: "1fr", md: "260px 1fr", lg: "280px 1fr" },
             gap: 2,
-            py: 2.5,
+            py: 2,
             borderBottom: "1px solid #F1F5F9",
             alignItems: "center",
           }}
         >
           <Box>
             <Typography sx={{ fontSize: 14, fontWeight: 600, color: "#101828" }}>
-              Cadence by temperature (business days)
+              Cadence by temperature
             </Typography>
-            <Typography sx={{ fontSize: 13, color: "#475467", mt: 0.25 }}>
-              Business days to wait before following up based on AI temperature classification.
+            <Typography sx={{ fontSize: 13, color: "#667085", mt: 0.25 }}>
+              Business days to wait before following up based on AI lead classification.
             </Typography>
           </Box>
-          <Box sx={{ display: "flex", gap: 1.5, flexWrap: "wrap", alignItems: "center" }}>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
-              <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: "#DC2626" }}>Hot</Typography>
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+              gap: { xs: 1, sm: 1.25, md: 1.5 },
+              width: "100%",
+              alignItems: "center",
+            }}
+          >
+            {/* Hot */}
+            <Box
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: { xs: 0.5, sm: 1 },
+                px: { xs: 1.25, sm: 1.5, md: 1.75 },
+                py: 1,
+                borderRadius: "12px",
+                border: "1px solid #FECACA",
+                backgroundColor: "#FEF2F2",
+                minWidth: 0,
+                boxShadow: "0px 1px 2px rgba(220, 38, 38, 0.05)",
+              }}
+            >
+              <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, flexShrink: 0, minWidth: 0 }}>
+                <IconFlame size={17} color="#DC2626" />
+                <Typography
+                  sx={{
+                    fontSize: { xs: 11.5, sm: 12.5 },
+                    fontWeight: 700,
+                    color: "#DC2626",
+                    letterSpacing: "0.02em",
+                  }}
+                >
+                  HOT
+                </Typography>
+              </Box>
               <TextField
                 type="number"
                 size="small"
@@ -523,14 +891,78 @@ export function FollowupSettings({ isTabActive = true }: FollowupSettingsProps) 
                 disabled={!canEdit}
                 onChange={(e) => set("cadence_hot_days", parseInt(e.target.value, 10) || 1)}
                 slotProps={{
-                  htmlInput: { min: 1, max: 60 },
-                  input: { endAdornment: <Typography sx={{ fontSize: 12, color: "#64748B", ml: 0.5 }}>days</Typography> },
+                  htmlInput: {
+                    min: 1,
+                    max: 999,
+                    style: {
+                      padding: "4px 4px 4px 10px",
+                      textAlign: "left",
+                      fontSize: "13.5px",
+                      fontWeight: 700,
+                    },
+                  },
+                  input: {
+                    endAdornment: (
+                      <Typography
+                        sx={{
+                          fontSize: { xs: 11, sm: 12 },
+                          color: "#64748B",
+                          ml: 0.5,
+                          mr: 0.75,
+                          userSelect: "none",
+                          fontWeight: 500,
+                        }}
+                      >
+                        days
+                      </Typography>
+                    ),
+                  },
                 }}
-                sx={{ width: 110 }}
+                sx={{
+                  width: { xs: 78, sm: 90, md: 98, lg: 104 },
+                  flexShrink: 0,
+                  ...inputSx,
+                  "& .MuiOutlinedInput-root": {
+                    height: 34,
+                    borderRadius: "8px",
+                    backgroundColor: "#FFFFFF",
+                    "& fieldset": { borderColor: "#FCA5A5" },
+                    "&:hover fieldset": { borderColor: "#EF4444" },
+                    "&.Mui-focused fieldset": { borderColor: "#DC2626", borderWidth: "1.5px" },
+                  },
+                }}
               />
             </Box>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
-              <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: "#D97706" }}>Warm</Typography>
+
+            {/* Warm */}
+            <Box
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: { xs: 0.5, sm: 1 },
+                px: { xs: 1.25, sm: 1.5, md: 1.75 },
+                py: 1,
+                borderRadius: "12px",
+                border: "1px solid #FDE68A",
+                backgroundColor: "#FFFBEB",
+                minWidth: 0,
+                boxShadow: "0px 1px 2px rgba(217, 119, 6, 0.05)",
+              }}
+            >
+              <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, flexShrink: 0, minWidth: 0 }}>
+                <IconClock size={17} color="#D97706" />
+                <Typography
+                  sx={{
+                    fontSize: { xs: 11.5, sm: 12.5 },
+                    fontWeight: 700,
+                    color: "#D97706",
+                    letterSpacing: "0.02em",
+                  }}
+                >
+                  WARM
+                </Typography>
+              </Box>
               <TextField
                 type="number"
                 size="small"
@@ -538,14 +970,78 @@ export function FollowupSettings({ isTabActive = true }: FollowupSettingsProps) 
                 disabled={!canEdit}
                 onChange={(e) => set("cadence_warm_days", parseInt(e.target.value, 10) || 1)}
                 slotProps={{
-                  htmlInput: { min: 1, max: 60 },
-                  input: { endAdornment: <Typography sx={{ fontSize: 12, color: "#64748B", ml: 0.5 }}>days</Typography> },
+                  htmlInput: {
+                    min: 1,
+                    max: 999,
+                    style: {
+                      padding: "4px 4px 4px 10px",
+                      textAlign: "left",
+                      fontSize: "13.5px",
+                      fontWeight: 700,
+                    },
+                  },
+                  input: {
+                    endAdornment: (
+                      <Typography
+                        sx={{
+                          fontSize: { xs: 11, sm: 12 },
+                          color: "#64748B",
+                          ml: 0.5,
+                          mr: 0.75,
+                          userSelect: "none",
+                          fontWeight: 500,
+                        }}
+                      >
+                        days
+                      </Typography>
+                    ),
+                  },
                 }}
-                sx={{ width: 110 }}
+                sx={{
+                  width: { xs: 78, sm: 90, md: 98, lg: 104 },
+                  flexShrink: 0,
+                  ...inputSx,
+                  "& .MuiOutlinedInput-root": {
+                    height: 34,
+                    borderRadius: "8px",
+                    backgroundColor: "#FFFFFF",
+                    "& fieldset": { borderColor: "#FCD34D" },
+                    "&:hover fieldset": { borderColor: "#F59E0B" },
+                    "&.Mui-focused fieldset": { borderColor: "#D97706", borderWidth: "1.5px" },
+                  },
+                }}
               />
             </Box>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
-              <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: "#0284C7" }}>Cold</Typography>
+
+            {/* Cold */}
+            <Box
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: { xs: 0.5, sm: 1 },
+                px: { xs: 1.25, sm: 1.5, md: 1.75 },
+                py: 1,
+                borderRadius: "12px",
+                border: "1px solid #BFDBFE",
+                backgroundColor: "#EFF6FF",
+                minWidth: 0,
+                boxShadow: "0px 1px 2px rgba(37, 99, 235, 0.05)",
+              }}
+            >
+              <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, flexShrink: 0, minWidth: 0 }}>
+                <IconSnowflake size={17} color="#2563EB" />
+                <Typography
+                  sx={{
+                    fontSize: { xs: 11.5, sm: 12.5 },
+                    fontWeight: 700,
+                    color: "#2563EB",
+                    letterSpacing: "0.02em",
+                  }}
+                >
+                  COLD
+                </Typography>
+              </Box>
               <TextField
                 type="number"
                 size="small"
@@ -553,33 +1049,71 @@ export function FollowupSettings({ isTabActive = true }: FollowupSettingsProps) 
                 disabled={!canEdit}
                 onChange={(e) => set("cadence_cold_days", parseInt(e.target.value, 10) || 1)}
                 slotProps={{
-                  htmlInput: { min: 1, max: 90 },
-                  input: { endAdornment: <Typography sx={{ fontSize: 12, color: "#64748B", ml: 0.5 }}>days</Typography> },
+                  htmlInput: {
+                    min: 1,
+                    max: 999,
+                    style: {
+                      padding: "4px 4px 4px 10px",
+                      textAlign: "left",
+                      fontSize: "13.5px",
+                      fontWeight: 700,
+                    },
+                  },
+                  input: {
+                    endAdornment: (
+                      <Typography
+                        sx={{
+                          fontSize: { xs: 11, sm: 12 },
+                          color: "#64748B",
+                          ml: 0.5,
+                          mr: 0.75,
+                          userSelect: "none",
+                          fontWeight: 500,
+                        }}
+                      >
+                        days
+                      </Typography>
+                    ),
+                  },
                 }}
-                sx={{ width: 110 }}
+                sx={{
+                  width: { xs: 78, sm: 90, md: 98, lg: 104 },
+                  flexShrink: 0,
+                  ...inputSx,
+                  "& .MuiOutlinedInput-root": {
+                    height: 34,
+                    borderRadius: "8px",
+                    backgroundColor: "#FFFFFF",
+                    "& fieldset": { borderColor: "#93C5FD" },
+                    "&:hover fieldset": { borderColor: "#3B82F6" },
+                    "&.Mui-focused fieldset": { borderColor: "#2563EB", borderWidth: "1.5px" },
+                  },
+                }}
               />
             </Box>
           </Box>
         </Box>
 
-        {/* Row: Working days */}
+        {/* Working days */}
         <Box
           sx={{
             display: "grid",
-            gridTemplateColumns: { xs: "1fr", md: "380px 1fr" },
+            gridTemplateColumns: { xs: "1fr", md: "260px 1fr", lg: "280px 1fr" },
             gap: 2,
-            py: 2.5,
+            py: 2,
             borderBottom: "1px solid #F1F5F9",
             alignItems: "center",
           }}
         >
           <Box>
-            <Typography sx={{ fontSize: 14, fontWeight: 600, color: "#101828" }}>Working days</Typography>
-            <Typography sx={{ fontSize: 13, color: "#475467", mt: 0.25 }}>
+            <Typography sx={{ fontSize: 14, fontWeight: 600, color: "#101828" }}>
+              Active working days
+            </Typography>
+            <Typography sx={{ fontSize: 13, color: "#667085", mt: 0.25 }}>
               Days of the week counted toward business day cadence intervals.
             </Typography>
           </Box>
-          <Box sx={{ display: "flex", gap: 0.75, flexWrap: "wrap" }}>
+          <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
             {WEEKDAYS.map((d, i) => {
               const selected = draft.workdays.includes(i);
               return (
@@ -588,8 +1122,6 @@ export function FollowupSettings({ isTabActive = true }: FollowupSettingsProps) 
                   label={d}
                   clickable={canEdit}
                   disabled={!canEdit && !selected}
-                  color={selected ? "primary" : "default"}
-                  variant={selected ? "filled" : "outlined"}
                   onClick={() => {
                     if (!canEdit) return;
                     set(
@@ -597,94 +1129,110 @@ export function FollowupSettings({ isTabActive = true }: FollowupSettingsProps) 
                       selected ? draft.workdays.filter((x) => x !== i) : [...draft.workdays, i].sort()
                     );
                   }}
-                  sx={{ fontWeight: 600, minWidth: 50, borderRadius: "8px" }}
+                  sx={{
+                    fontWeight: 700,
+                    minWidth: 54,
+                    height: 32,
+                    borderRadius: "10px",
+                    backgroundColor: selected ? "#4F46E5" : "#F8FAFC",
+                    color: selected ? "#FFFFFF" : "#64748B",
+                    border: selected ? "1px solid #4F46E5" : "1px solid #E2E8F0",
+                    boxShadow: selected ? "0px 1px 3px rgba(79, 70, 229, 0.25)" : "none",
+                    "&:hover": canEdit
+                      ? {
+                          backgroundColor: selected ? "#4338CA" : "#EEF2FF",
+                          borderColor: selected ? "#4338CA" : "#C7D2FE",
+                          color: selected ? "#FFFFFF" : "#4F46E5",
+                        }
+                      : {},
+                  }}
                 />
               );
             })}
           </Box>
         </Box>
 
-        {/* Row: Customer send hours */}
+        {/* Customer send window */}
         <Box
           sx={{
             display: "grid",
-            gridTemplateColumns: { xs: "1fr", md: "380px 1fr" },
+            gridTemplateColumns: { xs: "1fr", md: "260px 1fr", lg: "280px 1fr" },
             gap: 2,
-            py: 2.5,
+            py: 2,
             borderBottom: "1px solid #F1F5F9",
             alignItems: "center",
           }}
         >
           <Box>
-            <Typography sx={{ fontSize: 14, fontWeight: 600, color: "#101828" }}>Customer send window</Typography>
-            <Typography sx={{ fontSize: 13, color: "#475467", mt: 0.25 }}>
+            <Typography sx={{ fontSize: 14, fontWeight: 600, color: "#101828" }}>
+              Customer send window
+            </Typography>
+            <Typography sx={{ fontSize: 13, color: "#667085", mt: 0.25 }}>
               Automatic customer emails are dispatched only within these local hours.
             </Typography>
           </Box>
-          <Box sx={{ display: "flex", gap: 1.5, alignItems: "center" }}>
-            <TextField
-              type="time"
-              size="small"
+          <Box sx={{ display: "flex", gap: 1.5, alignItems: "center", flexWrap: "wrap" }}>
+            <ModernClockTimePicker
               value={draft.send_window_start}
               disabled={!canEdit}
-              onChange={(e) => set("send_window_start", e.target.value)}
-              sx={{ width: 140 }}
+              onChange={(val) => set("send_window_start", val)}
+              label="Send Window Start"
             />
-            <Typography sx={{ color: "#64748B", fontSize: 13 }}>to</Typography>
-            <TextField
-              type="time"
-              size="small"
+            <Typography sx={{ color: "#64748B", fontSize: 13, fontWeight: 600 }}>to</Typography>
+            <ModernClockTimePicker
               value={draft.send_window_end}
               disabled={!canEdit}
-              onChange={(e) => set("send_window_end", e.target.value)}
-              sx={{ width: 140 }}
+              onChange={(val) => set("send_window_end", val)}
+              label="Send Window End"
             />
           </Box>
         </Box>
 
-        {/* Row: Default reminder time */}
+        {/* Default reminder time */}
         <Box
           sx={{
             display: "grid",
-            gridTemplateColumns: { xs: "1fr", md: "380px 1fr" },
+            gridTemplateColumns: { xs: "1fr", md: "260px 1fr", lg: "280px 1fr" },
             gap: 2,
-            py: 2.5,
+            py: 2,
             borderBottom: "1px solid #F1F5F9",
             alignItems: "center",
           }}
         >
           <Box>
-            <Typography sx={{ fontSize: 14, fontWeight: 600, color: "#101828" }}>Default reminder time</Typography>
-            <Typography sx={{ fontSize: 13, color: "#475467", mt: 0.25 }}>
+            <Typography sx={{ fontSize: 14, fontWeight: 600, color: "#101828" }}>
+              Default reminder time
+            </Typography>
+            <Typography sx={{ fontSize: 13, color: "#667085", mt: 0.25 }}>
               Target time applied when a follow-up specifies a date without an explicit hour.
             </Typography>
           </Box>
           <Box>
-            <TextField
-              type="time"
-              size="small"
+            <ModernClockTimePicker
               value={draft.default_local_time}
               disabled={!canEdit}
-              onChange={(e) => set("default_local_time", e.target.value)}
-              sx={{ width: 140 }}
+              onChange={(val) => set("default_local_time", val)}
+              label="Default Reminder Time"
             />
           </Box>
         </Box>
 
-        {/* Row: Advance notice */}
+        {/* Advance team notice */}
         <Box
           sx={{
             display: "grid",
-            gridTemplateColumns: { xs: "1fr", md: "380px 1fr" },
+            gridTemplateColumns: { xs: "1fr", md: "260px 1fr", lg: "280px 1fr" },
             gap: 2,
-            py: 2.5,
+            py: 2,
             borderBottom: "1px solid #F1F5F9",
             alignItems: "center",
           }}
         >
           <Box>
-            <Typography sx={{ fontSize: 14, fontWeight: 600, color: "#101828" }}>Advance team notice</Typography>
-            <Typography sx={{ fontSize: 13, color: "#475467", mt: 0.25 }}>
+            <Typography sx={{ fontSize: 14, fontWeight: 600, color: "#101828" }}>
+              Advance team notice
+            </Typography>
+            <Typography sx={{ fontSize: 13, color: "#667085", mt: 0.25 }}>
               Notify team members this many business days ahead of follow-up due date (0 = remind only on due date).
             </Typography>
           </Box>
@@ -699,25 +1247,27 @@ export function FollowupSettings({ isTabActive = true }: FollowupSettingsProps) 
                 htmlInput: { min: 0, max: 10 },
                 input: { endAdornment: <Typography sx={{ fontSize: 12, color: "#64748B", ml: 0.5 }}>days before</Typography> },
               }}
-              sx={{ width: 160 }}
+              sx={{ width: 160, ...inputSx }}
             />
           </Box>
         </Box>
 
-        {/* Row: Timezone */}
+        {/* Follow-up timezone */}
         <Box
           sx={{
             display: "grid",
-            gridTemplateColumns: { xs: "1fr", md: "380px 1fr" },
+            gridTemplateColumns: { xs: "1fr", md: "260px 1fr", lg: "280px 1fr" },
             gap: 2,
-            py: 2.5,
+            py: 2,
             alignItems: "center",
           }}
         >
           <Box>
-            <Typography sx={{ fontSize: 14, fontWeight: 600, color: "#101828" }}>Follow-up timezone</Typography>
-            <Typography sx={{ fontSize: 13, color: "#475467", mt: 0.25 }}>
-              Current effective timezone: <strong>{baseline.effective_timezone}</strong> (inherited from workspace unless overridden).
+            <Typography sx={{ fontSize: 14, fontWeight: 600, color: "#101828" }}>
+              Follow-up timezone
+            </Typography>
+            <Typography sx={{ fontSize: 13, color: "#667085", mt: 0.25 }}>
+              Current effective: <strong>{baseline.effective_timezone}</strong> (inherited from workspace unless overridden).
             </Typography>
           </Box>
           <Box>
@@ -727,7 +1277,7 @@ export function FollowupSettings({ isTabActive = true }: FollowupSettingsProps) 
               value={draft.timezone ?? null}
               disabled={!canEdit}
               onChange={(_, val) => set("timezone", val)}
-              sx={{ maxWidth: 320 }}
+              sx={{ maxWidth: 320, ...inputSx }}
               renderInput={(params) => (
                 <TextField {...params} placeholder={`${baseline.effective_timezone} (workspace default)`} />
               )}
@@ -736,20 +1286,40 @@ export function FollowupSettings({ isTabActive = true }: FollowupSettingsProps) 
         </Box>
       </Box>
 
-      {/* Section 4: Safety & Automation Limits */}
-      <Box sx={{ py: 3 }}>
-        <Typography sx={{ fontSize: 16, fontWeight: 700, color: "#101828" }}>Safety limits</Typography>
-        <Typography sx={{ fontSize: 13.5, color: "#475467", mt: 0.25 }}>
-          Guardrails protecting recipient goodwill, spam reputation, and outbound volume.
-        </Typography>
+      {/* CARD 4: Safety Limits & Anti-Spam Guardrails */}
+      <Box sx={cardSx}>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, mb: 2 }}>
+          <Box
+            sx={{
+              width: 36,
+              height: 36,
+              borderRadius: "10px",
+              backgroundColor: "#FFF7ED",
+              color: "#EA580C",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <IconShieldLock size={20} stroke={2} />
+          </Box>
+          <Box>
+            <Typography sx={{ fontSize: 16, fontWeight: 700, color: "#101828" }}>
+              Safety Limits & Anti-Spam Guardrails
+            </Typography>
+            <Typography sx={{ fontSize: 13, color: "#667085", mt: 0.25 }}>
+              Guardrails protecting recipient goodwill, spam reputation, and outbound volume.
+            </Typography>
+          </Box>
+        </Box>
 
-        {/* Row: Max attempts */}
+        {/* Max attempts */}
         <Box
           sx={{
             display: "grid",
-            gridTemplateColumns: { xs: "1fr", md: "380px 1fr" },
+            gridTemplateColumns: { xs: "1fr", md: "260px 1fr", lg: "280px 1fr" },
             gap: 2,
-            py: 2.5,
+            py: 2,
             borderBottom: "1px solid #F1F5F9",
             alignItems: "center",
           }}
@@ -758,8 +1328,8 @@ export function FollowupSettings({ isTabActive = true }: FollowupSettingsProps) 
             <Typography sx={{ fontSize: 14, fontWeight: 600, color: "#101828" }}>
               Maximum automated emails
             </Typography>
-            <Typography sx={{ fontSize: 13, color: "#475467", mt: 0.25 }}>
-              Sequence limit per thread before pausing. Counter resets if the customer writes back.
+            <Typography sx={{ fontSize: 13, color: "#667085", mt: 0.25 }}>
+              Sequence limit per thread before pausing. Counter automatically resets if the customer writes back.
             </Typography>
           </Box>
           <Box>
@@ -773,18 +1343,18 @@ export function FollowupSettings({ isTabActive = true }: FollowupSettingsProps) 
                 htmlInput: { min: 1, max: 10 },
                 input: { endAdornment: <Typography sx={{ fontSize: 12, color: "#64748B", ml: 0.5 }}>emails</Typography> },
               }}
-              sx={{ width: 140 }}
+              sx={{ width: 150, ...inputSx }}
             />
           </Box>
         </Box>
 
-        {/* Row: Min spacing */}
+        {/* Min spacing */}
         <Box
           sx={{
             display: "grid",
-            gridTemplateColumns: { xs: "1fr", md: "380px 1fr" },
+            gridTemplateColumns: { xs: "1fr", md: "260px 1fr", lg: "280px 1fr" },
             gap: 2,
-            py: 2.5,
+            py: 2,
             alignItems: "center",
           }}
         >
@@ -792,7 +1362,7 @@ export function FollowupSettings({ isTabActive = true }: FollowupSettingsProps) 
             <Typography sx={{ fontSize: 14, fontWeight: 600, color: "#101828" }}>
               Minimum spacing between emails
             </Typography>
-            <Typography sx={{ fontSize: 13, color: "#475467", mt: 0.25 }}>
+            <Typography sx={{ fontSize: 13, color: "#667085", mt: 0.25 }}>
               Enforced cooldown buffer between consecutive outbound emails to the same recipient.
             </Typography>
           </Box>
@@ -807,7 +1377,7 @@ export function FollowupSettings({ isTabActive = true }: FollowupSettingsProps) 
                 htmlInput: { min: 1, max: 720 },
                 input: { endAdornment: <Typography sx={{ fontSize: 12, color: "#64748B", ml: 0.5 }}>hours</Typography> },
               }}
-              sx={{ width: 140 }}
+              sx={{ width: 150, ...inputSx }}
             />
           </Box>
         </Box>
@@ -816,42 +1386,61 @@ export function FollowupSettings({ isTabActive = true }: FollowupSettingsProps) 
       {/* Sticky Save / Discard Bar */}
       {canEdit && dirtyKeys.length > 0 && (
         <Paper
-          elevation={4}
+          elevation={6}
           sx={{
             position: "fixed",
             bottom: 24,
-            left: { xs: 16, sm: "calc(50% - 300px)" },
+            left: { xs: 16, sm: "calc(50% - 280px)" },
             right: { xs: 16, sm: "auto" },
-            width: { xs: "auto", sm: 600 },
+            width: { xs: "auto", sm: 560 },
             zIndex: 1000,
-            borderRadius: "14px",
-            px: 3,
+            borderRadius: "16px",
+            px: 2.75,
             py: 1.75,
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
             gap: 2,
-            border: "1px solid #BFDBFE",
+            border: "1px solid #E0E7FF",
             backgroundColor: "#FFFFFF",
-            boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)",
+            boxShadow: "0 20px 25px -5px rgba(16, 24, 40, 0.1), 0 8px 10px -6px rgba(16, 24, 40, 0.06)",
           }}
         >
-          <Box sx={{ display: "flex", flexDirection: "column" }}>
-            <Typography sx={{ fontSize: 13.5, fontWeight: 600, color: "#1E293B" }}>
-              {dirtyKeys.length} unsaved change{dirtyKeys.length === 1 ? "" : "s"}
-            </Typography>
-            {validationErrors.length > 0 && (
-              <Typography sx={{ fontSize: 12, color: "#DC2626", fontWeight: 500 }}>
-                {validationErrors[0]}
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+            <Box
+              sx={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                backgroundColor: "#4F46E5",
+                boxShadow: "0 0 0 3px rgba(79, 70, 229, 0.2)",
+              }}
+            />
+            <Box sx={{ display: "flex", flexDirection: "column" }}>
+              <Typography sx={{ fontSize: 13.5, fontWeight: 700, color: "#101828" }}>
+                {dirtyKeys.length} unsaved change{dirtyKeys.length === 1 ? "" : "s"}
               </Typography>
-            )}
+              {validationErrors.length > 0 && (
+                <Typography sx={{ fontSize: 12, color: "#DC2626", fontWeight: 600 }}>
+                  {validationErrors[0]}
+                </Typography>
+              )}
+            </Box>
           </Box>
 
           <Box sx={{ display: "flex", gap: 1.25, alignItems: "center" }}>
             <Button
               onClick={handleDiscard}
               disabled={save.isPending}
-              sx={{ textTransform: "none", fontWeight: 600, color: "#475467" }}
+              sx={{
+                textTransform: "none",
+                fontWeight: 600,
+                fontSize: 13.5,
+                color: "#475467",
+                borderRadius: "10px",
+                px: 2,
+                "&:hover": { backgroundColor: "#F1F5F9", color: "#1E293B" },
+              }}
             >
               Discard
             </Button>
@@ -863,9 +1452,12 @@ export function FollowupSettings({ isTabActive = true }: FollowupSettingsProps) 
               sx={{
                 textTransform: "none",
                 fontWeight: 600,
-                borderRadius: "8px",
-                backgroundColor: "#2563EB",
-                "&:hover": { backgroundColor: "#1D4ED8" },
+                fontSize: 13.5,
+                borderRadius: "10px",
+                px: 2.5,
+                py: 0.9,
+                backgroundColor: "#4F46E5",
+                "&:hover": { backgroundColor: "#4338CA" },
               }}
             >
               {save.isPending ? "Saving changes…" : "Save changes"}
