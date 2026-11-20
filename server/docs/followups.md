@@ -12,7 +12,7 @@ overrides/permissions and executes side effects.
 | --- | --- | --- | --- | --- |
 | Gmail ingestion (inbound business / outbound from mailbox) | `services/gmail_sync.py::_normalize_and_store` | `email_messages` insert, then in the **same transaction** `followups/triggers.on_message_stored` → fence upsert on `thread_followup_states` + `outbox_events(followup.assess)` (SAVEPOINT, never blocks ingestion) | `OutboxService.dispatch_fast_path` after commit; `outbox_relay_forever` (new, 10 s, ≤ 6 h old rows) as the durable fallback | none |
 | ProxiPilot sends (AI draft, manual reply, follow-up email) | `reply_planner/delivery.py` (main path + `_deliver_in_thread`), `delivery_reconciler._finalise_sent` | outbound `email_messages` insert + same-transaction trigger | same | Gmail (existing dispatcher) |
-| Assessment (AI #2) | `workers/followup_worker.FollowupWorker` (stream `followup_events`) → `followups/service.process_assessment` | `message_assessments` row (unique per thread/message/prompt version) | — | OpenAI (`create_with_retry`, strict JSON schema), **no transaction open** |
+| Assessment (AI #2) | `workers/followup_worker.FollowupWorker` (stream `followup_events`) → `followups/service.process_assessment` | `message_assessments`: the thread keeps only its latest assessment (older rows are replaced; superseded messages store nothing) | — | OpenAI (`create_with_retry`, strict JSON schema), **no transaction open** |
 | Apply decision | `followups/engine.apply_assessment` (one short transaction) | `thread_followup_states` (row-locked, revision fence), `contact_suppressions`, `followup_occurrences`, `email_threads.lead_intent` | — | none |
 | Scheduler | `followups/scheduler.FollowupScheduler` (embedded loop, 60 s) | lease on `followup_occurrences` (`FOR UPDATE SKIP LOCKED`) | — | — |
 | Team notices | `followups/notify.deliver` | one `followup_notice_deliveries` row per occurrence/notice type/address | — | transactional email (`send_email`), per recipient |
@@ -25,6 +25,10 @@ migration `e3f4a5b6c7d8_followup_intelligence.py`. UI: `components/inbox/FollowU
 `components/followups/{FollowUpPanel,FollowUpSheetControl,ScheduleDialog}.tsx`, `components/settings/FollowupSettings.tsx`, `hooks/useFollowups.ts`.
 
 ### Invariants enforced in code
+* **Latest assessment only.** One stored assessment per conversation (plus at most one in-flight row);
+  the panel reads one assessment and the current plan, never a history list. AI #2 reasons at
+  `medium` effort over the conversation, must cite message ids for any action-driving decision (else
+  `needs_review`) and must quote a customer-given date verbatim (else it is held for review).
 * **Revision fence.** Each new message bumps `revision` and marks the state stale *in the ingestion
   transaction*. Only the newest message's assessment can change effective state; a late or
   reverse-order result is stored with `not_applied_reason` (`superseded_by_newer_message`,

@@ -280,6 +280,18 @@ def _norm_text(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "")).strip().lower()
 
 
+def _phrase_in(phrase: Optional[str], texts: Sequence[str]) -> bool:
+    """True when every fragment of ``phrase`` (fragments joined by '...') occurs in one of ``texts``."""
+    if not phrase:
+        return False
+    frags = [_norm_text(f).strip(" .,;:!?\"'") for f in re.split(r"\.\.\.|…", phrase)]
+    frags = [f for f in frags if len(f) >= 2]
+    if not frags:
+        return False
+    hays = [_norm_text(t) for t in texts]
+    return any(all(f in h for f in frags) for h in hays)
+
+
 def _clip(s: Any, n: int) -> str:
     return str(s or "").strip()[:n]
 
@@ -390,13 +402,34 @@ def validate(
     if matched and matched not in {o["key"] for o in opportunities}:
         warnings.append("matched_opportunity_unknown")
 
+    # ---- Grounding guards (anti-hallucination) -------------------------------------------------
+    evidence = _ids(data.get("evidence_message_ids"), "evidence")
+    acts = decision in ("schedule", "defer", "wait_team", "suppress") or outcome in ("completed", "declined")
+    if acts and not evidence:
+        # An action-driving judgement that cannot point at a single message is not trusted.
+        if decision == "suppress" and cons.quote_verified:
+            pass                                   # the refusal itself is verified verbatim: keep it
+        else:
+            warnings.append("decision_without_evidence")
+            decision = "needs_review"
+            if outcome in ("completed", "declined"):
+                outcome = "unknown"
+    if timing.kind in ("customer_commitment", "customer_request") and timing.local_date is not None \
+            and not timing.ambiguous and not _phrase_in(timing.phrase, customer_texts):
+        # A date attributed to the customer must be quoted from what the customer wrote; otherwise it is
+        # shown to the team as a candidate and exact customer contact is held for review.
+        warnings.append("customer_date_not_quoted")
+        timing.ambiguous = True
+        timing.alternatives = [timing.local_date.isoformat() + (f" {timing.local_time.strftime('%H:%M')}"
+                                                                 if timing.local_time else "")]
+
     return Assessment(
         temperature=temperature,
         label_confidence=_unit(data.get("label_confidence"), "label_confidence"),
         buying_interest=_unit(data.get("buying_interest"), "buying_interest"),
         sales_relevance=relevance, reason_codes=reason_codes,
         explanation=_clip(data.get("explanation"), 400),
-        evidence_message_ids=_ids(data.get("evidence_message_ids"), "evidence"),
+        evidence_message_ids=evidence,
         outcome=outcome, next_actor=next_actor, next_action=_clip(data.get("next_action"), 300),
         decision=decision, matched_opportunity_key=matched, opportunities=opportunities,
         timing=timing, constraints=cons, warnings=warnings,

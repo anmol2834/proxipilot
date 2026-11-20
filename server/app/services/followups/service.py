@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
@@ -32,6 +32,27 @@ MAX_ATTEMPTS = 5
 
 def _utc(dt):
     return dt if dt is None or dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+async def _existing(db, thread_id: str, message_id: str) -> Optional[MessageAssessment]:
+    return (await db.execute(select(MessageAssessment).where(
+        MessageAssessment.thread_id == thread_id, MessageAssessment.message_id == message_id,
+        MessageAssessment.prompt_version == PROMPT_VERSION).with_for_update()
+        .execution_options(populate_existing=True))).scalar_one_or_none()
+
+
+async def _keep_latest_only(db, row: MessageAssessment, is_current: bool) -> None:
+    """A conversation keeps ONE assessment: its latest. When ``row`` became the current decision,
+    every older row of the thread is deleted (a newer in-flight row is left alone); when it was not
+    applied (a newer message won the revision fence) ``row`` itself is deleted. Bounded storage:
+    at most the current assessment plus one in-flight row per thread."""
+    if is_current:
+        await db.execute(delete(MessageAssessment).where(
+            MessageAssessment.thread_id == row.thread_id, MessageAssessment.id != row.id,
+            or_(MessageAssessment.message_sent_at.is_(None),
+                MessageAssessment.message_sent_at <= row.message_sent_at)))
+    else:
+        await db.delete(row)
 
 
 async def _row(db, *, tenant_id: str, thread_id: str, msg: EmailMessage) -> MessageAssessment:
@@ -60,7 +81,7 @@ async def process_assessment(*, tenant_id: str, thread_id: str, message_id: str,
         policy = await engine.load_policy(db, tenant_id)
         control = await db.get(ThreadFollowupControl, thread_id)
         assess_on, _ = engine.effective_switches(policy, control)
-        row = await _row(db, tenant_id=tenant_id, thread_id=thread_id, msg=msg)
+        existing = await _existing(db, thread_id, msg.id)
 
         if not flags.assessment_enabled or not assess_on:
             # Frozen label. The new message still fences outreach: hold pending customer email for review.
@@ -70,29 +91,35 @@ async def process_assessment(*, tenant_id: str, thread_id: str, message_id: str,
                 held = await engine.hold_customer_sends(db, thread_id, "new_message_not_assessed")
                 if held:
                     state.needs_review, state.review_reason = True, "new message arrived; automatic assessment is off"
-            row.status, row.not_applied_reason = "skipped", "assessment_disabled"
+            if existing is not None and existing.status != "valid":
+                await db.delete(existing)                 # nothing to keep: no assessment will be made
             await db.commit()
             return "assessment_disabled"
 
-        if row.status == "valid":
-            if row.applied or row.not_applied_reason:
+        if existing is not None and existing.status == "valid":
+            if existing.applied or existing.not_applied_reason:
                 await db.commit()
                 return "duplicate"
-            out = await engine.apply_assessment(db, tenant_id=tenant_id, row=row,
-                                                result=contracts.from_json(row.result), now=now)
+            out = await engine.apply_assessment(db, tenant_id=tenant_id, row=existing,
+                                                result=contracts.from_json(existing.result), now=now)
+            await _keep_latest_only(db, existing, out.applied)
             await db.commit()
             return "applied" if out.applied else f"not_applied:{out.reason}"
-        if row.attempts >= MAX_ATTEMPTS:
-            await db.commit()
-            return "dead"
 
         state = await db.get(ThreadFollowupState, thread_id)
         if state is not None and state.last_message_id and state.last_message_id != msg.id \
                 and _utc(state.last_message_at) and _utc(state.last_message_at) > _utc(msg.sent_at):
-            # A newer message exists; its assessment reads this one as context. Skip the expensive call.
-            row.status, row.not_applied_reason = "skipped", "superseded_by_newer_message"
+            # A newer message exists; its assessment reads this one as context. Skip the model call and
+            # store nothing (only the latest assessment of a conversation is ever kept).
+            if existing is not None:
+                await db.delete(existing)
             await db.commit()
             return "superseded"
+
+        if existing is not None and existing.attempts >= MAX_ATTEMPTS:
+            await db.commit()
+            return "dead"
+        row = existing or await _row(db, tenant_id=tenant_id, thread_id=thread_id, msg=msg)
 
         policy_cal = await engine.load_calendar(db, tenant_id, policy)
         ctx = await assessor.build_context(db, tenant_id=tenant_id, thread_id=thread_id, message_id=message_id,
@@ -142,9 +169,11 @@ async def process_assessment(*, tenant_id: str, thread_id: str, message_id: str,
                     st = await db.get(ThreadFollowupState, thread_id)
                     if st is not None and st.last_message_id == message_id:
                         st.stale, st.stale_reason = False, None
+                    await _keep_latest_only(db, row, True)
                     await db.commit()
                     return "shadow"
                 out = await engine.apply_assessment(db, tenant_id=tenant_id, row=row, result=result, now=now)
+                await _keep_latest_only(db, row, out.applied)
                 await db.commit()
                 logger.info("followup assessment applied" if out.applied else "followup assessment stored",
                             thread_id=thread_id, message_id=message_id, decision=result.decision,

@@ -31,35 +31,15 @@ export type FollowupStatus =
   | "suppressed"
   | "stopped";
 
+/** The conversation's current follow-up plan (the panel never loads past plans or assessments). */
 export interface FollowupOccurrenceDTO {
   id: string;
   origin: "ai" | "customer_date" | "cadence" | "user";
   status: "scheduled" | "cancelled" | "superseded" | "done" | "held";
   due_at: string | null;
-  due_local: string | null;
   notice_at: string | null;
-  notice_local: string | null;
-  advance_status: string;
-  due_notice_status: string;
   customer_status: string;
   hold_reason: string | null;
-  reason: string | null;
-  step: number;
-  notices: Record<string, Record<string, number>>;
-}
-
-export interface FollowupHistoryDTO {
-  id: string;
-  message_id: string;
-  created_at: string | null;
-  status: string;
-  temperature: FollowupTemperature | null;
-  decision: string | null;
-  outcome: string | null;
-  next_actor: string | null;
-  explanation: string | null;
-  applied: boolean;
-  not_applied_reason: string | null;
 }
 
 export interface ThreadFollowup {
@@ -124,8 +104,7 @@ export interface ThreadFollowup {
     can_manage_settings: boolean;
     workspace_timezone: string;
   };
-  occurrences: FollowupOccurrenceDTO[];
-  history: FollowupHistoryDTO[];
+  current_occurrence: FollowupOccurrenceDTO | null;
 }
 
 export interface FollowupControlsPatch {

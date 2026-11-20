@@ -1,6 +1,6 @@
 """Conversation intelligence & follow-up API.
 
-GET    /followups/threads/{id}             effective decision, controls, timing, history   (inbox.read)
+GET    /followups/threads/{id}             effective decision, controls, timing, latest AI view (inbox.read)
 PATCH  /followups/threads/{id}/controls    temperature / planning / assessment / snooze / complete /
                                            customer email permission (version-fenced)      (inbox.reply;
                                            customer email permission and recipient need inbox.send)
@@ -21,13 +21,13 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.context import TenantContext, require_permission
 from app.core.database import get_db
 from app.models.followup import (
-    ContactSuppression, FollowupNoticeDelivery, FollowupOccurrence, FollowupPolicy, MessageAssessment,
+    ContactSuppression, FollowupOccurrence, FollowupPolicy, MessageAssessment,
     ThreadFollowupControl, ThreadFollowupState,
 )
 from app.models.inbox import EmailThread
@@ -77,24 +77,17 @@ async def _panel(db: AsyncSession, ctx: TenantContext, thread: EmailThread) -> D
     sups = await engine.active_suppressions(db, tid, participants, now)
     account = await db.get(ConnectedIntegrationAccount, thread.integration_account_id)
     supported = bool(account and account.tenant_id == tid and (account.provider or "").lower() == "gmail")
-    last_asm = await db.get(MessageAssessment, state.last_assessment_id) if state and state.last_assessment_id else None
-    occs = (await db.execute(select(FollowupOccurrence).where(
-        FollowupOccurrence.tenant_id == tid, FollowupOccurrence.thread_id == thread.id,
-    ).order_by(FollowupOccurrence.created_at.desc()).limit(10))).scalars().all()
-    occ_ids = [o.id for o in occs]
-    notice_rows = (await db.execute(select(
-        FollowupNoticeDelivery.occurrence_id, FollowupNoticeDelivery.notice_type, FollowupNoticeDelivery.status,
-        func.count()).where(FollowupNoticeDelivery.occurrence_id.in_(occ_ids)).group_by(
-        FollowupNoticeDelivery.occurrence_id, FollowupNoticeDelivery.notice_type, FollowupNoticeDelivery.status,
-    ))).all() if occ_ids else []
-    notices: Dict[str, Dict[str, Dict[str, int]]] = {}
-    for oid, kind, st, n in notice_rows:
-        notices.setdefault(oid, {}).setdefault(kind, {})[st] = int(n)
-    history = (await db.execute(select(MessageAssessment).where(
+    # One indexed lookup each: the thread keeps only its latest assessment, and the panel shows only
+    # the current follow-up plan (people read the conversation itself for history).
+    latest_valid = (await db.execute(select(MessageAssessment).where(
         MessageAssessment.tenant_id == tid, MessageAssessment.thread_id == thread.id,
-    ).order_by(MessageAssessment.created_at.desc()).limit(10))).scalars().all()
+        MessageAssessment.status == "valid").order_by(MessageAssessment.created_at.desc()).limit(1)
+    )).scalar_one_or_none()
+    current = (await db.execute(select(FollowupOccurrence).where(
+        FollowupOccurrence.tenant_id == tid, FollowupOccurrence.thread_id == thread.id,
+    ).order_by((FollowupOccurrence.status == "scheduled").desc(), FollowupOccurrence.created_at.desc()).limit(1)
+    )).scalar_one_or_none()
     flags = get_flags()
-    latest_valid = next((a for a in history if a.status == "valid"), None)
     suggestion = None
     if latest_valid is not None:
         res = latest_valid.result or {}
@@ -124,8 +117,8 @@ async def _panel(db: AsyncSession, ctx: TenantContext, thread: EmailThread) -> D
             "suggested": state.suggested_temperature if state else None,
             "source": (state.temperature_source if state else None) or ("legacy" if (thread.lead_intent or "unknown") != "unknown" else None),
             "reason": state.temperature_reason if state else None,
-            "label_confidence": last_asm.label_confidence if last_asm else None,
-            "buying_interest": last_asm.buying_interest if last_asm else None,
+            "label_confidence": latest_valid.label_confidence if latest_valid else None,
+            "buying_interest": latest_valid.buying_interest if latest_valid else None,
         },
         "status": state.status if state else "none",
         "outcome": state.outcome if state else None,
@@ -175,18 +168,11 @@ async def _panel(db: AsyncSession, ctx: TenantContext, thread: EmailThread) -> D
             "can_manage_settings": ctx.has_permission("settings.update"),
             "workspace_timezone": cal.zone.name,
         },
-        "occurrences": [{
-            "id": o.id, "origin": o.origin, "status": o.status, "due_at": _iso(o.due_at), "due_local": local(o.due_at, o.tz),
-            "notice_at": _iso(o.notice_at), "notice_local": local(o.notice_at), "advance_status": o.advance_status,
-            "due_notice_status": o.due_notice_status, "customer_status": o.customer_status,
-            "hold_reason": o.hold_reason, "reason": o.reason, "step": o.step, "notices": notices.get(o.id, {}),
-        } for o in occs],
-        "history": [{
-            "id": a.id, "message_id": a.message_id, "created_at": _iso(a.created_at), "status": a.status,
-            "temperature": a.suggested_temperature, "decision": a.decision, "outcome": a.outcome,
-            "next_actor": a.next_actor, "explanation": a.explanation, "applied": a.applied,
-            "not_applied_reason": a.not_applied_reason,
-        } for a in history],
+        "current_occurrence": None if current is None else {
+            "id": current.id, "origin": current.origin, "status": current.status, "due_at": _iso(current.due_at),
+            "notice_at": _iso(current.notice_at), "customer_status": current.customer_status,
+            "hold_reason": current.hold_reason,
+        },
     }
 
 

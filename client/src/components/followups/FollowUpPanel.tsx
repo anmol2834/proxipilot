@@ -6,7 +6,7 @@
  * Every control is authorised on the server; the UI only hides or explains what the user cannot do.
  */
 
-import React, { useMemo, useState } from "react";
+import React, { useState } from "react";
 import Link from "next/link";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
@@ -26,7 +26,7 @@ import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import {
   IconAlertTriangle, IconBell, IconBrain, IconCalendarEvent, IconCheck, IconChevronDown, IconChevronUp,
-  IconClockPause, IconDots, IconEye, IconHandStop, IconHistory, IconMail, IconPlayerPause, IconPlayerPlay,
+  IconClockPause, IconDots, IconEye, IconHandStop, IconMail, IconPlayerPause, IconPlayerPlay,
   IconSparkles, IconTargetArrow, IconUser, IconX,
 } from "@tabler/icons-react";
 import { ConfirmDialog } from "@/components/ui/feedback/ConfirmDialog";
@@ -80,7 +80,6 @@ export function FollowUpPanel({ threadId, defaultOpen = true, onClose, flat = fa
   const lift = useLiftSuppression(threadId);
 
   const [open, setOpen] = useState(defaultOpen);
-  const [showActivity, setShowActivity] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [emailOpen, setEmailOpen] = useState(false);
@@ -92,31 +91,7 @@ export function FollowUpPanel({ threadId, defaultOpen = true, onClose, flat = fa
   const f: ThreadFollowup | undefined = q.data;
   const busy = patch.isPending || schedule.isPending || clear.isPending || applySuggestion.isPending || lift.isPending;
   const tz = f?.capabilities.workspace_timezone || "UTC";
-  const current = useMemo(() => f?.occurrences.find((o) => o.status === "scheduled") ?? f?.occurrences[0], [f]);
-
-  const activity = useMemo(() => {
-    if (!f) return [];
-    const items: { at: string; title: string; detail?: string | null; tone?: string }[] = [];
-    for (const h of f.history) {
-      items.push({
-        at: h.created_at ?? "", tone: h.applied ? "ok" : "muted",
-        title: `AI assessment · ${cap(h.temperature) || "—"} · ${DECISION[h.decision ?? ""] ?? humanize(h.decision ?? h.status)}`,
-        detail: [h.explanation, !h.applied && h.not_applied_reason ? `Not applied: ${humanize(h.not_applied_reason)}` : null]
-          .filter(Boolean).join(" — "),
-      });
-    }
-    for (const o of f.occurrences) {
-      const notices = Object.entries(o.notices || {}).map(([k, v]) =>
-        `${k} notice: ${Object.entries(v).map(([s, n]) => `${n} ${s}`).join(", ")}`).join(" · ");
-      items.push({
-        at: o.due_at ?? "", tone: o.status === "scheduled" ? "info" : "muted",
-        title: `Follow-up ${o.status} · due ${inZone(o.due_at, tz)}`,
-        detail: [DUE_SOURCE[o.origin] ?? o.origin, CUSTOMER_STATUS[o.customer_status]?.label, notices || null,
-                 o.hold_reason ? `Held: ${humanize(o.hold_reason)}` : null].filter(Boolean).join(" · "),
-      });
-    }
-    return items.sort((a, b) => (b.at || "").localeCompare(a.at || "")).slice(0, 14);
-  }, [f, tz]);
+  const current = f?.current_occurrence ?? null;
 
   if (q.isLoading) {
     return (
@@ -354,27 +329,6 @@ export function FollowUpPanel({ threadId, defaultOpen = true, onClose, flat = fa
                   Mark completed
                 </Button>
               )}
-            </Box>
-          )}
-
-          {activity.length > 0 && (
-            <Box>
-              <Divider sx={{ mb: 1, borderColor: "#F1F5F9" }} />
-              <Button size="small" startIcon={<IconHistory size={15} />} onClick={() => setShowActivity((v) => !v)}
-                      sx={{ textTransform: "none", fontWeight: 600, color: FU.muted }}>
-                {showActivity ? "Hide activity" : `Activity (${activity.length})`}
-              </Button>
-              <Collapse in={showActivity} unmountOnExit>
-                <Box sx={{ mt: 1, display: "flex", flexDirection: "column", gap: 1, pl: 1, borderLeft: `2px solid ${FU.border}` }}>
-                  {activity.map((a, i) => (
-                    <Box key={i}>
-                      <Typography sx={{ fontSize: 12.5, fontWeight: 600, color: a.tone === "ok" ? FU.ok : FU.body }}>{a.title}</Typography>
-                      <Typography sx={{ fontSize: 11.5, color: FU.faint }}>{a.at ? inZone(a.at, tz, true) : ""}</Typography>
-                      {a.detail && <Typography sx={{ fontSize: 12, color: FU.muted }}>{a.detail}</Typography>}
-                    </Box>
-                  ))}
-                </Box>
-              </Collapse>
             </Box>
           )}
         </Box>

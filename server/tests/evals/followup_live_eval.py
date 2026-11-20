@@ -68,6 +68,7 @@ SCENARIOS: List[Tuple[str, List[Tuple[str, str, str, int, List[Check]]]]] = [
             ("date 2026-12-15", lambda a: a.timing.local_date == date(2026, 12, 15)),
             ("time 15:00", lambda a: a.timing.local_time is not None and a.timing.local_time.strftime("%H:%M") == "15:00"),
             ("zone IST", lambda a: (a.timing.timezone or "").upper() in ("IST", "ASIA/KOLKATA") or "Kolkata" in (a.timing.timezone or "")),
+            ("date quoted from customer (accepted, not held)", lambda a: not a.timing.ambiguous),
         ]),
         ("inbound", "kavya@training.example", "Jan 8 at the same time instead.", 2, [
             ("changed_date", lambda a: a.constraints.changed_date),
@@ -175,6 +176,7 @@ async def run() -> int:
         return 2
     w = await build_world(f"eval{uuid.uuid4().hex[:8]}")
     results: List[Tuple[str, str, bool, str]] = []
+    guards: Dict[str, int] = {}
     try:
         for business, turns in SCENARIOS:
             th = await w.thread(business[:60])
@@ -194,6 +196,9 @@ async def run() -> int:
                     for name, _ in checks:
                         results.append((business, name, False, f"model/contract error: {exc}"[:120]))
                     continue
+                for g in ("decision_without_evidence", "customer_date_not_quoted", "refusal_quote_not_found"):
+                    if g in a.warnings:
+                        guards[g] = guards.get(g, 0) + 1
                 # Keep the prior decision for the next turn's context (as production does).
                 async with db_manager.session_factory() as db:
                     from app.models.followup import MessageAssessment
@@ -219,7 +224,8 @@ async def run() -> int:
     passed = sum(1 for r in results if r[2])
     for b, n, ok, d in results:
         print(f"{'PASS' if ok else 'FAIL'} | {b} | {n} | {d}")
-    print(f"\nSEMANTIC ACCURACY: {passed}/{len(results)} checks = {100 * passed / max(1, len(results)):.1f}%")
+    print(f"\nGUARD TRIGGERS: {guards or 'none'}")
+    print(f"SEMANTIC ACCURACY: {passed}/{len(results)} checks = {100 * passed / max(1, len(results)):.1f}%")
     return 0
 
 

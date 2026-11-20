@@ -72,6 +72,9 @@ class World:
     _seq: int = 0
 
     def script(self, message_id: str, result: Dict[str, Any]) -> None:
+        # A correct model cites the message it judged; tests that check the guard pass ids explicitly.
+        if isinstance(result, dict) and not result.get("evidence_message_ids"):
+            result = {**result, "evidence_message_ids": [message_id]}
         self.scripts[message_id] = result
 
     async def thread(self, subject: str = "Enquiry", customer: str = "buyer@client.example") -> str:

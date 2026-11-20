@@ -87,6 +87,40 @@ def test_refusal_quote_must_appear_in_customer_text():
     assert not bad.constraints.quote_verified and "refusal_quote_not_found" in bad.warnings
 
 
+@pytest.mark.parametrize("decision,outcome", [("schedule", "open_unconfirmed"), ("defer", "open_unconfirmed"),
+                                              ("wait_team", "open_unconfirmed"), ("none", "completed")])
+def test_action_without_evidence_becomes_needs_review(decision, outcome):
+    a = contracts.validate(base(decision=decision, outcome=outcome, evidence_message_ids=[]), **KW)
+    assert a.decision == "needs_review" and "decision_without_evidence" in a.warnings
+    if outcome == "completed":
+        assert a.outcome == "unknown"                     # an uncited "completed" never closes a lead
+
+
+def test_verified_refusal_needs_no_extra_evidence():
+    a = contracts.validate(base(decision="suppress", evidence_message_ids=[], constraints={
+        "refusal_scope": "all_contact", "refusal_quote": "Aage se kabhi message mat karna"}), **KW)
+    assert a.decision == "suppress"
+    b = contracts.validate(base(decision="suppress", evidence_message_ids=[], constraints={
+        "refusal_scope": "all_contact", "refusal_quote": "stop everything"}), **KW)
+    assert b.decision == "needs_review"
+
+
+def test_customer_date_must_be_quoted_from_customer_text():
+    kw = {**KW, "customer_texts": ["We intend to book on 15 December 2026. Please call that afternoon at 3 PM IST."]}
+    ok = contracts.validate(base(decision="schedule", timing={
+        "kind": "customer_commitment", "phrase": "15 December 2026 ... that afternoon at 3 PM IST",
+        "local_date": "2026-12-15", "local_time": "15:00", "precision": "instant"}), **kw)
+    assert not ok.timing.ambiguous and "customer_date_not_quoted" not in ok.warnings
+    bad = contracts.validate(base(decision="schedule", timing={
+        "kind": "customer_commitment", "phrase": "mid December", "local_date": "2026-12-15",
+        "local_time": "15:00", "precision": "instant"}), **kw)
+    assert bad.timing.ambiguous and bad.timing.alternatives == ["2026-12-15 15:00"]
+    assert "customer_date_not_quoted" in bad.warnings
+    team = contracts.validate(base(decision="wait_team", timing={
+        "kind": "team_deadline", "phrase": "by Thursday", "local_date": "2026-12-03"}), **kw)
+    assert not team.timing.ambiguous                      # the rule applies to customer-given dates only
+
+
 def test_outbound_message_cannot_raise_customer_interest():
     a = contracts.validate(base(temperature="hot"), **{**KW, "latest_is_outbound": True},
                            prior_ai_temperature="warm")

@@ -148,6 +148,8 @@ async def test_meera_reassesses_each_message_and_tracks_team_promise(w):
     assert len(live) == 1 and live[0].origin == "ai" and live[0].customer_status == "not_applicable"
     assert live[0].due_at == utc(2026, 12, 3, 4, 30)                     # Thursday 10:00 IST internal task
     assert len(w.spies.model_calls) == 3                                 # every message reassessed
+    rows = await w.sql("SELECT message_id FROM message_assessments WHERE thread_id=:t", t=th)
+    assert rows == [(m3,)]                                               # only the latest assessment is kept
     assert (await w.sql("SELECT lead_intent FROM email_threads WHERE id=:t", t=th))[0][0] == "hot"
 
 
@@ -155,6 +157,7 @@ async def test_meera_reassesses_each_message_and_tracks_team_promise(w):
 # Scenario 2 — training consultancy (Kavya): exact instants, team fan-out, zero customer email
 # ---------------------------------------------------------------------------------------------
 
+KAVYA_TEXT = ("We intend to book the workshop on 15 December 2026. Please contact me that afternoon at 3 PM IST.")
 KAVYA = R(temperature="hot", buying_interest=0.85, decision="schedule", next_actor="team",
           next_action="Call Kavya to book the workshop", outcome="open_unconfirmed",
           timing={"kind": "customer_commitment", "phrase": "15 December 2026 ... that afternoon at 3 PM IST",
@@ -203,7 +206,7 @@ async def test_kavya_exact_due_notice_and_team_fanout_with_zero_customer_email(w
 async def test_kavya_changes_date_supersedes_december_work(w):
     th = await w.thread("Workshop booking")
     sent = utc(2026, 12, 1, 6, 0)
-    await w.say(th, "inbound", "Book 15 December, call me at 3 PM IST.", sent, KAVYA)
+    await w.say(th, "inbound", KAVYA_TEXT, sent, KAVYA)
     [dec] = await w.live(th)
     await w.say(th, "inbound", "Jan 8 at the same time instead.", utc(2026, 12, 3, 6, 0), R(
         **{**KAVYA, "timing": {**KAVYA["timing"], "phrase": "Jan 8 at the same time", "local_date": "2027-01-08"},
@@ -270,7 +273,7 @@ async def test_arjun_open_unconfirmed_then_signed_closes_matching_followup(w):
 # ---------------------------------------------------------------------------------------------
 
 HOT_SCHEDULED = R(temperature="hot", buying_interest=0.9, decision="schedule", next_actor="customer",
-                  timing={"kind": "customer_request", "local_date": "2026-12-04", "local_time": "11:00",
+                  timing={"kind": "customer_request", "phrase": "Friday 11am", "local_date": "2026-12-04", "local_time": "11:00",
                           "precision": "instant"})
 
 
@@ -479,6 +482,26 @@ async def test_reverse_order_model_results_cannot_overwrite_newer_decision(w):
     assert (await w.state(th)).effective_temperature == "hot"
 
 
+async def test_superseded_and_out_of_order_messages_store_nothing(w):
+    th = await w.thread("Bounded")
+    t = utc(2026, 12, 1, 6, 0)
+    m1 = await w.msg(th, "inbound", "First", t)
+    m2 = await w.msg(th, "inbound", "Second, call Friday 11am", t + timedelta(minutes=5))
+    w.script(m2, HOT_SCHEDULED)
+    assert await w.assess(m2, th, t + timedelta(minutes=6)) == "applied"
+    assert await w.assess(m1, th, t + timedelta(minutes=7)) == "superseded"    # late event for an older message
+    assert await w.assess(m2, th, t + timedelta(minutes=8)) == "duplicate"     # redelivered event
+    rows = await w.sql("SELECT message_id, status FROM message_assessments WHERE thread_id=:t", t=th)
+    assert rows == [(m2, "valid")]
+    m3 = await w.msg(th, "inbound", "Third", t + timedelta(hours=1))
+    w.script(m3, R(temperature="warm", decision="wait_team", next_actor="team"))
+    assert await w.assess(m3, th, t + timedelta(hours=1, minutes=1)) == "applied"
+    rows = await w.sql("SELECT message_id FROM message_assessments WHERE thread_id=:t", t=th)
+    assert rows == [(m3,)]                                                     # the previous one was replaced
+    s = await w.state(th)
+    assert s.last_assessment_id is not None and s.effective_temperature == "warm"
+
+
 async def test_model_failure_keeps_last_decision_stale_and_retries(w):
     th = await w.thread("Flaky")
     t = utc(2026, 12, 1, 6, 0)
@@ -617,7 +640,7 @@ async def test_uncertain_gmail_send_is_left_to_reconciliation_not_retried_blindl
 
 async def test_partial_team_failure_retries_only_that_member_and_removal_mid_fanout(w):
     th = await w.thread("Fan-out")
-    await w.say(th, "inbound", "Book 15 December, call me at 3 PM IST.", utc(2026, 12, 1, 6, 0), KAVYA)
+    await w.say(th, "inbound", KAVYA_TEXT, utc(2026, 12, 1, 6, 0), KAVYA)
     from app.services.transactional_email import EmailDeliveryError
 
     async def hook(to):
@@ -650,7 +673,7 @@ async def test_partial_team_failure_retries_only_that_member_and_removal_mid_fan
 
 async def test_leases_prevent_double_processing_and_expire(w):
     th = await w.thread("Lease")
-    await w.say(th, "inbound", "Book 15 December, call me at 3 PM IST.", utc(2026, 12, 1, 6, 0), KAVYA)
+    await w.say(th, "inbound", KAVYA_TEXT, utc(2026, 12, 1, 6, 0), KAVYA)
     from app.services.followups.scheduler import _claim
     O = FollowupOccurrence
     now = utc(2026, 12, 14, 4, 30)
@@ -683,7 +706,7 @@ async def test_shadow_mode_records_but_never_acts(w, monkeypatch):
     monkeypatch.setenv("FOLLOWUP_SHADOW_MODE", "true")
     reset_flags_cache()
     th = await w.thread("Shadow")
-    mid = await w.msg(th, "inbound", "Call me Friday", utc(2026, 12, 1, 6, 0))
+    mid = await w.msg(th, "inbound", "Call me Friday 11am", utc(2026, 12, 1, 6, 0))
     w.script(mid, HOT_SCHEDULED)
     assert await w.assess(mid, th, utc(2026, 12, 1, 6, 1)) == "shadow"
     assert await w.live(th) == [] and (await w.state(th)).status == "none"
@@ -758,10 +781,11 @@ async def test_api_rbac_versions_and_participant_validation(w):
         r = await cl.patch(f"/followups/threads/{th}/controls", json={
             "version": panel["version"], "customer_email_enabled": True, "customer_recipient_email": CUSTOMER})
         assert r.status_code == 200 and r.json()["controls"]["customer_email_enabled"] is True
-        assert [o["customer_status"] for o in r.json()["occurrences"] if o["status"] == "scheduled"] == ["pending"]
+        cur = r.json()["current_occurrence"]
+        assert cur["status"] == "scheduled" and cur["customer_status"] == "pending"
         v = r.json()["version"]
         r = await cl.patch(f"/followups/threads/{th}/controls", json={"version": v, "planning_enabled": False})
-        assert r.json()["status"] == "stopped" and [o for o in r.json()["occurrences"] if o["status"] == "scheduled"] == []
+        assert r.json()["status"] == "stopped" and r.json()["current_occurrence"]["status"] != "scheduled"
         assert (await cl.get("/followups/policy")).status_code == 200
         assert (await cl.patch("/followups/policy", json={"version": 0, "cadence_hot_days": 2})).status_code == 403
     async with api(w, "viewer") as cl:
@@ -829,7 +853,7 @@ async def test_customer_email_needs_workspace_allowance(w, monkeypatch):
 
 async def test_snooze_defers_reminders_until_it_ends(w):
     th = await w.thread("Snooze")
-    await w.say(th, "inbound", "Book 15 December, call me at 3 PM IST.", utc(2026, 12, 1, 6, 0), KAVYA)
+    await w.say(th, "inbound", KAVYA_TEXT, utc(2026, 12, 1, 6, 0), KAVYA)
     async with db_manager.session_factory() as db:
         c = await engine.get_or_create_control(db, w.tenant_id, th)
         c.snoozed_until = utc(2026, 12, 16, 0, 0)
