@@ -20,6 +20,7 @@ from app.core.messaging import event_bus
 MONITORED_STREAMS: List[Tuple[str, str]] = [
     ("email_events", "email-worker-group"),
     ("ai_processing", "ai-worker-group"),
+    ("followup_events", "followup-worker-group"),
     ("knowledge_import_events", "knowledge-import-worker-group"),
     ("knowledge-events", "knowledge-indexer-group"),
 ]

@@ -22,6 +22,7 @@ from app.api.v1.routes.integrations import router as integrations_router
 from app.api.v1.routes.onboarding import router as onboarding_router
 from app.api.v1.routes.organizations import router as organizations_router
 from app.api.v1.routes.inbox import router as inbox_router
+from app.api.v1.routes.followups import router as followups_router
 from app.api.v1.routes.knowledge import router as knowledge_router
 from app.api.v1.routes.contacts import router as contacts_router
 from app.api.v1.routes.feedback import router as feedback_router
@@ -225,6 +226,16 @@ async def lifespan(app: FastAPI):
         # Outbound delivery reconciliation (DELIVERY_UNKNOWN / SEND_ATTEMPTED / FAILED_RETRYABLE).
         from app.services.reply_planner.delivery_reconciler import delivery_reconciler
         worker_tasks.append(asyncio.create_task(delivery_reconciler.run_forever()))
+        # Conversation intelligence & follow-ups: AI #2 assessment worker (own stream), leased
+        # follow-up scheduler, and the outbox relay that republishes any event whose fast-path
+        # publish failed (so committed work survives Redis blips and restarts).
+        from app.workers.followup_worker import FollowupWorker, outbox_relay_forever
+        from app.services.followups.scheduler import followup_scheduler
+        followup_worker = FollowupWorker(standalone=False)
+        active_workers.append(followup_worker)
+        worker_tasks.append(asyncio.create_task(followup_worker.run()))
+        worker_tasks.append(asyncio.create_task(followup_scheduler.run_forever()))
+        worker_tasks.append(asyncio.create_task(outbox_relay_forever()))
 
     except Exception as worker_init_err:
         logger.warning("Failed to start embedded workers", error=str(worker_init_err))
@@ -371,6 +382,8 @@ def create_app() -> FastAPI:
 
     # Register Inbox Routes (clean email thread and message read model)
     app.include_router(inbox_router, prefix="/api/v1")
+    # Conversation intelligence & follow-ups (panel, controls, schedule, policy, Leads queue)
+    app.include_router(followups_router, prefix="/api/v1")
 
     # Register Webhooks Routes (Google Cloud Pub/Sub push)
     app.include_router(webhooks_router, prefix="/api/v1")

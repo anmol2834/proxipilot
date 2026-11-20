@@ -29,6 +29,9 @@ CATEGORY = "products_services"
 
 # Every tenant-scoped table a seeded test tenant can touch, children first.
 _CLEANUP_TABLES = (
+    # followups & intelligence
+    "followup_notice_deliveries", "followup_occurrences", "message_assessments",
+    "thread_followup_states", "thread_followup_controls", "contact_suppressions", "followup_policies",
     # memories written by the reply pipeline
     "contact_facts", "contacts", "commitments", "thread_memories", "draft_feedback", "response_outcomes",
     "feedback_lessons", "style_profiles", "org_practices",

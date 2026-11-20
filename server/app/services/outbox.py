@@ -112,8 +112,12 @@ class OutboxService:
             return False
 
     @staticmethod
-    async def relay_pending_batch(limit: int = 100, tenant_id: Optional[str] = None) -> int:
-        """Query and publish a batch of pending outbox events to Redis Streams."""
+    async def relay_pending_batch(limit: int = 100, tenant_id: Optional[str] = None,
+                                  max_age_seconds: Optional[int] = None) -> int:
+        """Query and publish a batch of pending outbox events to Redis Streams.
+
+        ``max_age_seconds`` bounds how old a pending row may be to be relayed automatically, so a
+        long-stuck historical backlog is never replayed as a burst (it stays PENDING and visible)."""
         from datetime import timedelta
         published_count = 0
         now = datetime.now(timezone.utc)
@@ -125,6 +129,8 @@ class OutboxService:
                 OutboxEvent.status == OutboxStatus.PENDING.value,
                 OutboxEvent.created_at <= cutoff,
             )
+            if max_age_seconds:
+                query = query.where(OutboxEvent.created_at >= now - timedelta(seconds=max_age_seconds))
             if tenant_id:
                 query = query.where(OutboxEvent.tenant_id == tenant_id)
             stmt = (

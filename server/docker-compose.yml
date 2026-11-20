@@ -122,6 +122,45 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Follow-ups run embedded in `api` by default. These standalone processes are opt-in
+  # (`docker compose --profile standalone-followups up`); leases + SKIP LOCKED make it safe to run
+  # them alongside the embedded loops.
+  followup-worker:
+    profiles: ["standalone-followups"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "app.workers.cli", "--worker", "followup"]
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://proxipilot:proxipilot_dev@postgres:5432/proxipilot_dev
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  followup-scheduler:
+    profiles: ["standalone-followups"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "app.workers.cli", "--worker", "followup_scheduler"]
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://proxipilot:proxipilot_dev@postgres:5432/proxipilot_dev
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
   # ============================================================================
   # Local Qdrant Instance (Optional Offline Vector DB)
   # ============================================================================

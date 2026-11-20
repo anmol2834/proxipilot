@@ -378,8 +378,19 @@ class OutboundEmailDeliveryService:
             if recorded_ids:
                 outbound_msg.presented_entity_ids = json.dumps(recorded_ids)
 
+            # Follow-up intelligence: the sent reply is a new team message (fence + assessment event,
+            # same transaction). Its later Gmail echo is a duplicate insert and triggers nothing.
+            from app.services.followups.triggers import on_message_stored
+            fu_event = await on_message_stored(
+                db, tenant_id=tenant_id, account_id=account.id, thread_id=thread.id,
+                message_id=out_email_msg.id, sent_at=now, direction=MessageDirection.OUTBOUND.value,
+                from_email=account.email_address, now=now)
+
             t_commit_start = time.perf_counter()
             await db.commit()
+            if fu_event is not None:
+                from app.services.outbox import OutboxService
+                asyncio.create_task(OutboxService.dispatch_fast_path(fu_event.id))
             db_commit_ms = (time.perf_counter() - t_commit_start) * 1000
             total_duration_ms = (time.perf_counter() - t_delivery_start) * 1000
 
@@ -651,7 +662,14 @@ class OutboundEmailDeliveryService:
         outbound.sent_at = now.isoformat()
         thread.status = ThreadStatus.RESPONDED.value
         thread.latest_message_at = now
+        from app.services.followups.triggers import on_message_stored
+        fu_event = await on_message_stored(
+            db, tenant_id=tenant_id, account_id=account.id, thread_id=thread.id, message_id=sent_msg_id,
+            sent_at=now, direction=MessageDirection.OUTBOUND.value, from_email=account.email_address, now=now)
         await db.commit()
+        if fu_event is not None:
+            from app.services.outbox import OutboxService
+            asyncio.create_task(OutboxService.dispatch_fast_path(fu_event.id))
         return {"provider_message_id": prov_id, "to_email": recipient, "thread_id": thread.id,
                 "sent_msg_id": sent_msg_id, "sent_at": now, "from_email": account.email_address}
 

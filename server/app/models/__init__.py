@@ -169,6 +169,10 @@ from app.models.contact import (
 )
 
 # Audit Domain
+from app.models.followup import (  # noqa: E402
+    ContactSuppression, FollowupNoticeDelivery, FollowupOccurrence, FollowupPolicy, MessageAssessment,
+    ThreadFollowupControl, ThreadFollowupState,
+)
 from app.models.audit import (
     AuditAction,
     AuditActorType,

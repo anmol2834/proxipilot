@@ -1173,10 +1173,27 @@ class GmailSyncEngine:
                 correlation_id=external_message_id,
             )
 
+        # ---- Follow-up intelligence: fence pending outreach + followup.assess (same transaction) ----
+        # Accepted customer mail and mail the team actually sent from the connected mailbox. Machine
+        # mail never reaches this point (classified out above); recency is enforced inside.
+        followup_event = None
+        if direction == MessageDirection.OUTBOUND.value or (
+            classification.disposition == EmailDisposition.STORE_AND_RESOLVE_CONTEXT
+        ):
+            from app.services.followups.triggers import on_message_stored
+
+            followup_event = await on_message_stored(
+                db, tenant_id=account.tenant_id, account_id=account.id, thread_id=thread_id,
+                message_id=new_msg_id, sent_at=sent_at, direction=direction,
+                from_email=parse_result.from_email, now=now,
+            )
+
         await db.commit()
 
         if outbox_event:
             asyncio.create_task(outbox_service.dispatch_fast_path(outbox_event.id))
+        if followup_event:
+            asyncio.create_task(outbox_service.dispatch_fast_path(followup_event.id))
 
         # Memory 4: update the counterpart's relationship memory. Runs only for newly
         # inserted messages (duplicates returned above), after the message commit, and

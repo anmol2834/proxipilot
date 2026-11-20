@@ -3,6 +3,7 @@
 import React, { useRef, useEffect, useState } from "react";
 import { Conversation, Message, LeadTemperature, Mailbox } from "@/types/inbox.types";
 import { ThreadMessages } from "./ThreadMessages";
+import { FollowUpPanel } from "./FollowUpPanel";
 import { useDiscardDraft, useSendDraft, useSendManualReply, useThreadDraft } from "@/hooks/useMemory";
 import { useTenant } from "@/hooks/use-tenant";
 import { can } from "@/lib/permissions";
@@ -654,6 +655,9 @@ export function ConversationDetailPane({
             {aiSummaryText}
           </p>
         </div>
+
+        {/* ── Follow-up intelligence: temperature, next step, due, team notice, customer email ── */}
+        <FollowUpPanel threadId={conversation.id} />
 
         {/* ── Full conversation history (newest batch first, older on scroll-up) ── */}
         <ThreadMessages

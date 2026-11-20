@@ -604,8 +604,29 @@ async def set_lead_temperature(
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Thread not found")
 
+    # A user's label is a manual override that survives later AI #2 output until released (null =
+    # "use automatic classification"). It never schedules or authorizes customer email.
+    from app.services.followups import engine as followup_engine
+
+    manual = (body.lead_temperature or "").lower() or None
+    control = await followup_engine.get_or_create_control(db, org_id, thread_id)
+    control.manual_temperature = manual
+    control.manual_temperature_by = context.user_id if manual else None
+    control.manual_temperature_at = now if manual else None
+    control.version = (control.version or 0) + 1
+    state = await followup_engine.lock_state(db, org_id, thread_id)
+    if manual:
+        state.effective_temperature, state.temperature_source = manual, "manual"
+    else:
+        state.effective_temperature = state.suggested_temperature
+        state.temperature_source = "ai" if state.suggested_temperature else None
+        if state.suggested_temperature:
+            await db.execute(update(EmailThread).where(EmailThread.id == thread_id, EmailThread.tenant_id == org_id)
+                             .values({EmailThread.lead_intent: state.suggested_temperature}))
+
     await db.commit()
-    return {"id": thread_id, "lead_temperature": body.lead_temperature}
+    return {"id": thread_id, "lead_temperature": manual or state.effective_temperature,
+            "temperature_source": state.temperature_source}
 
 
 @router.delete("/threads/{thread_id}", status_code=status.HTTP_200_OK)

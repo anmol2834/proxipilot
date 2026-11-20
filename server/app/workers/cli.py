@@ -13,6 +13,7 @@ from app.core.logging import logger, setup_logging
 from app.workers.ai_worker import AiWorker
 from app.workers.automation_worker import AutomationWorker
 from app.workers.email_worker import EmailWorker
+from app.workers.followup_worker import FollowupWorker, OutboxRelayRunner, SchedulerRunner
 from app.workers.import_worker import KnowledgeImportWorker
 from app.workers.knowledge_embedding_worker import KnowledgeEmbeddingWorker
 
@@ -22,6 +23,9 @@ WORKERS = {
     "automation": AutomationWorker,
     "knowledge_import": KnowledgeImportWorker,
     "knowledge_indexer": KnowledgeEmbeddingWorker,
+    "followup": FollowupWorker,
+    "followup_scheduler": SchedulerRunner,
+    "outbox_relay": OutboxRelayRunner,
 }
 
 

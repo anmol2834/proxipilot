@@ -1,6 +1,6 @@
 import React from "react";
 import type { Metadata } from "next";
-import { SubroutePlaceholder } from "@/components/dashboard";
+import { FollowupSettings } from "@/components/settings/FollowupSettings";
 
 export const metadata: Metadata = {
   title: "Settings — ProxiPilot",
@@ -9,9 +9,12 @@ export const metadata: Metadata = {
 
 export default function SettingsPage() {
   return (
-    <SubroutePlaceholder
-      title="Workspace Settings"
-      description="Configure workspace domain, notification webhooks, AI confidence thresholds, and security controls."
-    />
+    <div style={{ padding: "24px 28px", display: "flex", flexDirection: "column", gap: 16 }}>
+      <div>
+        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "#0F172A" }}>Workspace settings</h1>
+        <p style={{ margin: "4px 0 0", fontSize: 13, color: "#64748B" }}>Preferences that apply to your whole workspace.</p>
+      </div>
+      <FollowupSettings />
+    </div>
   );
 }

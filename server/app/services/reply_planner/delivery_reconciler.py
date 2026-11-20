@@ -160,6 +160,18 @@ class DeliveryReconciler:
 
     @staticmethod
     async def _resend_blocker(db, out: OutboundMessage, thread: EmailThread, now: datetime) -> Optional[str]:
+        if (out.idempotency_key or "").startswith("fu_"):
+            # Proactive follow-up: re-run the authoritative customer-send gate on fresh state
+            # (kill switch, consent, suppression, revision, mailbox health) before ANY resend.
+            from app.models.followup import FollowupOccurrence
+            from app.services.followups import gate
+
+            occ = await db.get(FollowupOccurrence, out.idempotency_key[3:])
+            if occ is None or occ.tenant_id != out.tenant_id:
+                return "follow-up occurrence no longer exists"
+            g = await gate.evaluate(db, occ, now, check_window=False, for_resend=True)
+            if not g.ok:
+                return f"follow-up gate: {g.reason}"
         created = _ts(out.created_at) or now
         if (now - created).total_seconds() > RESEND_MAX_AGE_S:
             return "reply is stale (older than 30 minutes)"
@@ -179,16 +191,25 @@ class DeliveryReconciler:
         exists = (await db.execute(select(EmailMessage.id).where(
             EmailMessage.tenant_id == out.tenant_id,
             EmailMessage.external_message_id == out.provider_message_id))).scalar_one_or_none()
+        fu_event = None
         if not exists and out.provider_message_id:
+            new_id = f"msg_{uuid.uuid4().hex[:12]}"
             db.add(EmailMessage(
-                id=f"msg_{uuid.uuid4().hex[:12]}", tenant_id=out.tenant_id, thread_id=thread.id,
+                id=new_id, tenant_id=out.tenant_id, thread_id=thread.id,
                 integration_account_id=account.id, external_message_id=out.provider_message_id,
                 direction=MessageDirection.OUTBOUND.value, from_email=account.email_address,
                 to_emails=out.to_emails, body_text=out.body_text, sent_at=now,
                 message_id_header=out.provider_message_id, in_reply_to_external_id=out.in_reply_to_external_id,
                 filter_reason="ACCEPT"))
+            from app.services.followups.triggers import on_message_stored
+            fu_event = await on_message_stored(
+                db, tenant_id=out.tenant_id, account_id=account.id, thread_id=thread.id, message_id=new_id,
+                sent_at=now, direction=MessageDirection.OUTBOUND.value, from_email=account.email_address, now=now)
         thread.status = ThreadStatus.RESPONDED.value
         await db.commit()
+        if fu_event is not None:
+            from app.services.outbox import OutboxService
+            asyncio.create_task(OutboxService.dispatch_fast_path(fu_event.id))
 
 
 def _threading(parent: Optional[EmailMessage]):
