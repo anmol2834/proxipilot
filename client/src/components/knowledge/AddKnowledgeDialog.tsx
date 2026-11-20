@@ -220,19 +220,22 @@ function AddKnowledgeModalContent({
   const isDone = upload.phase === "done";
   const isError = upload.phase === "error";
 
-  // Auto-close dialog 1.5 s after success
+  // Auto-close dialog 1.2 s after success
   useEffect(() => {
     if (isDone) {
       const t = setTimeout(() => {
-        resetUpload();
         onClose();
-      }, 1500);
+      }, 1200);
       return () => clearTimeout(t);
     }
-  }, [isDone, resetUpload, onClose]);
+  }, [isDone, onClose]);
 
-  // Reset upload state whenever the dialog unmounts
-  useEffect(() => () => { resetUpload(); }, [resetUpload]);
+  // Reset upload state whenever the dialog unmounts (unless an import just completed and post-fetch is in flight)
+  useEffect(() => () => {
+    if (useKnowledgeStore.getState().upload.phase !== "done") {
+      resetUpload();
+    }
+  }, [resetUpload]);
 
   const currentCatOption =
     (selectedCategory && CATEGORY_OPTIONS.find((c) => c.id === selectedCategory)) ||

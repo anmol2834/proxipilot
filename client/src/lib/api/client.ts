@@ -8,6 +8,7 @@ import { ApiResponse, HttpMethod, RequestOptions } from "./types";
 export class ApiClient {
   private readonly baseUrl: string;
   private readonly defaultTimeout: number;
+  private token: string | null = null;
 
   constructor(
     baseUrl: string = env.NEXT_PUBLIC_API_URL,
@@ -15,6 +16,37 @@ export class ApiClient {
   ) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
     this.defaultTimeout = defaultTimeout;
+  }
+
+  public setAuthToken(token: string | null): void {
+    this.token = token;
+    if (typeof window !== "undefined") {
+      try {
+        if (token) {
+          localStorage.setItem("pp_access_token", token);
+        } else {
+          localStorage.removeItem("pp_access_token");
+        }
+      } catch {
+        // Ignore localStorage quota/access restrictions
+      }
+    }
+  }
+
+  public getAuthToken(): string | null {
+    if (this.token) return this.token;
+    if (typeof window !== "undefined") {
+      try {
+        const stored = localStorage.getItem("pp_access_token");
+        if (stored) {
+          this.token = stored;
+          return stored;
+        }
+      } catch {
+        // Ignore localStorage errors
+      }
+    }
+    return null;
   }
 
   private buildUrl(endpoint: string, params?: RequestOptions["params"]): string {
@@ -77,6 +109,11 @@ export class ApiClient {
       Accept: "application/json",
       ...customHeaders,
     };
+
+    const authToken = this.getAuthToken();
+    if (authToken && !headers["Authorization"]) {
+      headers["Authorization"] = `Bearer ${authToken}`;
+    }
 
     if (body !== undefined && !(body instanceof FormData)) {
       headers["Content-Type"] = "application/json";

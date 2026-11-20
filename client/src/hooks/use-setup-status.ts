@@ -23,18 +23,19 @@
 import { useEffect, useMemo } from "react";
 import { useIntegrations } from "./use-integrations";
 import { useKnowledgeStore } from "@/stores/knowledge.store";
+import type { DashboardOverview } from "@/services/dashboard.service";
 
 export interface SetupStatus {
   /** Always true once the user has an account (they are logged in) */
   accountCreated: boolean;
   /**
    * True only when the server confirms at least one active Gmail integration
-   * with status 'healthy' or 'connected'. Derived from useIntegrations() query.
+   * with status 'healthy' or 'connected'. Derived from useIntegrations() query or overview.
    */
   emailConnected: boolean;
   /**
    * True only when the server has at least one knowledge item indexed.
-   * Derived from useKnowledgeStore.items (fetched from server on first use).
+   * Derived from useKnowledgeStore.items or overview.
    */
   knowledgeAdded: boolean;
   /** True when both emailConnected and knowledgeAdded are true */
@@ -43,9 +44,13 @@ export interface SetupStatus {
   isEmailLoading: boolean;
   /** Whether the knowledge items list is still loading from the server */
   isKnowledgeLoading: boolean;
+  /**
+   * True while initial data is being fetched and setup completion has not been confirmed.
+   */
+  isInitialLoading: boolean;
 }
 
-export function useSetupStatus(): SetupStatus {
+export function useSetupStatus(overviewData?: DashboardOverview): SetupStatus {
   const { accounts, isLoading: isEmailLoading } = useIntegrations();
   const {
     items,
@@ -71,16 +76,25 @@ export function useSetupStatus(): SetupStatus {
   }, []);
 
   const emailConnected = useMemo(() => {
-    return accounts.some(
+    const hasActiveAccount = accounts.some(
       (a) => a.status === "healthy" || a.status === "connected"
     );
-  }, [accounts]);
+    if (hasActiveAccount) return true;
+    if (overviewData && (overviewData.workspace?.mailboxes ?? 0) > 0) return true;
+    return false;
+  }, [accounts, overviewData]);
 
   const knowledgeAdded = useMemo(() => {
-    return items.length > 0;
-  }, [items]);
+    if (items.length > 0) return true;
+    if (overviewData && (overviewData.workspace?.knowledge_items ?? 0) > 0) return true;
+    return false;
+  }, [items, overviewData]);
 
   const isSetupComplete = emailConnected && knowledgeAdded;
+
+  const isInitialLoading =
+    !isSetupComplete &&
+    (isEmailLoading || isKnowledgeLoading || isKnowledgeFetching);
 
   return {
     accountCreated: true, // always true — user is authenticated to reach this page
@@ -89,5 +103,6 @@ export function useSetupStatus(): SetupStatus {
     isSetupComplete,
     isEmailLoading,
     isKnowledgeLoading: isKnowledgeLoading || isKnowledgeFetching,
+    isInitialLoading,
   };
 }

@@ -194,6 +194,9 @@ export const authApi = {
    */
   async verifyOtp(data: VerifyOtpRequest): Promise<VerifyOtpResponse> {
     const res = await apiClient.post<VerifyOtpResponse>("/auth/verify-otp", data);
+    if (res.data?.access_token) {
+      apiClient.setAuthToken(res.data.access_token);
+    }
     return res.data;
   },
 
@@ -210,6 +213,9 @@ export const authApi = {
    */
   async signin(data: SigninRequest): Promise<SigninResponse> {
     const res = await apiClient.post<SigninResponse>("/auth/signin", data);
+    if (res.data?.access_token) {
+      apiClient.setAuthToken(res.data.access_token);
+    }
     return res.data;
   },
 
@@ -217,7 +223,11 @@ export const authApi = {
    * Revoke current session and clear session cookies.
    */
   async signout(): Promise<void> {
-    await apiClient.post("/auth/signout");
+    try {
+      await apiClient.post("/auth/signout");
+    } finally {
+      apiClient.setAuthToken(null);
+    }
   },
 
   /**

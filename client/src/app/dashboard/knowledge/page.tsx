@@ -223,6 +223,7 @@ function KnowledgeContent() {
     isLoading,
     isFetching,
     fetchError,
+    upload,
     selectedCategory,
     setSelectedCategory,
     searchQuery,
@@ -233,7 +234,12 @@ function KnowledgeContent() {
     totalCount,
   } = useKnowledgeStore();
 
-  const isTableLoading = isLoading || isFetching;
+  const isTableLoading =
+    isLoading ||
+    isFetching ||
+    upload.phase === "uploading" ||
+    upload.phase === "processing" ||
+    upload.phase === "done";
 
   // ── Fetch items on mount and refresh category counts ─────────────────────
   useEffect(() => {

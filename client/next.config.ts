@@ -24,6 +24,15 @@ const nextConfig: NextConfig = {
       { source: "/ai-transparency", destination: "/privacy", permanent: true },
     ];
   },
+  async rewrites() {
+    const apiTarget = process.env.API_PROXY_TARGET || "https://api.proxipilot.com";
+    return [
+      {
+        source: "/api/v1/:path*",
+        destination: `${apiTarget}/api/v1/:path*`,
+      },
+    ];
+  },
 };
 
 export default nextConfig;

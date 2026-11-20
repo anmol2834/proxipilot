@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import ButtonBase from "@mui/material/ButtonBase";
@@ -18,9 +18,14 @@ export function UserProfileMenu() {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const open = Boolean(anchorEl);
 
-  const fullName = user?.full_name || user?.email?.split("@")[0] || "";
-  const email = user?.email || "";
-  const initial = (fullName.charAt(0) || user?.email?.charAt(0) || "U").toUpperCase();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const fullName = mounted ? (user?.full_name || user?.email?.split("@")[0] || "") : "";
+  const email = mounted ? (user?.email || "") : "";
+  const initial = mounted ? ((fullName.charAt(0) || user?.email?.charAt(0) || "U").toUpperCase()) : "U";
 
   const handleClick = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
@@ -139,7 +144,7 @@ export function UserProfileMenu() {
         <MenuItem
           onClick={() => {
             handleClose();
-            router.push("/dashboard/settings");
+            router.push("/dashboard/settings?tab=profile");
           }}
           sx={{ borderRadius: "8px", fontSize: "0.82rem", color: "#334155" }}
         >
@@ -154,7 +159,7 @@ export function UserProfileMenu() {
         <MenuItem
           onClick={() => {
             handleClose();
-            router.push("/dashboard/settings");
+            router.push("/dashboard/settings?tab=preferences");
           }}
           sx={{ borderRadius: "8px", fontSize: "0.82rem", color: "#334155" }}
         >

@@ -127,12 +127,12 @@ export function useLiftSuppression(threadId: string) {
   });
 }
 
-export function useFollowupPolicy() {
+export function useFollowupPolicy(enabled: boolean = true) {
   const { organizationId } = useTenant();
   return useQuery({
     queryKey: followupKeys.policy(organizationId),
     queryFn: () => followupService.getPolicy(),
-    enabled: Boolean(organizationId),
+    enabled: Boolean(organizationId) && enabled,
   });
 }
 
@@ -143,7 +143,7 @@ export function usePatchFollowupPolicy() {
     mutationFn: (patch: Partial<FollowupPolicy> & { version: number }) => followupService.patchPolicy(patch),
     onSuccess: (policy) => {
       qc.setQueryData(followupKeys.policy(organizationId), policy);
-      qc.invalidateQueries({ queryKey: followupKeys.all(organizationId) });
+      qc.invalidateQueries({ queryKey: queryKeys.inbox.lists() });
     },
   });
 }

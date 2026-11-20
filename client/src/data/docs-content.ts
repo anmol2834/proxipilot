@@ -341,7 +341,7 @@ export const DOCS_ARTICLES: Record<string, DocArticle> = {
     content: `
       <section id="inbox-overview">
         <h2>1. Navigating the Unified Inbox</h2>
-        <p>The ProxiPilot Inbox displays active threads synchronized from your connected mailboxes. Inquiries are prioritized into <em>All, Unread, Starred, and Priority</em> tabs, with lead temperature badges (Hot, Warm, Cold).</p>
+        <p>The ProxiPilot Inbox displays active threads synchronized from your connected mailboxes. Inquiries are prioritized into <em>All, Unread, Follow-up, and Priority</em> tabs, with lead temperature badges (Hot, Warm, Cold).</p>
       </section>
 
       <section id="isolated-copilot">

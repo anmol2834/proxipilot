@@ -277,14 +277,28 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
 
   openAddDialog: (preselectedCat) =>
     set({ isAddDialogOpen: true, selectedCategoryForAdd: preselectedCat ?? null }),
-  // Closing the dialog never cancels an import: an in-flight job keeps running and
-  // is tracked in the background (see BackgroundImportIndicator).
-  closeAddDialog: () =>
-    set((state) => ({
+  closeAddDialog: () => {
+    const state = get();
+    const wasDone = state.upload.phase === "done";
+    const rows = state.upload.processedRows || state.upload.rowCount || 0;
+    const label = state.upload.datasetName || state.upload.fileName || "Your file";
+
+    set((prev) => ({
       isAddDialogOpen: false,
       selectedCategoryForAdd: null,
-      upload: isUploadBusy(state.upload) ? state.upload : INITIAL_UPLOAD_STATE,
-    })),
+      isLoading: wasDone ? true : prev.isLoading,
+      isFetching: wasDone ? true : prev.isFetching,
+    }));
+
+    if (wasDone) {
+      toast.success(
+        `${rows.toLocaleString()} records are mapped, indexed and ready to use.`,
+        `"${label}" imported`
+      );
+      void get().fetchItems(true, 1);
+      void get().fetchCategoryCounts();
+    }
+  },
   openEditDialog: (item) => set({ editingItem: item }),
   closeEditDialog: () => set({ editingItem: null }),
   openDeleteDialog: (item) => set({ deletingItem: item }),
@@ -302,8 +316,8 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
   fetchItems: async (reset = false, targetPage?: number) => {
     const state = get();
 
-    // Prevent duplicate fetch
-    if (state.isLoading) return;
+    // Prevent duplicate fetch unless forced reset (e.g. after upload/import or filter change)
+    if (state.isLoading && !reset) return;
 
     const pageToFetch = targetPage ?? (reset ? 1 : state.currentPage);
     const isInitial = reset || state.items.length === 0;
@@ -315,7 +329,7 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
     });
 
     try {
-      const result = await knowledgeService.listItems({
+      let result = await knowledgeService.listItems({
         category: state.selectedCategory !== "all" ? state.selectedCategory : undefined,
         status: state.statusFilter !== "All" ? state.statusFilter : undefined,
         search: state.searchQuery.trim() || undefined,
@@ -323,6 +337,19 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
         page: pageToFetch,
         limit: state.pageSize, // batch size = 10
       });
+
+      // If called right after import completion but result is empty (e.g. DB replica delay), retry once
+      if (result.items.length === 0 && get().upload.phase === "done") {
+        await new Promise((r) => setTimeout(r, 600));
+        result = await knowledgeService.listItems({
+          category: state.selectedCategory !== "all" ? state.selectedCategory : undefined,
+          status: state.statusFilter !== "All" ? state.statusFilter : undefined,
+          search: state.searchQuery.trim() || undefined,
+          sort: state.sortOption,
+          page: pageToFetch,
+          limit: state.pageSize,
+        });
+      }
 
       set({
         items: result.items,
@@ -332,10 +359,16 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
         hasMore: result.hasMore,
         isLoading: false,
         isFetching: false,
+        upload: get().upload.phase === "done" ? INITIAL_UPLOAD_STATE : get().upload,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to load knowledge items";
-      set({ fetchError: msg, isLoading: false, isFetching: false });
+      set({
+        fetchError: msg,
+        isLoading: false,
+        isFetching: false,
+        upload: get().upload.phase === "done" ? INITIAL_UPLOAD_STATE : get().upload,
+      });
     }
   },
 
@@ -538,15 +571,29 @@ async function trackImportJob(
     });
 
     saveActiveImport(null);
+    const targetCat = meta.category
+      ? (meta.category as KnowledgeCategory)
+      : getState().selectedCategory;
+
     setState((state) => ({
-      upload: { ...state.upload, phase: "done", processingProgress: 100 },
+      upload: {
+        ...state.upload,
+        phase: "done",
+        processingProgress: 100,
+        processedRows: finalJob.processed_rows ?? finalJob.row_count ?? state.upload.processedRows,
+        rowCount: finalJob.row_count ?? state.upload.rowCount,
+      },
+      isLoading: true,
+      isFetching: true,
+      selectedCategory: state.selectedCategory === "all" ? "all" : targetCat,
+      searchQuery: "",
+      statusFilter: "All",
+      currentPage: 1,
     }));
 
-    // Refresh knowledge list in background
-    setTimeout(() => {
-      getState().fetchItems(true, 1);
-      getState().fetchCategoryCounts();
-    }, 500);
+    // Trigger immediate refresh so skeleton loader is shown and fresh items load
+    void getState().fetchItems(true, 1);
+    void getState().fetchCategoryCounts();
 
     if (!getState().isAddDialogOpen) {
       const rows = finalJob.processed_rows ?? finalJob.row_count ?? 0;
@@ -555,7 +602,6 @@ async function trackImportJob(
         `${rows.toLocaleString()} records are mapped, indexed and ready to use.`,
         `"${label}" imported`
       );
-      // Dialog is closed, so nothing else will clear the finished state.
       setState({ upload: INITIAL_UPLOAD_STATE });
     }
   } catch (err) {
