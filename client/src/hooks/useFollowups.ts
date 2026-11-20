@@ -1,14 +1,12 @@
 "use client";
 
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTenant } from "@/hooks/use-tenant";
 import { queryKeys } from "@/lib/query/query-keys";
 import { followupService } from "@/services/followup.service";
 import type {
   FollowupControlsPatch,
   FollowupPolicy,
-  LeadFilter,
-  LeadSort,
   ThreadFollowup,
 } from "@/types/followup.types";
 
@@ -17,9 +15,6 @@ export const followupKeys = {
   all: (org: string | null) => ["followups", org ?? "none"] as const,
   thread: (org: string | null, threadId: string) => [...followupKeys.all(org), "thread", threadId] as const,
   policy: (org: string | null) => [...followupKeys.all(org), "policy"] as const,
-  summary: (org: string | null) => [...followupKeys.all(org), "summary"] as const,
-  leads: (org: string | null, filter: LeadFilter, page: number, temperature: string | null, q: string, sort: LeadSort) =>
-    [...followupKeys.all(org), "leads", filter, page, temperature ?? "any", q, sort] as const,
 };
 
 /** Human-readable message from an API error (409s explain a concurrent change). */
@@ -40,14 +35,12 @@ export function useThreadFollowup(threadId: string | null) {
   });
 }
 
-/** After any change: store the fresh panel, refresh Leads, the nav badge and the inbox list. */
+/** After any change: store the fresh panel and refresh the inbox list (its follow-up badges). */
 function useApplyPanel(threadId: string) {
   const qc = useQueryClient();
   const { organizationId } = useTenant();
   return (panel: ThreadFollowup) => {
     qc.setQueryData(followupKeys.thread(organizationId, threadId), panel);
-    qc.invalidateQueries({ queryKey: [...followupKeys.all(organizationId), "leads"] });
-    qc.invalidateQueries({ queryKey: followupKeys.summary(organizationId) });
     qc.invalidateQueries({ queryKey: queryKeys.inbox.lists() });
   };
 }
@@ -130,31 +123,5 @@ export function usePatchFollowupPolicy() {
       qc.setQueryData(followupKeys.policy(organizationId), policy);
       qc.invalidateQueries({ queryKey: followupKeys.all(organizationId) });
     },
-  });
-}
-
-/** Counts for the sidebar badge; refreshed every minute, never polls the full inbox. */
-export function useFollowupSummary() {
-  const { organizationId } = useTenant();
-  return useQuery({
-    queryKey: followupKeys.summary(organizationId),
-    queryFn: () => followupService.summary(),
-    enabled: Boolean(organizationId),
-    refetchInterval: 60_000,
-    staleTime: 30_000,
-    retry: false,
-  });
-}
-
-export function useLeads(filter: LeadFilter, page: number, temperature: string | null, q: string, sort: LeadSort,
-                         pageSize = 25) {
-  const { organizationId } = useTenant();
-  return useQuery({
-    queryKey: followupKeys.leads(organizationId, filter, page, temperature, q, sort),
-    queryFn: () => followupService.leads({ filter, page, pageSize, temperature, q, sort }),
-    enabled: Boolean(organizationId),
-    placeholderData: keepPreviousData,
-    staleTime: 20_000,
-    refetchInterval: 60_000,
   });
 }

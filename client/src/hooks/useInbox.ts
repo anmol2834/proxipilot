@@ -105,7 +105,7 @@ export function useSetLeadTemperature() {
       });
     },
     // A Hot/Warm/Cold pick is a manual override (null = use automatic classification): refresh the
-    // follow-up panel and Leads so they show the new source.
+    // follow-up panel so it shows the new source.
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["followups"] });
     },

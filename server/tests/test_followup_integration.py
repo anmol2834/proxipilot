@@ -764,8 +764,6 @@ async def test_api_rbac_versions_and_participant_validation(w):
         assert r.json()["status"] == "stopped" and [o for o in r.json()["occurrences"] if o["status"] == "scheduled"] == []
         assert (await cl.get("/followups/policy")).status_code == 200
         assert (await cl.patch("/followups/policy", json={"version": 0, "cadence_hot_days": 2})).status_code == 403
-        leads = (await cl.get("/followups/leads", params={"filter": "active"})).json()
-        assert leads["counts"]["active"] == 0                              # stopped is not actionable
     async with api(w, "viewer") as cl:
         assert (await cl.get(f"/followups/threads/{th}")).status_code == 403
     async with api(w, "admin") as cl:
@@ -792,7 +790,6 @@ async def test_observe_only_workspace_records_then_admin_activates_and_applies(w
         assert panel["latest_suggestion"]["decision"] == "schedule" and panel["latest_suggestion"]["is_latest_message"]
         r = await cl.post(f"/followups/threads/{th}/apply-suggestion", params={"version": panel["version"]})
         assert r.status_code == 409                                         # observe-only: nothing applies
-        assert (await cl.get("/followups/summary")).json()["mode"] == "shadow"
         assert (await cl.patch("/followups/policy", json={"version": 1, "mode": "active"})).status_code == 403
     async with api(w, "admin") as cl:
         pol = (await cl.get("/followups/policy")).json()
@@ -846,25 +843,7 @@ async def test_snooze_defers_reminders_until_it_ends(w):
     assert kinds == {"Follow-up due now"} and len(w.spies.team_mail) == 4      # one due notice each, no stale advance
 
 
-async def test_summary_search_and_sort(w):
-    t = utc(2026, 12, 1, 6, 0)
-    a = await w.thread("Alpha quotation")
-    await w.say(a, "inbound", "Call Friday", t, HOT_SCHEDULED)
-    b = await w.thread("Beta enquiry")
-    await w.say(b, "inbound", "Maybe", t, R(temperature="cold", decision="schedule", timing={"kind": "cadence"}))
-    async with api(w, "member") as cl:
-        s = (await cl.get("/followups/summary")).json()
-        assert s["active"] == 2 and s["mode"] == "active"
-        found = (await cl.get("/followups/leads", params={"q": "alpha"})).json()
-        assert [i["thread_id"] for i in found["items"]] == [a] and found["total"] == 1
-        by_temp = (await cl.get("/followups/leads", params={"sort": "temperature"})).json()["items"]
-        assert [i["thread_id"] for i in by_temp] == [a, b]
-        body = (await cl.get("/followups/leads")).json()
-        assert body["kpis"]["hot"] == 1 and body["timezone"] == "Asia/Kolkata"
-        assert (await cl.get("/followups/leads", params={"sort": "bogus"})).status_code == 422
-
-
-async def test_leads_filters_are_distinct(w):
+async def test_status_classification_is_distinct(w):
     t = utc(2026, 12, 1, 6, 0)
     a = await w.thread("Scheduled")
     await w.say(a, "inbound", "Call Friday 11am", t, HOT_SCHEDULED)
@@ -876,9 +855,7 @@ async def test_leads_filters_are_distinct(w):
     d = await w.thread("Refused")
     await w.say(d, "inbound", "Stop contacting me", t, R(decision="suppress",
                 constraints={"refusal_scope": "all_contact"}), sender="other@client.example")
-    async with api(w, "member") as cl:
-        counts = (await cl.get("/followups/leads")).json()["counts"]
-        assert counts["scheduled"] == 1 and counts["needs_review"] == 1 and counts["closed"] == 1
-        assert counts["active"] == 2                                       # suppressed excluded from actionable
-        items = (await cl.get("/followups/leads", params={"filter": "scheduled"})).json()["items"]
-        assert [i["thread_id"] for i in items] == [a]
+    statuses = {k: (await w.state(th)).status for k, th in (("a", a), ("b", b), ("c", c), ("d", d))}
+    assert statuses == {"a": "scheduled", "b": "needs_review", "c": "closed", "d": "suppressed"}
+    assert (await w.state(b)).needs_review and not (await w.state(a)).needs_review
+    assert len(await w.live(a)) == 1 and await w.live(d) == []           # refused: nothing actionable

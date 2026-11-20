@@ -9,7 +9,6 @@ DELETE /followups/threads/{id}/schedule    release the manual schedule          
 DELETE /followups/suppressions/{id}        lift a do-not-contact restriction                 (settings.update)
 GET    /followups/policy                   workspace timing defaults                         (settings.read)
 PATCH  /followups/policy                   update defaults (version-fenced)                  (settings.update)
-GET    /followups/leads                    paginated Leads queue with distinct filters      (inbox.read)
 
 Every query is scoped by the caller's tenant; thread participants are validated server-side.
 """
@@ -22,7 +21,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.context import TenantContext, require_permission
@@ -40,7 +39,6 @@ from app.services.followups.flags import get_flags
 
 router = APIRouter(prefix="/followups", tags=["Follow-ups"])
 
-LEAD_FILTERS = ("active", "open_unconfirmed", "scheduled", "due", "deferred", "waiting_team", "needs_review", "closed")
 _HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
@@ -405,22 +403,6 @@ async def apply_suggestion(thread_id: str, version: int = Query(..., ge=0), db: 
     return await _panel(db, ctx, thread)
 
 
-@router.get("/summary")
-async def summary(db: AsyncSession = Depends(get_db),
-                  ctx: TenantContext = Depends(require_permission("inbox.read"))) -> Dict[str, Any]:
-    """Cheap counts for navigation badges (no thread data)."""
-    tid, now = ctx.organization_id, datetime.now(timezone.utc)
-    S = ThreadFollowupState
-
-    async def n(clause) -> int:
-        return int((await db.execute(select(func.count()).select_from(S).where(S.tenant_id == tid, clause))).scalar_one())
-
-    policy = await engine.load_policy(db, tid)
-    return {"due": await n(_filter_clause("due", now)), "needs_review": await n(_filter_clause("needs_review", now)),
-            "active": await n(_filter_clause("active", now)),
-            "mode": "shadow" if engine.observe_only(policy) else "active"}
-
-
 @router.delete("/suppressions/{suppression_id}")
 async def lift_suppression(suppression_id: str, db: AsyncSession = Depends(get_db),
                            ctx: TenantContext = Depends(require_permission("settings.update"))) -> Dict[str, Any]:
@@ -527,84 +509,3 @@ async def patch_policy(body: PolicyPatch, db: AsyncSession = Depends(get_db),
                                metadata={"fields": sorted(fields)})
     await db.commit()
     return _policy_dto(p, await engine.load_calendar(db, tid, p))
-
-
-# ---------------------------------------------------------------------------
-# Leads queue
-# ---------------------------------------------------------------------------
-
-def _filter_clause(name: str, now: datetime):
-    S = ThreadFollowupState
-    actionable = S.status.in_(engine.ACTIVE_STATUSES)
-    return {
-        "active": actionable,
-        "open_unconfirmed": and_(actionable, S.outcome == "open_unconfirmed"),
-        "scheduled": and_(S.status.in_(("scheduled", "waiting_team")), S.due_at.is_not(None), S.due_at > now),
-        "due": and_(S.status.in_(("scheduled", "deferred", "waiting_team")), S.due_at.is_not(None), S.due_at <= now),
-        "deferred": S.status == "deferred",
-        "waiting_team": S.status == "waiting_team",
-        "needs_review": and_(S.needs_review.is_(True), S.status.not_in(("suppressed", "stopped", "closed"))),
-        "closed": S.status == "closed",
-    }[name]
-
-
-LEAD_SORTS = ("due", "recent", "temperature")
-
-
-@router.get("/leads")
-async def leads(filter: str = Query("active"), page: int = Query(1, ge=1), page_size: int = Query(25, ge=1, le=100),
-                temperature: Optional[str] = Query(None), q: Optional[str] = Query(None, max_length=120),
-                sort: str = Query("due"), db: AsyncSession = Depends(get_db),
-                ctx: TenantContext = Depends(require_permission("inbox.read"))) -> Dict[str, Any]:
-    if filter not in LEAD_FILTERS:
-        raise HTTPException(status_code=422, detail=f"filter must be one of {', '.join(LEAD_FILTERS)}")
-    if sort not in LEAD_SORTS:
-        raise HTTPException(status_code=422, detail=f"sort must be one of {', '.join(LEAD_SORTS)}")
-    from sqlalchemy import case, or_
-
-    tid, now = ctx.organization_id, datetime.now(timezone.utc)
-    S, T = ThreadFollowupState, EmailThread
-    base = and_(S.tenant_id == tid, T.tenant_id == tid, _filter_clause(filter, now))
-    if temperature in ("hot", "warm", "cold", "unknown"):
-        base = and_(base, S.effective_temperature == temperature)
-    term = (q or "").strip()
-    if term:
-        like = f"%{term.replace('%', '').replace('_', '')}%"
-        base = and_(base, or_(T.subject.ilike(like), T.sender_email.ilike(like), T.sender_name.ilike(like)))
-    temp_rank = case((S.effective_temperature == "hot", 0), (S.effective_temperature == "warm", 1),
-                     (S.effective_temperature == "cold", 2), else_=3)
-    order = {"due": (S.due_at.asc().nullslast(), S.updated_at.desc()),
-             "recent": (T.latest_message_at.desc().nullslast(),),
-             "temperature": (temp_rank, S.due_at.asc().nullslast())}[sort]
-    total = (await db.execute(select(func.count()).select_from(S).join(T, T.id == S.thread_id).where(base))).scalar_one()
-    rows = (await db.execute(
-        select(S, T.subject, T.sender_name, T.sender_email, T.latest_message_at).join(T, T.id == S.thread_id)
-        .where(base).order_by(*order).offset((page - 1) * page_size).limit(page_size))).all()
-    counts: Dict[str, int] = {}
-    for name in LEAD_FILTERS:
-        counts[name] = (await db.execute(select(func.count()).select_from(S).join(T, T.id == S.thread_id).where(
-            S.tenant_id == tid, T.tenant_id == tid, _filter_clause(name, now)))).scalar_one()
-    cal = await engine.load_calendar(db, tid)
-    local_now = now.astimezone(cal.zone.tz)
-    end_of_today, _ = tm.local_instant(local_now.date(), datetime.max.time().replace(microsecond=0), cal.zone)
-    actionable = S.status.in_(engine.ACTIVE_STATUSES)
-    kpis = {
-        "due_today": (await db.execute(select(func.count()).select_from(S).where(
-            S.tenant_id == tid, actionable, S.due_at.is_not(None), S.due_at <= end_of_today))).scalar_one(),
-        "hot": (await db.execute(select(func.count()).select_from(S).where(
-            S.tenant_id == tid, actionable, S.effective_temperature == "hot"))).scalar_one(),
-    }
-    policy = await engine.load_policy(db, tid)
-    return {
-        "filter": filter, "page": page, "page_size": page_size, "total": total, "counts": counts, "kpis": kpis,
-        "mode": "shadow" if engine.observe_only(policy) else "active", "timezone": cal.zone.name,
-        "items": [{
-            "thread_id": s.thread_id, "subject": subject, "sender_name": sname, "sender_email": semail,
-            "latest_message_at": _iso(latest), "temperature": s.effective_temperature,
-            "temperature_source": s.temperature_source, "status": s.status, "outcome": s.outcome,
-            "next_actor": s.next_actor, "next_action": s.next_action, "due_at": _iso(s.due_at),
-            "due_local": tm.fmt_local(_utc(s.due_at), tm.resolve_zone(s.due_tz) or cal.zone) if s.due_at else None,
-            "notice_at": _iso(s.notice_at), "needs_review": s.needs_review, "review_reason": s.review_reason,
-            "stale": s.stale,
-        } for s, subject, sname, semail, latest in rows],
-    }

@@ -63,7 +63,14 @@ function Pill({ label, fg, bg, tooltip, icon }: { label: string; fg: string; bg:
   return tooltip ? <Tooltip title={tooltip} arrow>{chip}</Tooltip> : chip;
 }
 
-export function FollowUpPanel({ threadId, defaultOpen = true }: { threadId: string; defaultOpen?: boolean }) {
+export function FollowUpPanel({ threadId, defaultOpen = true, onClose, flat = false }: {
+  threadId: string;
+  defaultOpen?: boolean;
+  /** When given the panel is shown as a sheet: always expanded, with a close button. */
+  onClose?: () => void;
+  /** No outer border/shadow (the container provides it). */
+  flat?: boolean;
+}) {
   const q = useThreadFollowup(threadId);
   const policyQ = useFollowupPolicy();
   const patch = usePatchFollowupControls(threadId);
@@ -155,7 +162,7 @@ export function FollowUpPanel({ threadId, defaultOpen = true }: { threadId: stri
   else if (f.participants.length === 0) emailDisabledReason = "Nobody has written in this conversation yet.";
 
   return (
-    <Box sx={card} data-testid="followup-panel">
+    <Box sx={flat ? cardFlat : card} data-testid="followup-panel">
       {/* Header */}
       <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap", minWidth: 0 }}>
@@ -177,13 +184,19 @@ export function FollowUpPanel({ threadId, defaultOpen = true }: { threadId: stri
               </IconButton>
             </Tooltip>
           )}
-          <IconButton size="small" onClick={() => setOpen((v) => !v)} aria-label={open ? "Collapse follow-up" : "Expand follow-up"}>
-            {open ? <IconChevronUp size={17} /> : <IconChevronDown size={17} />}
-          </IconButton>
+          {onClose ? (
+            <Tooltip title="Close (Esc)">
+              <IconButton size="small" onClick={onClose} aria-label="Close follow-up"><IconX size={17} /></IconButton>
+            </Tooltip>
+          ) : (
+            <IconButton size="small" onClick={() => setOpen((v) => !v)} aria-label={open ? "Collapse follow-up" : "Expand follow-up"}>
+              {open ? <IconChevronUp size={17} /> : <IconChevronDown size={17} />}
+            </IconButton>
+          )}
         </Box>
       </Box>
 
-      <Collapse in={open} unmountOnExit>
+      <Collapse in={open || Boolean(onClose)} unmountOnExit>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25, mt: 1.25 }}>
           {/* Banners */}
           {observe && sugg && (
@@ -438,5 +451,6 @@ const card = {
   borderRadius: "12px", backgroundColor: "#FFFFFF", border: `1px solid ${FU.border}`, p: "14px 18px",
   display: "flex", flexDirection: "column", gap: 1, boxShadow: "0 1px 3px rgba(15,23,42,0.03)",
 } as const;
+const cardFlat = { ...card, border: "none", boxShadow: "none", borderRadius: 0, p: 0 } as const;
 const banner = { borderRadius: "10px", fontSize: 13, py: 0.25, "& .MuiAlert-message": { py: 0.75 } } as const;
 const actionBtn = { textTransform: "none", fontWeight: 600, borderRadius: "8px", fontSize: 12.5 } as const;

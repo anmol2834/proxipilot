@@ -3,7 +3,7 @@
 import React, { useRef, useEffect, useState } from "react";
 import { Conversation, Message, LeadTemperature, Mailbox } from "@/types/inbox.types";
 import { ThreadMessages } from "./ThreadMessages";
-import { FollowUpPanel } from "./FollowUpPanel";
+import { FollowUpSheetControl } from "@/components/followups/FollowUpSheetControl";
 import { useDiscardDraft, useSendDraft, useSendManualReply, useThreadDraft } from "@/hooks/useMemory";
 import { useTenant } from "@/hooks/use-tenant";
 import { can } from "@/lib/permissions";
@@ -291,9 +291,11 @@ export function ConversationDetailPane({
           borderBottom: "1px solid #F1F5F9",
           gap: 8,
           background: "#FFFFFF",
+          position: "relative",   // anchors the follow-up sheet right under the toolbar
+          zIndex: 30,
         }}
       >
-        {/* Left: Mobile back (if needed) + Delete */}
+        {/* Left: Mobile back (if needed) + Delete + Follow-up */}
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           {onBackToList && (
             <ToolbarBtn onClick={onBackToList} title="Back to list">
@@ -304,6 +306,9 @@ export function ConversationDetailPane({
           <ToolbarBtn onClick={onDeleteClick} title="Delete conversation" danger>
             <IconTrash size={16} stroke={1.8} />
           </ToolbarBtn>
+
+          {/* Follow-up: opens a sheet right under this toolbar (no scrolling to find it) */}
+          <FollowUpSheetControl threadId={conversation.id} />
         </div>
 
         {/* Right: Hot / Warm / Cold pills */}
@@ -497,9 +502,6 @@ export function ConversationDetailPane({
             {aiSummaryText}
           </p>
         </div>
-
-        {/* ── Follow-up intelligence: temperature, next step, due, team notice, customer email ── */}
-        <FollowUpPanel threadId={conversation.id} />
 
         {/* ── Full conversation history (newest batch first, older on scroll-up) ── */}
         <ThreadMessages

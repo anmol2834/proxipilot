@@ -87,7 +87,7 @@ def render(kind: str, *, occ: FollowupOccurrence, thread: EmailThread, state: Op
     if not can_view:
         subject = "Follow-up reminder in your ProxiPilot workspace"
         text = (f"A conversation follow-up is {'coming up' if kind == 'advance' else 'due'} ({due_local}).\n"
-                f"Ask a teammate with inbox access to review it, or sign in: {base}/dashboard/leads")
+                f"Ask a teammate with inbox access to review it, or sign in: {base}/dashboard/inbox")
         return subject, text, f"<p>{html.escape(text)}</p>"
     who = thread.sender_name or thread.sender_email or "a customer"
     subj = (thread.subject or "(no subject)")[:120]

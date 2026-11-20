@@ -22,7 +22,7 @@ overrides/permissions and executes side effects.
 Modules: `services/followups/{flags,contracts,timing,assessor,engine,gate,composer,notify,scheduler,triggers,service}.py`,
 API `api/v1/routes/followups.py`, worker `workers/followup_worker.py`, models `models/followup.py`,
 migration `e3f4a5b6c7d8_followup_intelligence.py`. UI: `components/inbox/FollowUpPanel.tsx`,
-`components/leads/LeadsQueue.tsx`, `components/settings/FollowupSettings.tsx`, `hooks/useFollowups.ts`.
+`components/followups/{FollowUpPanel,FollowUpSheetControl,ScheduleDialog}.tsx`, `components/settings/FollowupSettings.tsx`, `hooks/useFollowups.ts`.
 
 ### Invariants enforced in code
 * **Revision fence.** Each new message bumps `revision` and marks the state stale *in the ingestion
@@ -84,8 +84,8 @@ Settings → Follow-ups & reminders (owners/admins, `settings.update`):
   member with send permission must still enable it per conversation and recipient (consent dialog).
 * Timing, working days, send hours, advance notice, limits and time zone.
 
-The UI surfaces: conversation Follow-up panel (inbox and Leads drawer), Leads workspace (KPIs,
-filters, search, sort, pagination), sidebar badge (due + needs review), inbox list badges.
+The UI surfaces: the Follow-up button in the conversation toolbar (opens the panel as a sheet under
+the toolbar), the guided date/time scheduler, inbox list badges and the inbox Follow-up filter.
 `FOLLOWUP_SHADOW_MODE=true` on the server still forces observe-only for every workspace, and
 `FOLLOWUP_CUSTOMER_SEND_ENABLED` remains the platform kill switch.
 
@@ -123,12 +123,12 @@ Reliability (deterministic, frozen clocks, provider spies, real Postgres 16):
   revocation / mailbox flag at send **and** reconciler resend, crash before/after provider
   acceptance, uncertain send not retried, partial team failure retries only that member, membership
   removal mid fan-out, leases, disabled assessment, shadow mode, no historical burst, manual and
-  legacy labels, API RBAC / versions / participant validation / tenant isolation, Leads filters.
+  legacy labels, API RBAC / versions / participant validation / tenant isolation, status classification.
 * Full regression (all unit suites + reconciler, inbox-thread, permanent-deletion integration):
   547 passed, 0 failed.
 * Migration: base → head, `downgrade d2e3f4a5b6c7` with data, `upgrade head` again.
 * Isolated end-to-end run (own Postgres/Redis): relay published committed-but-unpublished events,
-  the embedded worker consumed them; UI panel, controls, Leads and Settings verified in a browser.
+  the embedded worker consumed them; UI panel, controls and Settings verified in a browser.
 
 Semantic accuracy (live model, reported separately, `python -m tests.evals.followup_live_eval`):
 47 / 47 annotated checks on 14 synthetic conversations (8 spec scenarios + 5 unseen businesses;

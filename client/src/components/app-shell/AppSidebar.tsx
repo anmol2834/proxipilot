@@ -10,28 +10,11 @@ import Divider from "@mui/material/Divider";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ProxiPilotLogo } from "@/components/ui/ProxiPilotLogo";
-import { useFollowupSummary } from "@/hooks/useFollowups";
 
 interface NavItem {
   label: string;
   href: string;
   icon: (active: boolean) => React.ReactNode;
-  badge?: "followups";
-}
-
-/** Due + needs-review follow-ups; hidden when zero or when the user cannot read the inbox. */
-function FollowupBadge() {
-  const { data } = useFollowupSummary();
-  const n = (data?.due ?? 0) + (data?.needs_review ?? 0);
-  if (!n) return null;
-  return (
-    <Box component="span" title={`${data?.due ?? 0} due · ${data?.needs_review ?? 0} need review`}
-         sx={{ ml: "auto", minWidth: 20, height: 20, px: 0.75, borderRadius: "10px", backgroundColor: "#DC2626",
-               color: "#FFFFFF", fontSize: 11, fontWeight: 700, display: "inline-flex", alignItems: "center",
-               justifyContent: "center", fontVariantNumeric: "tabular-nums" }}>
-      {n > 99 ? "99+" : n}
-    </Box>
-  );
 }
 
 const PRIMARY_NAV: NavItem[] = [
@@ -54,18 +37,6 @@ const PRIMARY_NAV: NavItem[] = [
       <svg width="18" height="18" viewBox="0 0 24 24" fill={active ? "#2563EB" : "none"} stroke={active ? "#2563EB" : "#64748B"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
         <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
-      </svg>
-    ),
-  },
-  {
-    label: "Leads",
-    href: "/dashboard/leads",
-    badge: "followups",
-    icon: (active) => (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={active ? "#2563EB" : "#64748B"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="9" />
-        <circle cx="12" cy="12" r="5" />
-        <circle cx="12" cy="12" r="1.5" fill={active ? "#2563EB" : "#64748B"} />
       </svg>
     ),
   },
@@ -261,7 +232,6 @@ export function AppSidebar({ onItemClick }: AppSidebarProps) {
             >
               {item.label}
             </Typography>
-            {item.badge === "followups" && <FollowupBadge />}
           </ListItemButton>
         );
       })}

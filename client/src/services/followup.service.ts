@@ -1,25 +1,17 @@
 /**
- * Follow-up Service — conversation intelligence, follow-up controls, workspace policy, Leads queue.
+ * Follow-up Service — conversation intelligence, follow-up controls and workspace policy.
  *
  *   GET    /followups/threads/{id}
  *   PATCH  /followups/threads/{id}/controls
  *   POST   /followups/threads/{id}/schedule
  *   DELETE /followups/threads/{id}/schedule?version=
+ *   POST   /followups/threads/{id}/apply-suggestion?version=
  *   DELETE /followups/suppressions/{id}
  *   GET    /followups/policy        PATCH /followups/policy
- *   GET    /followups/leads?filter=&page=&page_size=&temperature=
  */
 
 import { apiClient } from "@/lib/api/client";
-import type {
-  FollowupControlsPatch,
-  FollowupPolicy,
-  FollowupSummary,
-  LeadFilter,
-  LeadSort,
-  LeadsResponse,
-  ThreadFollowup,
-} from "@/types/followup.types";
+import type { FollowupControlsPatch, FollowupPolicy, ThreadFollowup } from "@/types/followup.types";
 
 export const followupService = {
   async getThread(threadId: string): Promise<ThreadFollowup> {
@@ -51,10 +43,6 @@ export const followupService = {
     ).data;
   },
 
-  async summary(): Promise<FollowupSummary> {
-    return (await apiClient.get<FollowupSummary>("/followups/summary")).data;
-  },
-
   async liftSuppression(id: string): Promise<{ id: string; lifted: boolean }> {
     return (await apiClient.delete<{ id: string; lifted: boolean }>(`/followups/suppressions/${id}`)).data;
   },
@@ -65,27 +53,5 @@ export const followupService = {
 
   async patchPolicy(patch: Partial<FollowupPolicy> & { version: number }): Promise<FollowupPolicy> {
     return (await apiClient.patch<FollowupPolicy>("/followups/policy", patch)).data;
-  },
-
-  async leads(params: {
-    filter: LeadFilter;
-    page: number;
-    pageSize: number;
-    temperature?: string | null;
-    q?: string | null;
-    sort?: LeadSort;
-  }): Promise<LeadsResponse> {
-    return (
-      await apiClient.get<LeadsResponse>("/followups/leads", {
-        params: {
-          filter: params.filter,
-          page: params.page,
-          page_size: params.pageSize,
-          temperature: params.temperature ?? undefined,
-          q: params.q || undefined,
-          sort: params.sort ?? "due",
-        },
-      })
-    ).data;
   },
 };
