@@ -153,6 +153,12 @@ async def _panel(db: AsyncSession, ctx: TenantContext, thread: EmailThread) -> D
             "completed": bool(control and control.completed),
         },
         "latest_suggestion": suggestion,
+        "time_suggestion": None if not (state and state.suggested_due_at) else {
+            "due_at": _iso(state.suggested_due_at),
+            "local": local(state.suggested_due_at, state.suggested_due_tz),
+            "timezone": state.suggested_due_tz, "phrase": state.suggested_due_phrase,
+            "source": state.suggested_due_source, "suggested_at": _iso(state.suggested_at),
+        },
         "workspace": {"mode": "shadow" if engine.observe_only(policy) else "active",
                       "configured_mode": policy.mode, "customer_email_allowed": bool(policy.customer_email_allowed)},
         "participants": participants,
@@ -306,8 +312,20 @@ async def schedule(thread_id: str, body: ScheduleBody, db: AsyncSession = Depend
         hour=int(hh), minute=int(mm)), zone)
     if due <= now:
         raise HTTPException(status_code=422, detail="Choose a time in the future")
+    await _set_manual_due(db, ctx, thread, control, due, zone, cal, now)
+    await _audit(db, ctx, "FOLLOWUP_SCHEDULED", thread.id, {"due_at": due.isoformat(), "tz": zone.name})
+    await db.commit()
+    return await _panel(db, ctx, thread)
+
+
+async def _set_manual_due(db: AsyncSession, ctx: TenantContext, thread: EmailThread, control: ThreadFollowupControl,
+                          due: datetime, zone: "tm.Zone", cal: "tm.Calendar", now: datetime) -> None:
+    """A person sets the follow-up time: it becomes the locked plan and any pending AI suggestion is
+    resolved by that decision."""
+    tid = ctx.organization_id
     control.manual_due_at, control.manual_due_tz, control.manual_due_by = due, zone.name, ctx.user_id
     control.version = (control.version or 0) + 1
+    engine.clear_time_suggestion(await engine.lock_state(db, tid, thread.id))
     out = await engine.reapply_latest(db, tenant_id=tid, thread_id=thread.id, now=now)
     if out is None or out.occurrence_id is None:
         # No AI decision yet (or it does not plan): an explicit, clearly identified manual task.
@@ -328,7 +346,47 @@ async def schedule(thread_id: str, body: ScheduleBody, db: AsyncSession = Depend
             state.status = "waiting_team"
         state.due_at, state.due_tz, state.due_source, state.due_precision = due, zone.name, "user", "instant"
         state.notice_at = notice_at
-    await _audit(db, ctx, "FOLLOWUP_SCHEDULED", thread.id, {"due_at": due.isoformat(), "tz": zone.name})
+
+
+@router.post("/threads/{thread_id}/time-suggestion/accept")
+async def accept_time_suggestion(thread_id: str, version: int = Query(..., ge=0), db: AsyncSession = Depends(get_db),
+                                 ctx: TenantContext = Depends(require_permission("inbox.reply"))) -> Dict[str, Any]:
+    """Move the follow-up to the time AI #2 suggested (a person's explicit review)."""
+    thread = await _thread(db, ctx, thread_id)
+    tid, now = ctx.organization_id, datetime.now(timezone.utc)
+    control = await engine.get_or_create_control(db, tid, thread.id)
+    if version != control.version:
+        raise HTTPException(status_code=409, detail="This conversation's follow-up settings changed; refresh and retry")
+    state = await engine.lock_state(db, tid, thread.id)
+    if state.suggested_due_at is None:
+        raise HTTPException(status_code=409, detail="There is no suggested time to accept")
+    due = _utc(state.suggested_due_at)
+    if due <= now:
+        engine.clear_time_suggestion(state)
+        await db.commit()
+        raise HTTPException(status_code=409, detail="The suggested time has already passed; schedule a new time")
+    cal = await engine.load_calendar(db, tid)
+    zone = tm.resolve_zone(state.suggested_due_tz) or cal.zone
+    phrase = state.suggested_due_phrase
+    await _set_manual_due(db, ctx, thread, control, due, zone, cal, now)
+    await _audit(db, ctx, "FOLLOWUP_TIME_SUGGESTION_ACCEPTED", thread.id,
+                 {"due_at": due.isoformat(), "tz": zone.name, "phrase": (phrase or "")[:120]})
+    await db.commit()
+    return await _panel(db, ctx, thread)
+
+
+@router.post("/threads/{thread_id}/time-suggestion/dismiss")
+async def dismiss_time_suggestion(thread_id: str, version: int = Query(..., ge=0), db: AsyncSession = Depends(get_db),
+                                  ctx: TenantContext = Depends(require_permission("inbox.reply"))) -> Dict[str, Any]:
+    """Keep the current follow-up time; the suggestion is cleared until new evidence arrives."""
+    thread = await _thread(db, ctx, thread_id)
+    tid = ctx.organization_id
+    control = await engine.get_or_create_control(db, tid, thread.id)
+    if version != control.version:
+        raise HTTPException(status_code=409, detail="This conversation's follow-up settings changed; refresh and retry")
+    engine.clear_time_suggestion(await engine.lock_state(db, tid, thread.id))
+    control.version = (control.version or 0) + 1
+    await _audit(db, ctx, "FOLLOWUP_TIME_SUGGESTION_DISMISSED", thread.id, {})
     await db.commit()
     return await _panel(db, ctx, thread)
 

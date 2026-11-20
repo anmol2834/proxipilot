@@ -43,6 +43,8 @@ export const SOURCE: Record<string, string> = {
 export const DUE_SOURCE: Record<string, string> = {
   customer_date: "Customer's date",
   ai: "AI-suggested window",
+  ai_window: "AI-suggested window",
+  team_deadline: "Team commitment",
   cadence: "Workspace cadence",
   user: "Scheduled by your team",
 };

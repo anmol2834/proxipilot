@@ -32,8 +32,8 @@ import {
 import { ConfirmDialog } from "@/components/ui/feedback/ConfirmDialog";
 import { toast } from "@/stores/notification.store";
 import {
-  followupError, useApplySuggestion, useClearFollowupSchedule, useFollowupPolicy, useLiftSuppression,
-  usePatchFollowupControls, useScheduleFollowup, useThreadFollowup,
+  followupError, useAcceptTimeSuggestion, useApplySuggestion, useClearFollowupSchedule, useDismissTimeSuggestion,
+  useFollowupPolicy, useLiftSuppression, usePatchFollowupControls, useScheduleFollowup, useThreadFollowup,
 } from "@/hooks/useFollowups";
 import type { FollowupControlsPatch, ThreadFollowup } from "@/types/followup.types";
 import { CustomerEmailDialog } from "./CustomerEmailDialog";
@@ -41,6 +41,12 @@ import { ScheduleDialog } from "./ScheduleDialog";
 import {
   ACTOR, CUSTOMER_STATUS, DECISION, DUE_SOURCE, FU, SOURCE, STATUS, TEMPERATURE, cap, humanize, inZone, relative,
 } from "./meta";
+
+const TIME_SUGGESTION_SOURCE: Record<string, string> = {
+  customer_date: "the customer's date",
+  team_deadline: "a team commitment",
+  ai_window: "AI timing from the conversation",
+};
 
 type Confirm = null | "complete" | "stop_email" | { lift: string };
 
@@ -78,6 +84,8 @@ export function FollowUpPanel({ threadId, defaultOpen = true, onClose, flat = fa
   const clear = useClearFollowupSchedule(threadId);
   const applySuggestion = useApplySuggestion(threadId);
   const lift = useLiftSuppression(threadId);
+  const acceptTime = useAcceptTimeSuggestion(threadId);
+  const dismissTime = useDismissTimeSuggestion(threadId);
 
   const [open, setOpen] = useState(defaultOpen);
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -89,7 +97,8 @@ export function FollowUpPanel({ threadId, defaultOpen = true, onClose, flat = fa
   const [snoozeEl, setSnoozeEl] = useState<HTMLElement | null>(null);
 
   const f: ThreadFollowup | undefined = q.data;
-  const busy = patch.isPending || schedule.isPending || clear.isPending || applySuggestion.isPending || lift.isPending;
+  const busy = patch.isPending || schedule.isPending || clear.isPending || applySuggestion.isPending || lift.isPending
+    || acceptTime.isPending || dismissTime.isPending;
   const tz = f?.capabilities.workspace_timezone || "UTC";
   const current = f?.current_occurrence ?? null;
 
@@ -128,6 +137,7 @@ export function FollowUpPanel({ threadId, defaultOpen = true, onClose, flat = fa
   const due = relative(f.due.at);
   const snoozed = f.controls.snoozed_until && new Date(f.controls.snoozed_until).getTime() > Date.now();
   const policy = policyQ.data;
+  const timeSugg = f.time_suggestion && new Date(f.time_suggestion.due_at).getTime() > Date.now() ? f.time_suggestion : null;
 
   let emailDisabledReason: string | null = null;
   if (!f.capabilities.customer_email_supported) emailDisabledReason = "Automatic customer email needs a connected Gmail mailbox.";
@@ -174,6 +184,43 @@ export function FollowUpPanel({ threadId, defaultOpen = true, onClose, flat = fa
       <Collapse in={open || Boolean(onClose)} unmountOnExit>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25, mt: 1.25 }}>
           {/* Banners */}
+          {timeSugg && (
+            <Box data-testid="followup-time-suggestion" role="status"
+                 sx={{ border: "1.5px solid #F59E0B", backgroundColor: "#FFFBEB", borderRadius: "10px", p: "10px 12px",
+                       display: "flex", flexDirection: "column", gap: 0.75 }}>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+                <IconCalendarEvent size={16} color="#B45309" />
+                <Typography sx={{ fontSize: 13, fontWeight: 700, color: "#92400E" }}>AI suggests a new follow-up time</Typography>
+              </Box>
+              <Typography sx={{ fontSize: 13, color: FU.text, lineHeight: 1.55 }}>
+                Move from <b>{f.due.at ? inZone(f.due.at, f.due.timezone || tz, true) : "the current time"}</b> to{" "}
+                <b>{inZone(timeSugg.due_at, timeSugg.timezone || tz, true)}</b>
+                {timeSugg.phrase ? <> — based on “{timeSugg.phrase}”</> : null}
+                {timeSugg.source ? <Box component="span" sx={{ color: FU.muted }}> · {TIME_SUGGESTION_SOURCE[timeSugg.source] ?? humanize(timeSugg.source)}</Box> : null}
+              </Typography>
+              <Typography sx={{ fontSize: 12, color: FU.muted }}>
+                The current time stays in place until someone reviews this. Automatic customer email waits for the review.
+              </Typography>
+              {canEdit && (
+                <Box sx={{ display: "flex", gap: 1, mt: 0.25 }}>
+                  <Button size="small" variant="contained" disableElevation disabled={busy}
+                          onClick={() => acceptTime.mutate(f.version, {
+                            onSuccess: () => toast.success("Follow-up moved to the suggested time"),
+                            onError: (e) => toast.error(followupError(e)) })}
+                          sx={{ ...actionBtn, backgroundColor: "#B45309", "&:hover": { backgroundColor: "#92400E" } }}>
+                    Accept new time
+                  </Button>
+                  <Button size="small" variant="outlined" disabled={busy}
+                          onClick={() => dismissTime.mutate(f.version, {
+                            onSuccess: () => toast.success("Kept the current follow-up time"),
+                            onError: (e) => toast.error(followupError(e)) })}
+                          sx={{ ...actionBtn, color: "#92400E", borderColor: "#FCD34D" }}>
+                    Keep current time
+                  </Button>
+                </Box>
+              )}
+            </Box>
+          )}
           {observe && sugg && (
             <Alert severity="info" icon={<IconBrain size={18} />} sx={banner}>
               <b>AI suggests:</b> {cap(sugg.temperature)} · {DECISION[sugg.decision ?? ""] ?? humanize(sugg.decision)}

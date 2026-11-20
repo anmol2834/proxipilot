@@ -79,6 +79,8 @@ class ThreadDTO(BaseModel):
     has_followup: bool = False
     followup_status: Optional[str] = None
     followup_due_at: Optional[datetime] = None
+    # The AI proposed a different follow-up time that a person has not reviewed yet.
+    followup_time_suggested: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -361,19 +363,22 @@ async def _overlay_followup_states(db: AsyncSession, org_id: str, items: List[Th
         ThreadFollowupState.thread_id,
         ThreadFollowupState.status,
         ThreadFollowupState.due_at,
+        ThreadFollowupState.suggested_due_at,
     ).where(
         ThreadFollowupState.tenant_id == org_id,
         ThreadFollowupState.thread_id.in_(thread_ids),
         ThreadFollowupState.status.in_(active_followup_statuses),
     )
     rows = (await db.execute(stmt)).all()
-    by_thread = {r[0]: (r[1], r[2]) for r in rows}
+    by_thread = {r[0]: (r[1], r[2], r[3]) for r in rows}
+    now = datetime.now(timezone.utc)
     for item in items:
         if item.id in by_thread:
-            st, due = by_thread[item.id]
+            st, due, suggested = by_thread[item.id]
             item.has_followup = True
             item.followup_status = st
             item.followup_due_at = due
+            item.followup_time_suggested = suggested is not None and suggested > now
 
 
 async def _overlay_memory_summaries(db: AsyncSession, org_id: str, items: List[ThreadDTO]) -> None:

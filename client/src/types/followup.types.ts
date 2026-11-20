@@ -105,6 +105,18 @@ export interface ThreadFollowup {
     workspace_timezone: string;
   };
   current_occurrence: FollowupOccurrenceDTO | null;
+  /** The AI proposes moving an already-set follow-up; nothing changes until a person accepts it. */
+  time_suggestion: FollowupTimeSuggestion | null;
+}
+
+export interface FollowupTimeSuggestion {
+  due_at: string;
+  local: string | null;
+  timezone: string | null;
+  /** The customer's or team's own words the new time comes from, quoted verbatim. */
+  phrase: string | null;
+  source: "customer_date" | "team_deadline" | "ai_window" | string | null;
+  suggested_at: string | null;
 }
 
 export interface FollowupControlsPatch {

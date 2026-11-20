@@ -67,6 +67,8 @@ export interface Conversation {
   hasFollowup?: boolean;
   followupStatus?: string | null;
   followupDueAt?: string | null;
+  /** The AI suggested a different follow-up time that nobody has reviewed yet. */
+  followupTimeSuggested?: boolean;
   unread: boolean;
   createdAt: string;
   updatedAt: string;

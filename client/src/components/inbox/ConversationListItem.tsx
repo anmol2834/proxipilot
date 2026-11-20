@@ -59,8 +59,16 @@ function guessCategory(subject: string, senderName: string): { label: string; bg
 }
 
 /** Compact follow-up badge for the list (server already filters to active follow-up states). */
-function followupBadge(status: string | null, dueAt: string | null): { label: string; title: string; color: string; bg: string } | null {
+function followupBadge(
+  status: string | null,
+  dueAt: string | null,
+  timeSuggested = false,
+): { label: string; title: string; color: string; bg: string } | null {
   if (!status) return null;
+  if (timeSuggested) {
+    return { label: "New time suggested", title: "AI suggests a different follow-up time — open to review",
+             color: "#92400E", bg: "#FDE68A" };
+  }
   const due = dueAt ? new Date(dueAt) : null;
   const overdue = due ? due.getTime() <= Date.now() : false;
   if (status === "needs_review") return { label: "Review", title: "Follow-up needs a decision", color: "#B91C1C", bg: "#FEE2E2" };
@@ -81,7 +89,11 @@ export function ConversationListItem({
   const { sender, subject, snippet, latestMessageAt, unread, leadTemperature, threadCount } = conversation;
   const avatarStyle = getAvatarStyle(sender.name);
   const tempChip = leadTemperature ? TEMP_CHIP[leadTemperature] : null;
-  const followupChip = followupBadge(conversation.followupStatus ?? null, conversation.followupDueAt ?? null);
+  const followupChip = followupBadge(
+    conversation.followupStatus ?? null,
+    conversation.followupDueAt ?? null,
+    Boolean(conversation.followupTimeSuggested),
+  );
   const categoryChip = guessCategory(subject, sender.name);
 
   return (

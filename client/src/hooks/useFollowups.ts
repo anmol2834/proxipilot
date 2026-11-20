@@ -96,6 +96,28 @@ export function useApplySuggestion(threadId: string) {
   });
 }
 
+/** Accept the AI's proposed new follow-up time (it becomes the team's own schedule). */
+export function useAcceptTimeSuggestion(threadId: string) {
+  const apply = useApplyPanel(threadId);
+  const onError = useRefetchOnConflict(threadId);
+  return useMutation({
+    mutationFn: (version: number) => followupService.acceptTimeSuggestion(threadId, version),
+    onSuccess: apply,
+    onError,
+  });
+}
+
+/** Keep the current follow-up time and discard the AI's proposal. */
+export function useDismissTimeSuggestion(threadId: string) {
+  const apply = useApplyPanel(threadId);
+  const onError = useRefetchOnConflict(threadId);
+  return useMutation({
+    mutationFn: (version: number) => followupService.dismissTimeSuggestion(threadId, version),
+    onSuccess: apply,
+    onError,
+  });
+}
+
 export function useLiftSuppression(threadId: string) {
   const qc = useQueryClient();
   const { organizationId } = useTenant();

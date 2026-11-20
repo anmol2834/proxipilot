@@ -152,6 +152,12 @@ class ThreadFollowupState(Base, TenantAwareMixin):
     stale_reason: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     sequence_anchor_message_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     attempts_used: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    # A set follow-up time is locked; a different time proposed by AI #2 waits here for a person.
+    suggested_due_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    suggested_due_tz: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    suggested_due_phrase: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    suggested_due_source: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    suggested_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class ContactSuppression(Base, TenantAwareMixin):

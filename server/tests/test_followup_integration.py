@@ -1,4 +1,4 @@
-"""Conversation intelligence & follow-ups — end-to-end behaviour on a real (throwaway) Postgres.
+﻿"""Conversation intelligence & follow-ups â€” end-to-end behaviour on a real (throwaway) Postgres.
 
 Runs the PRODUCTION trigger, assessment service, engine, scheduler, gate, notice fan-out, delivery
 path and API. AI #2 output is scripted per message (the model decides meaning; these tests verify
@@ -64,7 +64,7 @@ async def w(monkeypatch):
 
     async def fake_compose(payload):
         world.spies.compose_calls += 1
-        return world.scripts.get("__compose__", "Just checking in on the 40 units you asked about.")
+        return world.scripts.get("__compose__", "Hi there, are the 40 units you asked about still on for Friday?")
 
     async def gmail_spy(db, outbound, account, *, gmail_thread_id, send_kwargs):
         world.spies.gmail_calls.append({"to": send_kwargs["to_email"], "idem": outbound.idempotency_key})
@@ -117,7 +117,7 @@ ACTIVE_TEAM = ("owner", "admin", "member", "viewer")
 
 
 # ---------------------------------------------------------------------------------------------
-# Scenario 1 — industrial supplier (Meera): cold -> warm -> hot; the team owes the quote
+# Scenario 1 â€” industrial supplier (Meera): cold -> warm -> hot; the team owes the quote
 # ---------------------------------------------------------------------------------------------
 
 async def test_meera_reassesses_each_message_and_tracks_team_promise(w):
@@ -154,7 +154,7 @@ async def test_meera_reassesses_each_message_and_tracks_team_promise(w):
 
 
 # ---------------------------------------------------------------------------------------------
-# Scenario 2 — training consultancy (Kavya): exact instants, team fan-out, zero customer email
+# Scenario 2 â€” training consultancy (Kavya): exact instants, team fan-out, zero customer email
 # ---------------------------------------------------------------------------------------------
 
 KAVYA_TEXT = ("We intend to book the workshop on 15 December 2026. Please contact me that afternoon at 3 PM IST.")
@@ -203,20 +203,97 @@ async def test_kavya_exact_due_notice_and_team_fanout_with_zero_customer_email(w
     assert acc == [("accepted", 4)]
 
 
-async def test_kavya_changes_date_supersedes_december_work(w):
+JAN8 = R(**{**KAVYA, "timing": {**KAVYA["timing"], "phrase": "Jan 8 at the same time", "local_date": "2027-01-08"},
+            "constraints": {**KAVYA["constraints"], "changed_date": True}})
+
+
+async def test_kavya_new_date_is_a_suggestion_until_a_person_accepts_it(w):
+    """A date already set is locked: the AI's new date is highlighted for review, never applied on its own."""
     th = await w.thread("Workshop booking")
-    sent = utc(2026, 12, 1, 6, 0)
-    await w.say(th, "inbound", KAVYA_TEXT, sent, KAVYA)
+    await w.say(th, "inbound", KAVYA_TEXT, utc(2026, 12, 1, 6, 0), KAVYA)
     [dec] = await w.live(th)
-    await w.say(th, "inbound", "Jan 8 at the same time instead.", utc(2026, 12, 3, 6, 0), R(
-        **{**KAVYA, "timing": {**KAVYA["timing"], "phrase": "Jan 8 at the same time", "local_date": "2027-01-08"},
-           "constraints": {**KAVYA["constraints"], "changed_date": True}}))
+    await w.say(th, "inbound", "Jan 8 at the same time instead.", utc(2026, 12, 3, 6, 0), JAN8)
+    [still] = await w.live(th)
+    assert still.id == dec.id and still.due_at == utc(2026, 12, 15, 9, 30)          # December stays in place
+    s = await w.state(th)
+    assert s.due_at == utc(2026, 12, 15, 9, 30)
+    assert s.suggested_due_at == utc(2027, 1, 8, 9, 30) and s.suggested_due_phrase == "Jan 8 at the same time"
+    async with api(w, "member") as cl:
+        inbox = (await cl.get(f"/inbox/threads/{th}")).json()
+        assert inbox["followup_time_suggested"] is True                              # highlighted in the inbox
+        panel = (await cl.get(f"/followups/threads/{th}")).json()
+        assert panel["time_suggestion"]["due_at"].startswith("2027-01-08T09:30")
+        assert panel["due"]["at"].startswith("2026-12-15T09:30")
+    # The December advance notice still goes out, and tells the team a new time is waiting for review.
+    await FollowupScheduler().run_once(now=utc(2026, 12, 14, 4, 30), tenant_id=w.tenant_id)
+    texts = [m["text"] for m in w.spies.team_mail if "Open the conversation" in m["text"]]   # members who can view
+    assert texts and all("A different time was suggested" in x for x in texts)
+    async with api(w, "member") as cl:
+        r = await cl.post(f"/followups/threads/{th}/time-suggestion/accept", params={"version": panel["version"]})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["time_suggestion"] is None and body["due"]["at"].startswith("2027-01-08T09:30")
+        r2 = await cl.post(f"/followups/threads/{th}/time-suggestion/accept", params={"version": body["version"]})
+        assert r2.status_code == 409                                                 # nothing left to accept
+        assert (await cl.get(f"/inbox/threads/{th}")).json()["followup_time_suggested"] is False
     occs = {o.id: o for o in await w.occurrences(th)}
     assert occs[dec.id].status == "superseded"
     [jan] = await w.live(th)
     assert jan.due_at == utc(2027, 1, 8, 9, 30) and jan.notice_at == utc(2027, 1, 7, 4, 30)
-    await FollowupScheduler().run_once(now=utc(2026, 12, 14, 4, 30), tenant_id=w.tenant_id)
-    assert w.spies.team_mail == []                                          # December reminders never fire
+
+
+async def test_dismissed_time_suggestion_keeps_date_and_never_comes_back(w):
+    th = await w.thread("Workshop booking")
+    await w.say(th, "inbound", KAVYA_TEXT, utc(2026, 12, 1, 6, 0), KAVYA)
+    [dec] = await w.live(th)
+    await w.say(th, "inbound", "Jan 8 at the same time instead.", utc(2026, 12, 3, 6, 0), JAN8)
+    async with api(w, "member") as cl:
+        version = (await cl.get(f"/followups/threads/{th}")).json()["version"]
+        r = await cl.post(f"/followups/threads/{th}/time-suggestion/dismiss", params={"version": version})
+        assert r.status_code == 200, r.text
+        assert r.json()["time_suggestion"] is None and r.json()["due"]["at"].startswith("2026-12-15T09:30")
+        # Any later re-application of the same assessment (a controls change) must not raise it again.
+        r = await cl.patch(f"/followups/threads/{th}/controls",
+                           json={"version": r.json()["version"], "planning_enabled": True})
+        assert r.status_code == 200, r.text
+        assert r.json()["time_suggestion"] is None
+    [kept] = await w.live(th)
+    assert kept.id == dec.id and (await w.state(th)).suggested_due_at is None
+
+
+async def test_ai_sets_the_first_date_automatically_and_agreeing_dates_raise_nothing(w):
+    th = await w.thread("Workshop booking")
+    await w.say(th, "inbound", KAVYA_TEXT, utc(2026, 12, 1, 6, 0), KAVYA)
+    [dec] = await w.live(th)
+    assert dec.origin != "user" and dec.due_at == utc(2026, 12, 15, 9, 30)          # set by the AI, no human step
+    await w.say(th, "inbound", "Yes, 15 December 2026 at 3 PM IST works.", utc(2026, 12, 2, 6, 0),
+                R(**{**KAVYA, "timing": {**KAVYA["timing"], "phrase": "15 December 2026 at 3 PM IST"}}))
+    [same] = await w.live(th)
+    assert same.id == dec.id and (await w.state(th)).suggested_due_at is None
+
+
+async def test_team_schedule_is_locked_against_ai_and_suggestion_holds_customer_email(w, monkeypatch):
+    enable_customer_send(monkeypatch)
+    th = await w.thread("40 units")
+    t = utc(2026, 12, 1, 6, 0)
+    await w.say(th, "inbound", "We need 40 units; check with me Friday 11am.", t, HOT_SCHEDULED)
+    await permit_customer_email(w, th)
+    async with api(w, "member") as cl:
+        version = (await cl.get(f"/followups/threads/{th}")).json()["version"]
+        r = await cl.post(f"/followups/threads/{th}/schedule",
+                          json={"version": version, "local_date": "2026-12-04", "local_time": "12:00"})
+        assert r.status_code == 200, r.text
+    later = R(**{**HOT_SCHEDULED, "timing": {**HOT_SCHEDULED["timing"], "phrase": "Monday 11am",
+                                             "local_date": "2026-12-07"}})
+    await w.say(th, "inbound", "Actually make it Monday 11am.", t + timedelta(hours=2), later)
+    [occ] = await w.live(th)
+    assert occ.origin == "user" and occ.due_at == utc(2026, 12, 4, 6, 30)            # the team's time stands
+    assert (await w.state(th)).suggested_due_at == utc(2026, 12, 7, 5, 30)
+    async with db_manager.session_factory() as db:
+        res = await gate.evaluate(db, occ, utc(2026, 12, 4, 6, 30))
+    assert not res.ok and res.reason == "new_time_suggested_pending_review"
+    await FollowupScheduler().run_once(now=utc(2026, 12, 4, 6, 30), tenant_id=w.tenant_id)
+    assert w.spies.gmail_calls == []                                                  # nobody is emailed on a guess
 
 
 async def test_owner_who_schedules_gets_one_notice_per_stage(w):
@@ -243,7 +320,7 @@ async def test_owner_who_schedules_gets_one_notice_per_stage(w):
 
 
 # ---------------------------------------------------------------------------------------------
-# Scenario 3 — software company (Arjun): purchase unconfirmed stays open; "we signed" closes
+# Scenario 3 â€” software company (Arjun): purchase unconfirmed stays open; "we signed" closes
 # ---------------------------------------------------------------------------------------------
 
 async def test_arjun_open_unconfirmed_then_signed_closes_matching_followup(w):
@@ -269,7 +346,7 @@ async def test_arjun_open_unconfirmed_then_signed_closes_matching_followup(w):
 
 
 # ---------------------------------------------------------------------------------------------
-# Scenario 4 — design agency (Nisha): refusal fences, suppresses durably, zero customer sends
+# Scenario 4 â€” design agency (Nisha): refusal fences, suppresses durably, zero customer sends
 # ---------------------------------------------------------------------------------------------
 
 HOT_SCHEDULED = R(temperature="hot", buying_interest=0.9, decision="schedule", next_actor="customer",
@@ -345,7 +422,7 @@ async def test_no_email_please_call_allows_internal_task_only(w, monkeypatch):
 
 
 # ---------------------------------------------------------------------------------------------
-# Scenario 5 — logistics: scoped refusal closes one opportunity only
+# Scenario 5 â€” logistics: scoped refusal closes one opportunity only
 # ---------------------------------------------------------------------------------------------
 
 async def test_logistics_scoped_refusal_closes_only_annual_contract(w):
@@ -368,7 +445,7 @@ async def test_logistics_scoped_refusal_closes_only_annual_contract(w):
 
 
 # ---------------------------------------------------------------------------------------------
-# Scenario 6 — IT services: outage is support, not a Hot lead; "thank you" keeps renewal closed
+# Scenario 6 â€” IT services: outage is support, not a Hot lead; "thank you" keeps renewal closed
 # ---------------------------------------------------------------------------------------------
 
 async def test_outage_is_support_and_courtesy_reply_does_not_reopen(w):
@@ -391,7 +468,7 @@ async def test_outage_is_support_and_courtesy_reply_does_not_reopen(w):
 
 
 # ---------------------------------------------------------------------------------------------
-# Scenario 7 — consulting: "03/04" stays uncertain; nothing exact, nobody emailed
+# Scenario 7 â€” consulting: "03/04" stays uncertain; nothing exact, nobody emailed
 # ---------------------------------------------------------------------------------------------
 
 async def test_ambiguous_numeric_date_needs_review_and_never_contacts(w, monkeypatch):
@@ -416,7 +493,7 @@ async def test_ambiguous_numeric_date_needs_review_and_never_contacts(w, monkeyp
 
 
 # ---------------------------------------------------------------------------------------------
-# Scenario 8 — two opportunities / two threads; tenant isolation
+# Scenario 8 â€” two opportunities / two threads; tenant isolation
 # ---------------------------------------------------------------------------------------------
 
 async def test_verified_order_closes_only_matching_opportunity_and_tenants_do_not_leak(w):
@@ -548,7 +625,7 @@ async def test_refusal_arriving_between_claim_and_send_produces_zero_provider_ca
     async def compose_while_customer_refuses(payload):
         w.spies.compose_calls += 1
         await w.msg(th, "inbound", "Please stop emailing me.", utc(2026, 12, 4, 5, 29))
-        return "Just checking in about Friday."
+        return "Hi there, does Friday still work for you?"
 
     monkeypatch.setattr("app.services.followups.composer.call_composer", compose_while_customer_refuses)
     await FollowupScheduler().run_once(now=utc(2026, 12, 4, 5, 30), tenant_id=w.tenant_id)
@@ -629,7 +706,7 @@ async def test_uncertain_gmail_send_is_left_to_reconciliation_not_retried_blindl
     t = utc(2026, 12, 1, 6, 0)
     await w.say(th, "inbound", "Check with me Friday 11am.", t, HOT_SCHEDULED)
     await permit_customer_email(w, th)
-    w.scripts["__compose__"] = "Just checking in about Friday, as you asked."
+    w.scripts["__compose__"] = "Hi there, is Friday still good for you, as you suggested?"
     w.scripts["__gmail_fail__"] = True
     await FollowupScheduler().run_once(now=utc(2026, 12, 4, 5, 30), tenant_id=w.tenant_id)
     occ = (await w.occurrences(th))[0]
@@ -713,6 +790,26 @@ async def test_shadow_mode_records_but_never_acts(w, monkeypatch):
     async with db_manager.session_factory() as db:
         row = (await db.execute(select(MessageAssessment).where(MessageAssessment.message_id == mid))).scalar_one()
         assert row.status == "valid" and row.not_applied_reason == "shadow_mode" and row.decision == "schedule"
+
+
+async def test_observe_mode_still_highlights_a_new_time_for_a_team_schedule(w, monkeypatch):
+    monkeypatch.setenv("FOLLOWUP_SHADOW_MODE", "true")
+    reset_flags_cache()
+    th = await w.thread("Observe")
+    await w.msg(th, "inbound", "Let's speak soon.", utc(2026, 12, 1, 6, 0))
+    async with api(w, "member") as cl:
+        version = (await cl.get(f"/followups/threads/{th}")).json()["version"]
+        r = await cl.post(f"/followups/threads/{th}/schedule",
+                          json={"version": version, "local_date": "2026-12-04", "local_time": "11:00"})
+        assert r.status_code == 200, r.text
+    mid = await w.msg(th, "inbound", "Actually make it Monday 11am.", utc(2026, 12, 2, 6, 0))
+    w.script(mid, R(**{**HOT_SCHEDULED, "timing": {**HOT_SCHEDULED["timing"], "phrase": "Monday 11am",
+                                                   "local_date": "2026-12-07"}}))
+    assert await w.assess(mid, th, utc(2026, 12, 2, 6, 1)) == "shadow"
+    s = await w.state(th)
+    assert s.suggested_due_at == utc(2026, 12, 7, 5, 30)                         # recorded for review
+    [occ] = await w.live(th)
+    assert occ.origin == "user" and occ.due_at == utc(2026, 12, 4, 5, 30)        # nothing applied
 
 
 async def test_historical_mail_never_triggers_a_launch_burst(w):

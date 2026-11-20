@@ -19,6 +19,9 @@ function statusHint(data: ReturnType<typeof useThreadFollowup>["data"]): { text:
   if (!data) return null;
   if (data.status === "suppressed") return { text: "Do not contact", color: "#991B1B", bg: "#FEE2E2" };
   if (data.needs_review) return { text: "Review", color: "#B91C1C", bg: "#FEE2E2" };
+  if (data.time_suggestion && new Date(data.time_suggestion.due_at).getTime() > Date.now()) {
+    return { text: "New time?", color: "#92400E", bg: "#FDE68A" };
+  }
   if (data.due.at) {
     const due = new Date(data.due.at);
     if (due.getTime() <= Date.now()) return { text: "Due now", color: "#B91C1C", bg: "#FEE2E2" };

@@ -50,6 +50,7 @@ interface BackendThread {
   has_followup?: boolean;
   followup_status?: string | null;
   followup_due_at?: string | null;
+  followup_time_suggested?: boolean;
   lead_temperature: string | null;
   status: string;
   ai_summary: BackendAISummary | null;
@@ -178,6 +179,7 @@ function _threadToConversation(t: BackendThread): Conversation {
     hasFollowup: Boolean(t.has_followup),
     followupStatus: t.followup_status ?? null,
     followupDueAt: t.followup_due_at ?? null,
+    followupTimeSuggested: Boolean(t.followup_time_suggested),
     unread: t.is_unread,
     createdAt: t.created_at,
     updatedAt: t.updated_at,

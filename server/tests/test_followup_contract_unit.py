@@ -161,3 +161,141 @@ def test_follow_up_text_must_be_grounded(body, problem):
     thread = "We need 40 units. Please send the final quote by Thursday."
     got = validate_grounded(body, thread)
     assert (got is None) if problem is None else (got == problem)
+
+
+# ---------------------------------------------------------------------------------------------
+# Customer follow-up text: human voice, closing, own-system-mail guard, time-suggestion verdicts
+# ---------------------------------------------------------------------------------------------
+
+from datetime import datetime, timedelta, timezone  # noqa: E402
+
+from app.services.followups import composer, engine, timing as tm  # noqa: E402
+
+
+@pytest.mark.parametrize("text", [
+    "Hi Kavya, I hope this email finds you well. Any update on the quote?",
+    "Hi Kavya, just following up on the quote.",
+    "Hi Kavya, just checking in about the workshop.",
+    "Hi Kavya, circling back on the proposal.",
+    "Hello, touching base about next steps.",
+    "Hi, please don't hesitate to contact us about the quote.",
+    "As an AI, I wanted to remind you about the quote.",
+    "Hi Kavya, this is a friendly reminder about the workshop booking.",
+    "Hi Kavya, a quick recap:\n- the quote\n- the delivery window",
+    "Hi Kavya, **the quote** is ready whenever you are.",
+])
+def test_voice_validator_rejects_automated_sounding_text(text):
+    assert composer.validate_voice(text) is not None
+
+
+@pytest.mark.parametrize("text", [
+    "Hi Kavya, did the workshop plan for December come together on your side? Happy to hold the afternoon slot if it still suits you.",
+    "Hola Marta, ¿pudiste revisar la propuesta con tu equipo? Si te viene bien, lo vemos el lunes.",
+    "Hi Arjun, were you able to get sign-off on the annual plan? If anything is still unclear I can walk your team through it.",
+])
+def test_voice_validator_accepts_natural_follow_ups(text):
+    assert composer.validate_voice(text) is None
+
+
+def test_tidy_and_first_name_and_quiet_label():
+    assert composer.tidy("Hi Kavya — quick one.\n\n\n\nThanks") == "Hi Kavya - quick one.\n\nThanks"
+    assert composer.first_name("kavya rao") == "Kavya"
+    assert composer.first_name("Rao, Kavya") == "Kavya"
+    assert composer.first_name("sales@client.example") is None
+    assert composer.first_name("123 Ltd") is None
+    assert not re.search(r"\d", " ".join(composer.quiet_label(d) for d in (0, 3, 7, 14, 30, 400)))
+
+
+async def test_composer_repairs_once_then_appends_team_closing(monkeypatch):
+    from app.services.reply_planner.closing import make_closing
+
+    drafts = iter(["Hi Kavya, just following up on the workshop.",
+                   "Hi Kavya, did the December workshop plan work out on your side?"])
+    seen = []
+
+    async def fake_call(payload):
+        seen.append(dict(payload))
+        return next(drafts)
+
+    class M:
+        def __init__(self, i, direction, body):
+            self.id, self.direction, self.body_text, self.from_name = i, direction, body, "Kavya Rao"
+            self.sent_at = datetime(2026, 12, 1, tzinfo=timezone.utc)
+
+    async def fake_history(db, t, th):
+        return [M("m1", "inbound", "We plan the workshop in December."), M("m2", "outbound", "Great, noted.")]
+
+    class DB:
+        async def get(self, *a):
+            return None
+
+    async def no_memory(t, m):
+        return {"conversation_memory": "Summary so far: workshop in December.", "team_style": None}
+
+    async def closing(t, m):
+        return make_closing("Best regards,", "Acme Training")
+
+    monkeypatch.setattr(composer, "call_composer", fake_call)
+    monkeypatch.setattr(composer, "_history", fake_history)
+    monkeypatch.setattr(composer, "_memory", no_memory)
+    monkeypatch.setattr(composer, "_closing", closing)
+    out = await composer.compose(DB(), "t", "th")
+    assert out.ok, out.reason
+    assert out.text.startswith("Hi Kavya, did the December workshop plan")
+    assert out.text.rstrip().endswith("Best regards,\nAcme Training")
+    assert len(seen) == 2 and "previous_draft_rejected_because" in seen[1]
+    assert seen[0]["customer_first_name"] == "Kavya" and seen[0]["conversation_memory"]
+
+
+async def test_composer_holds_when_repair_also_fails(monkeypatch):
+    async def fake_call(payload):
+        return "Hi, just checking in."
+
+    class M:
+        id, direction, body_text, from_name, sent_at = "m1", "inbound", "Hello", "X", None
+
+    async def fake_history(db, t, th):
+        return [M()]
+
+    class DB:
+        async def get(self, *a):
+            return None
+
+    async def no_memory(t, m):
+        return {"conversation_memory": None, "team_style": None}
+
+    monkeypatch.setattr(composer, "call_composer", fake_call)
+    monkeypatch.setattr(composer, "_history", fake_history)
+    monkeypatch.setattr(composer, "_memory", no_memory)
+    out = await composer.compose(DB(), "t", "th")
+    assert not out.ok and out.reason.startswith("templated_phrase")
+
+
+def test_own_platform_mail_is_never_a_customer_conversation(monkeypatch):
+    from app.services import gmail_sync
+
+    class S:
+        email_from_address = "Hello@Platform.example"
+
+    monkeypatch.setattr("app.core.config.get_transactional_email_settings", lambda: S())
+    assert gmail_sync._is_platform_sender('"ProxiPilot" <hello@platform.example>')
+    assert not gmail_sync._is_platform_sender("buyer@client.example")
+    S.email_from_address = ""
+    assert not gmail_sync._is_platform_sender("hello@platform.example")
+
+
+def _due(at, source):
+    r = tm.DueResolution()
+    r.due_at, r.source = at, source
+    return r
+
+
+def test_time_suggestion_verdicts():
+    locked = datetime(2026, 12, 15, 9, 30, tzinfo=timezone.utc)
+    res = contracts.validate(base(), **KW)
+    assert engine.time_suggestion(_due(locked + timedelta(minutes=10), "customer_date"), res, locked) == "agree"
+    assert engine.time_suggestion(_due(locked + timedelta(days=24), "customer_date"), res, locked) == "suggest"
+    assert engine.time_suggestion(_due(locked + timedelta(days=3), "ai_window"), res, locked) == "suggest"
+    assert engine.time_suggestion(_due(locked + timedelta(days=3), "cadence"), res, locked) is None
+    assert engine.time_suggestion(_due(None, "none"), res, locked) is None
+    assert engine.time_suggestion(_due(locked, "customer_date"), res, None) is None

@@ -96,6 +96,9 @@ async def evaluate(db: AsyncSession, occ: FollowupOccurrence, now: Optional[date
         return GateResult(False, f"decision_does_not_support_contact:{state.status}/{state.decision}")
     if state.needs_review:
         return GateResult(False, "needs_review")
+    if state.suggested_due_at is not None:
+        # A different time is waiting for a person: never email the customer at the old time meanwhile.
+        return GateResult(False, "new_time_suggested_pending_review")
     control = await _fresh(db, ThreadFollowupControl, occ.thread_id)
     if control is None or not control.customer_email_enabled or not control.customer_recipient_email:
         return GateResult(False, "customer_email_not_permitted")

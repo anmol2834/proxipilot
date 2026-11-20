@@ -6,6 +6,8 @@
  *   POST   /followups/threads/{id}/schedule
  *   DELETE /followups/threads/{id}/schedule?version=
  *   POST   /followups/threads/{id}/apply-suggestion?version=
+ *   POST   /followups/threads/{id}/time-suggestion/accept?version=
+ *   POST   /followups/threads/{id}/time-suggestion/dismiss?version=
  *   DELETE /followups/suppressions/{id}
  *   GET    /followups/policy        PATCH /followups/policy
  */
@@ -38,6 +40,22 @@ export const followupService = {
   async applySuggestion(threadId: string, version: number): Promise<ThreadFollowup> {
     return (
       await apiClient.post<ThreadFollowup>(`/followups/threads/${threadId}/apply-suggestion`, undefined, {
+        params: { version },
+      })
+    ).data;
+  },
+
+  async acceptTimeSuggestion(threadId: string, version: number): Promise<ThreadFollowup> {
+    return (
+      await apiClient.post<ThreadFollowup>(`/followups/threads/${threadId}/time-suggestion/accept`, undefined, {
+        params: { version },
+      })
+    ).data;
+  },
+
+  async dismissTimeSuggestion(threadId: string, version: number): Promise<ThreadFollowup> {
+    return (
+      await apiClient.post<ThreadFollowup>(`/followups/threads/${threadId}/time-suggestion/dismiss`, undefined, {
         params: { version },
       })
     ).data;

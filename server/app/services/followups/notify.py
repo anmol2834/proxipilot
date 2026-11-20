@@ -99,7 +99,13 @@ def render(kind: str, *, occ: FollowupOccurrence, thread: EmailThread, state: Op
         subject = f"Follow-up due now: {subj}"
         lead = f"The follow-up with {who} is due now ({due_local})."
     lines = [lead, f"Next step: {action}", customer_line(occ) if kind == "due" else
-             "This is an internal reminder; nothing has been sent to the customer.", f"Open the conversation: {link}"]
+             "This is an internal reminder; nothing has been sent to the customer."]
+    if state is not None and state.suggested_due_at is not None:
+        zone = tm.resolve_zone(state.suggested_due_tz) or cal.zone
+        quoted = f' ("{state.suggested_due_phrase}")' if state.suggested_due_phrase else ""
+        lines.append(f"A different time was suggested: {tm.fmt_local(state.suggested_due_at, zone)}{quoted}. "
+                     "Review it in ProxiPilot to accept or keep the current time.")
+    lines.append(f"Open the conversation: {link}")
     text = "\n\n".join(lines)
     html_body = "".join(f"<p>{html.escape(line)}</p>" for line in lines[:-1]) + \
         f'<p><a href="{html.escape(link)}">Open the conversation</a></p>'

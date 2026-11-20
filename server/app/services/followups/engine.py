@@ -301,8 +301,71 @@ async def _ensure_suppression(db: AsyncSession, *, tenant_id: str, thread_id: st
     return sup
 
 
+# A different time is suggested only when it is meaningfully different and backed by real timing
+# evidence (a customer's date, a team deadline, a contextual window or an explicit change). The
+# workspace cadence never challenges a date that is already set.
+SUGGESTION_MIN_DELTA = timedelta(minutes=30)
+_SUGGESTING_SOURCES = ("customer_date", "team_deadline", "ai_window")
+
+
+def time_suggestion(due_res: "tm.DueResolution", result: Assessment, locked_due: Optional[datetime]):
+    """'agree' when AI #2 points at the locked time, 'suggest' for a different evidenced time, else None."""
+    if locked_due is None or due_res.due_at is None:
+        return None
+    if abs(due_res.due_at - locked_due) < SUGGESTION_MIN_DELTA:
+        return "agree"
+    # Only an evidenced time (the customer's date, a team commitment, an AI window quoted from the
+    # conversation) may challenge a set date; the workspace cadence never does.
+    if due_res.source in _SUGGESTING_SOURCES:
+        return "suggest"
+    return None
+
+
+def set_time_suggestion(state: ThreadFollowupState, due_res: "tm.DueResolution", now: datetime) -> None:
+    state.suggested_due_at, state.suggested_due_tz = due_res.due_at, due_res.zone_name
+    state.suggested_due_phrase = (due_res.phrase or None)
+    state.suggested_due_source = due_res.source
+    state.suggested_at = now
+
+
+def clear_time_suggestion(state: ThreadFollowupState) -> None:
+    state.suggested_due_at = state.suggested_due_tz = state.suggested_due_phrase = None
+    state.suggested_due_source = state.suggested_at = None
+
+
+async def note_time_suggestion(db: AsyncSession, *, tenant_id: str, thread_id: str, message_id: str,
+                               result: Assessment, now: Optional[datetime] = None) -> Optional[str]:
+    """Observe-only mode: nothing is applied, but a different time for an already-set follow-up is
+    still recorded so the team sees it highlighted. Caller commits."""
+    now = now or datetime.now(timezone.utc)
+    state = await lock_state(db, tenant_id, thread_id)
+    msg = await db.get(EmailMessage, message_id)
+    if msg is None or msg.tenant_id != tenant_id:
+        return None
+    control = await db.get(ThreadFollowupControl, thread_id)
+    manual_due = _utc(control.manual_due_at) if control is not None and control.manual_due_at else None
+    if manual_due and manual_due > now:
+        locked = manual_due
+    else:
+        keep = next((o for o in await live_occurrences(db, thread_id) if _utc(o.due_at) > now), None)
+        locked = _utc(keep.due_at) if keep is not None else None
+    if locked is None:
+        return None
+    policy = await load_policy(db, tenant_id)
+    cal = await load_calendar(db, tenant_id, policy)
+    due_res = tm.resolve_due(result.timing, cal=cal, anchor=_utc(msg.sent_at), now=now, decision=result.decision,
+                             temperature=state.effective_temperature or result.temperature,
+                             cadence_days=cadence_days(policy))
+    verdict = time_suggestion(due_res, result, locked)
+    if verdict == "agree":
+        clear_time_suggestion(state)
+    elif verdict == "suggest":
+        set_time_suggestion(state, due_res, now)
+    return verdict
+
+
 async def apply_assessment(db: AsyncSession, *, tenant_id: str, row: MessageAssessment, result: Assessment,
-                           now: Optional[datetime] = None) -> ApplyOutcome:
+                           now: Optional[datetime] = None, suggest: bool = True) -> ApplyOutcome:
     """Apply one validated decision. Caller commits. Never calls a model or provider."""
     now = now or datetime.now(timezone.utc)
     state = await lock_state(db, tenant_id, row.thread_id)
@@ -392,21 +455,31 @@ async def apply_assessment(db: AsyncSession, *, tenant_id: str, row: MessageAsse
             if status == "stopped" and o.origin == "user":
                 continue                                       # clearly identified manual tasks survive
             _retire(o, "cancelled", f"state_{status}")
+        clear_time_suggestion(state)
     else:
+        # A follow-up time that is already set (by a person, or earlier) is LOCKED: AI #2 may only
+        # suggest a different time, which waits for a person (highlighted in the inbox).
         if manual_due and manual_due > now:
+            keep = next((o for o in live if o.origin == "user" and _utc(o.due_at) == manual_due), None)
+            locked_due: Optional[datetime] = manual_due
             origin, due_at, zone_name, external_ok = "user", manual_due, control.manual_due_tz or cal.zone.name, True
-        elif due_res.due_at is not None:
-            origin = {"customer_date": "customer_date", "cadence": "cadence"}.get(due_res.source, "ai")
-            due_at, zone_name, external_ok = due_res.due_at, due_res.zone_name, due_res.external_ok
-        elif status in PURSUIT_STATUSES and due_res.review_reason:
-            status = "needs_review"           # pursuit warranted but the date is unusable: hold for the team
-        # A neutral message never blindly resets a still-valid customer date or user schedule.
-        keep = None
-        if not result.constraints.changed_date and origin in (None, "ai", "cadence"):
-            keep = next((o for o in live if o.origin in ("customer_date", "user") and _utc(o.due_at) > now), None)
+        else:
+            keep = next((o for o in live if _utc(o.due_at) > now), None)
+            locked_due = _utc(keep.due_at) if keep is not None else None
+            if keep is None and due_res.due_at is not None:
+                origin = {"customer_date": "customer_date", "cadence": "cadence"}.get(due_res.source, "ai")
+                due_at, zone_name, external_ok = due_res.due_at, due_res.zone_name, due_res.external_ok
+            elif keep is None and status in PURSUIT_STATUSES and due_res.review_reason:
+                status = "needs_review"       # pursuit warranted but the date is unusable: hold for the team
         if keep is not None:
             plan_occ = keep
             origin, due_at, zone_name = keep.origin, _utc(keep.due_at), keep.tz
+            external_ok = keep.origin == "user" or keep.customer_status != "held"
+        verdict = time_suggestion(due_res, result, locked_due)
+        if verdict == "agree":
+            clear_time_suggestion(state)
+        elif verdict == "suggest" and suggest:           # only NEW evidence raises a suggestion
+            set_time_suggestion(state, due_res, now)
         # Customer "not before" restriction: contact moves after it; an internal task may stay earlier.
         if restr.until and due_at and due_at < restr.until and status in PURSUIT_STATUSES:
             if origin == "user":
@@ -448,6 +521,15 @@ async def apply_assessment(db: AsyncSession, *, tenant_id: str, row: MessageAsse
                 if notice_at is None:
                     plan_occ.advance_status = "skipped"
 
+    if plan_occ is not None and plan_occ.status == "scheduled" and status in PURSUIT_STATUSES \
+            and plan_occ.customer_status in ("not_applicable", "held", "pending"):
+        # Keep the (locked) plan's customer-email state in step with the current permission.
+        allowed = bool(control is not None and control.customer_email_enabled and external_ok
+                       and not restr.blocks_email and not other_blocked)
+        plan_occ.customer_status = "pending" if allowed else ("held" if control is not None and
+                                                              control.customer_email_enabled else "not_applicable")
+        plan_occ.hold_reason = None if allowed else (restr.reason or plan_occ.hold_reason)
+        plan_occ.recipient_email = primary if allowed else plan_occ.recipient_email
     if plan_occ is not None and plan_occ.customer_status == "pending" and (restr.blocks_email or other_blocked):
         plan_occ.customer_status, plan_occ.hold_reason = "held", restr.reason or "other_participant_restricted"
     if other_blocked and status in PURSUIT_STATUSES:
@@ -491,7 +573,9 @@ async def reapply_latest(db: AsyncSession, *, tenant_id: str, thread_id: str,
     row = await db.get(MessageAssessment, state.last_assessment_id)
     if row is None or row.status != "valid" or not row.result:
         return None
-    return await apply_assessment(db, tenant_id=tenant_id, row=row, result=from_json(row.result), now=now)
+    # Re-deriving after a person's own change never re-raises a suggestion they already handled.
+    return await apply_assessment(db, tenant_id=tenant_id, row=row, result=from_json(row.result), now=now,
+                                  suggest=False)
 
 
 async def hold_customer_sends(db: AsyncSession, thread_id: str, reason: str) -> int:

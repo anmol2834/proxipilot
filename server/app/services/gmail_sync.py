@@ -24,6 +24,7 @@ import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
+import re
 import uuid
 from typing import Any, Dict, List, Optional, Set
 
@@ -241,6 +242,20 @@ async def _get_and_clear_pending_watermark(account_id: str) -> Optional[int]:
 # =============================================================================
 
 # Metadata headers needed for Phase 1 filter
+def _is_platform_sender(from_value: str) -> bool:
+    """True when the message comes from ProxiPilot's own transactional sender address."""
+    try:
+        from app.core.config import get_transactional_email_settings
+
+        platform = (get_transactional_email_settings().email_from_address or "").strip().lower()
+    except Exception:  # noqa: BLE001 - never block ingestion on configuration problems
+        return False
+    if not platform or "@" not in platform:
+        return False
+    match = re.search(r"[\w.+-]+@[\w.-]+", from_value or "")
+    return bool(match) and match.group(0).lower() == platform
+
+
 def _own_domain(account: Any) -> str:
     email = (getattr(account, "email_address", "") or "").lower()
     return email.split("@", 1)[1] if "@" in email else ""
@@ -1012,6 +1027,14 @@ class GmailSyncEngine:
         account_email_lower = (account.email_address or "").lower()
         if "SENT" in label_ids or (account_email_lower and account_email_lower in sender_lower):
             direction = MessageDirection.OUTBOUND.value
+
+        # ---- ProxiPilot's own system mail is never a customer conversation ----
+        # Verification codes, password resets and follow-up reminders are sent from the platform's
+        # transactional address; when they land in the connected mailbox they must not be stored,
+        # assessed or answered (that would create fake "customer" threads and reply loops).
+        if direction == MessageDirection.INBOUND.value and _is_platform_sender(sender_lower):
+            logger.info("Message ignored: ProxiPilot system mail", message_id=external_message_id)
+            return False
 
         # ---- Pre-Persistence Classification Gate ----
         if direction == MessageDirection.OUTBOUND.value:

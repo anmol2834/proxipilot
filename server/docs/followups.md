@@ -47,6 +47,17 @@ migration `e3f4a5b6c7d8_followup_intelligence.py`. UI: `components/inbox/FollowU
   message never resets a still-valid customer date or user schedule. A customer "not before" date
   moves contact after it; a manual time earlier than it is surfaced as a conflict and external
   contact is held.
+* **A set date is locked.** The AI sets the first date on its own (customer date, team
+  commitment, AI window or cadence). Once a future date exists — set by the AI or by a person —
+  a later AI reading never moves it. If the AI finds a different *evidenced* time (customer date,
+  team deadline or AI window, ≥ 30 min away; cadence never challenges a date) it is stored as a
+  **time suggestion** (`thread_followup_states.suggested_due_*`), highlighted in the inbox list
+  ("New time suggested"), the Follow-up button ("New time?") and the panel, and mentioned in team
+  notices. A person accepts it (`POST …/time-suggestion/accept` → becomes the team's schedule) or
+  keeps the current time (`…/dismiss`; re-applying the same assessment never raises it again).
+  While a suggestion is open, automatic customer email holds (`new_time_suggested_pending_review`).
+  Observe-only workspaces record suggestions too. An AI reading that agrees with the set time clears
+  any open suggestion.
 * **Time:** due and team-notice are separate instants; DST gaps shift forward, folds take the first
   occurrence; unknown/ambiguous zones and numeric dates such as 03/04 hold exact external contact and
   go to review with the alternatives; customer-promised weekend dates are never silently moved.
@@ -59,8 +70,17 @@ migration `e3f4a5b6c7d8_followup_intelligence.py`. UI: `components/inbox/FollowU
   still has `inbox.send`, recipient is a verified participant **and** the exact address the threaded
   reply goes to (never reply-all, never inferred), no suppression (any participant), workspace
   active, Gmail mailbox healthy with automation enabled, no newer message, attempts left, min
-  spacing, send window. Composed text must be grounded (every number / email / link already in the
-  thread). One idempotency key per occurrence across retries.
+  spacing, send window. One idempotency key per occurrence across retries.
+* **Customer follow-up text** (`composer.py`): written from the conversation memory (summary, open
+  requirements, already-answered points), the last 10 *business* messages, the agreed next step and
+  the team's learned writing style, in the customer's language. Deterministic checks: grounded
+  (every number / email / link already in the thread; no placeholders or markup) and human voice
+  (no stock filler such as "hope this email finds you well" / "just following up" / "circling
+  back", no AI or automation mentions, no lists, markdown or emoji). One repair attempt with the
+  exact problem; a second failure holds the send for review. The model never writes a sign-off: the
+  team's own sign-off and company name are appended (`reply_planner.closing.apply_closing`).
+* **Own system mail is never a conversation.** Inbound mail from the platform's transactional sender
+  (verification codes, password resets, follow-up reminders) is skipped at ingestion.
 * **No launch burst:** only mail ≤ 48 h old triggers; the relay replays only ≤ 6 h old pending rows;
   due notices > 7 days late are skipped; cadence never lands in the past.
 
@@ -71,8 +91,9 @@ Tenant zone Asia/Kolkata, Mon–Fri, notice 1 business day at 10:00, customer em
 | Step | Source | Result |
 | --- | --- | --- |
 | T1 Tue 1 Dec 06:00Z | `msg_fu_83585edb39ce4a16883c` “We intend to book the workshop on 15 December 2026 … 3 PM IST.” | fence → revision 1; `asm_d2f1263873d4499490e09b23e2dcf9ab` hot / schedule / applied → revision 2; occurrence `fuo_193e08e5…` origin `customer_date`, due **2026-12-15 09:30Z** (15:00 IST), notice **2026-12-14 04:30Z** (Mon 10:00 IST), customer `not_applicable` |
-| T2 Thu 3 Dec 06:00Z | `msg_fu_51f0986c96a942ab9936` “Jan 8 at the same time instead.” | fence → revision 3; `asm_9faae87c…` applied (changed_date) → revision 4; `fuo_193e08e5…` **superseded**; new `fuo_5e038f4e…` due **2027-01-08 09:30Z**, notice **2027-01-07 04:30Z** |
-| T3 Mon 14 Dec 04:30Z | scheduler | 0 notices (December work superseded) |
+| T2 Thu 3 Dec 06:00Z | “Jan 8 at the same time instead.” | fence → revision 3; assessment applied (changed_date) → revision 4; December occurrence **kept** (date locked); time suggestion **2027-01-08 09:30Z** stored; inbox shows “New time suggested” |
+| T3 Mon 14 Dec 04:30Z | scheduler | December advance notices, each stating “A different time was suggested: Fri 8 Jan 2027, 15:00 … Review it in ProxiPilot” |
+| T3b | member clicks **Accept new time** | December occurrence **superseded**; new occurrence due **2027-01-08 09:30Z**, notice **2027-01-07 04:30Z**; suggestion cleared |
 | T4 Thu 7 Jan 04:30Z | scheduler | 4 individual advance notices (owner, admin, member + generic one for the no-inbox role); removed / invited / suspended excluded |
 | T5 Fri 8 Jan 09:30Z | scheduler | 4 due notices stating the customer has **not** been emailed; 0 Gmail calls; occurrence `done`; `attempts_used` = 1 |
 
@@ -111,7 +132,7 @@ held/eligible occurrences.
 
 Startup: embedded in the API process (`app/main.py`: FollowupWorker, scheduler, outbox relay).
 Standalone: `python -m app.workers.cli --worker followup|followup_scheduler|outbox_relay`
-(compose profile `standalone-followups`). Migration: `alembic upgrade head` (`e3f4a5b6c7d8`, additive).
+(compose profile `standalone-followups`). Migration: `alembic upgrade head` (`e3f4a5b6c7d8` … `1b2c3d4e5f6a`, all additive).
 
 Rollback without schema change: set the flags above (shadow on / reminders off / customer send off).
 Schema rollback: `alembic downgrade d2e3f4a5b6c7` drops the seven follow-up tables (follow-up data

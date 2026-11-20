@@ -169,6 +169,9 @@ async def process_assessment(*, tenant_id: str, thread_id: str, message_id: str,
                     st = await db.get(ThreadFollowupState, thread_id)
                     if st is not None and st.last_message_id == message_id:
                         st.stale, st.stale_reason = False, None
+                        # A set follow-up time stays locked, but a different evidenced time is surfaced.
+                        await engine.note_time_suggestion(db, tenant_id=tenant_id, thread_id=thread_id,
+                                                          message_id=message_id, result=result, now=now)
                     await _keep_latest_only(db, row, True)
                     await db.commit()
                     return "shadow"
