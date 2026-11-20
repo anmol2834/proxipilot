@@ -14,14 +14,65 @@ tenant id, so they no longer depend on data that may have been deleted from the 
 
 from __future__ import annotations
 
+import asyncio
+import sys
 import uuid
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import AsyncIterator, Dict, List
+from urllib.parse import urlsplit
 
 import httpx
 import pytest
 from sqlalchemy import text
+
+# =============================================================================================
+# Production-database guard — tests only ever talk to a LOCAL database.
+# =============================================================================================
+# The app resolves DATABASE_URL from the environment first and then from server/.env, and the
+# developer .env points at the production database. A test run without an explicit local
+# DATABASE_URL therefore used to create (and not always fully remove) synthetic tenants in
+# production. Resolve the URL exactly the way the app does and, unless the host is local, make
+# every database connection fail with a clear error. Pure unit tests are unaffected.
+LOCAL_DATABASE_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def database_host(url: str) -> str:
+    return (urlsplit(url.replace("+asyncpg", "")).hostname or "").lower()
+
+
+def _effective_database_url() -> str:
+    from app.core.config import DatabaseSettings
+
+    return DatabaseSettings().database_url
+
+
+TEST_DATABASE_HOST = database_host(_effective_database_url())
+REMOTE_DATABASE_BLOCKED = TEST_DATABASE_HOST not in LOCAL_DATABASE_HOSTS
+_BLOCKED_MESSAGE = (
+    f"Tests may only use a LOCAL database, but DATABASE_URL resolves to host '{TEST_DATABASE_HOST}' "
+    "(server/.env points at production). Start a throwaway Postgres (e.g. docker run -d --name pp-test-pg "
+    "-e POSTGRES_PASSWORD=pptest -e POSTGRES_DB=pptest -p 55432:5432 postgres:16-alpine), migrate it, and "
+    "run with DATABASE_URL=postgresql://postgres:pptest@localhost:55432/pptest?sslmode=disable"
+)
+
+if REMOTE_DATABASE_BLOCKED:
+    from app.core import database as _database
+
+    def _refuse_remote_database(self) -> None:  # noqa: ANN001 — replaces DatabaseManager.initialize
+        raise RuntimeError(_BLOCKED_MESSAGE)
+
+    # Every engine/session in the app is created through DatabaseManager.initialize (lazily), so
+    # blocking it blocks all database access for this test run - including fixtures and cleanup.
+    _database.DatabaseManager.initialize = _refuse_remote_database  # type: ignore[method-assign]
+    if _database.db_manager._engine is not None:  # pragma: no cover - only if something connected early
+        raise RuntimeError(_BLOCKED_MESSAGE)
+
+
+def pytest_report_header(config) -> str:  # noqa: ANN001
+    if REMOTE_DATABASE_BLOCKED:
+        return f"database: BLOCKED remote host '{TEST_DATABASE_HOST}' — database tests will fail; unit tests run"
+    return f"database: local ({TEST_DATABASE_HOST})"
 
 FIXTURE_XLSX = Path(__file__).parent / "fixtures" / "home_appliance_services.xlsx"
 CATALOGUE_SIZE = 24
@@ -62,8 +113,27 @@ async def _qdrant_delete_tenant(tenant_id: str) -> None:
         pass
 
 
-async def purge_tenant(tenant_id: str) -> None:
-    """Remove every row and vector a test tenant created. Safe to call repeatedly."""
+# Modules that keep fire-and-forget work (memory updates after a send, …) in a module-level
+# ``_BACKGROUND`` task set. That work can write rows for a test tenant AFTER the test finished.
+_BACKGROUND_TASK_MODULES = (
+    "app.services.thread_memory", "app.services.commitment_memory", "app.services.feedback_memory",
+)
+
+
+async def drain_background_tasks(timeout: float = 30.0) -> None:
+    """Wait for the app's tracked fire-and-forget tasks so they cannot write after cleanup."""
+    current = asyncio.current_task()
+    pending = set()
+    for name in _BACKGROUND_TASK_MODULES:
+        mod = sys.modules.get(name)
+        tasks = getattr(mod, "_BACKGROUND", None) if mod else None
+        if tasks:
+            pending.update(t for t in tasks if not t.done() and t is not current)
+    if pending:
+        await asyncio.wait(pending, timeout=timeout)
+
+
+async def _delete_tenant_rows(tenant_id: str) -> None:
     from app.core.database import db_manager
 
     async with db_manager.session_factory() as db:
@@ -73,6 +143,17 @@ async def purge_tenant(tenant_id: str) -> None:
             if tbl in existing:
                 await db.execute(text(f"DELETE FROM {tbl} WHERE tenant_id = :t"), {"t": tenant_id})
         await db.commit()
+
+
+async def purge_tenant(tenant_id: str) -> None:
+    """Remove every row and vector a test tenant created. Safe to call repeatedly."""
+    from app.core.database import db_manager
+
+    await drain_background_tasks()
+    await _delete_tenant_rows(tenant_id)
+    # Work scheduled by the test that was still starting up can land after the first pass.
+    await drain_background_tasks()
+    await _delete_tenant_rows(tenant_id)
     try:
         await _qdrant_delete_tenant(tenant_id)
     except Exception:  # noqa: BLE001 — vector cleanup is best effort if Qdrant is down
@@ -197,9 +278,9 @@ async def seeded_conversation(seeded_tenant: str) -> Dict[str, str]:
             {"a": ids["account_id"], "t": seeded_tenant, "e": f"support-{tag}@itest.example"})
         await db.execute(text("""
             INSERT INTO email_threads (id, tenant_id, integration_account_id, external_thread_id, subject,
-                status, message_count, unread_count, is_read, is_starred, context_revision,
+                status, message_count, unread_count, is_read, context_revision,
                 first_message_at, latest_message_at, created_at, updated_at)
-            VALUES (:th, :t, :a, :ext, 'Home appliance services', 'responded', 2, 1, false, false, 1,
+            VALUES (:th, :t, :a, :ext, 'Home appliance services', 'responded', 2, 1, false, 1,
                     :first, :latest, now(), now())"""),
             {"th": ids["thread_id"], "t": seeded_tenant, "a": ids["account_id"], "ext": f"ext_thr_{tag}",
              "first": now - timedelta(hours=2), "latest": now})

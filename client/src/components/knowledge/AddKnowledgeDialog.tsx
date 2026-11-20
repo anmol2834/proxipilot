@@ -8,10 +8,10 @@ import Typography from "@mui/material/Typography";
 import Button from "@mui/material/Button";
 import TextField from "@mui/material/TextField";
 import IconButton from "@mui/material/IconButton";
-import Paper from "@mui/material/Paper";
 import LinearProgress from "@mui/material/LinearProgress";
 import { isUploadBusy, useKnowledgeStore } from "@/stores/knowledge.store";
 import { ConcreteKnowledgeCategory, KnowledgeItemType } from "@/types/knowledge.types";
+import { AddKnowledgeCategoryPicker } from "./AddKnowledgeCategoryPicker";
 
 interface CategoryOption {
   id: ConcreteKnowledgeCategory;
@@ -28,7 +28,7 @@ const CATEGORY_OPTIONS: CategoryOption[] = [
     id: "products-services",
     name: "Products & Services",
     type: "Service",
-    desc: "Add your products or services, features, specifications, pricing, and availability.",
+    desc: "Products and services with their specs, pricing and availability.",
     iconBg: "#EFF6FF",
     iconColor: "#2563EB",
     icon: (
@@ -41,7 +41,7 @@ const CATEGORY_OPTIONS: CategoryOption[] = [
     id: "company-info",
     name: "Company Info",
     type: "Information",
-    desc: "Add details about your organization, plus its contact details, address and business hours.",
+    desc: "Who you are, plus your contact details, address and business hours.",
     iconBg: "#EEF2FF",
     iconColor: "#3B82F6",
     icon: (
@@ -61,7 +61,7 @@ const CATEGORY_OPTIONS: CategoryOption[] = [
     id: "policies",
     name: "Policies",
     type: "Policy",
-    desc: "Add refund, cancellation, warranty, and other business policies.",
+    desc: "Refund, return, cancellation, warranty and other business rules.",
     iconBg: "#FEF2F2",
     iconColor: "#EF4444",
     icon: (
@@ -75,7 +75,7 @@ const CATEGORY_OPTIONS: CategoryOption[] = [
     id: "support-faqs",
     name: "Support & FAQs",
     type: "FAQ",
-    desc: "Add common questions and their answers.",
+    desc: "Common customer questions with your approved answers.",
     iconBg: "#F0F9FF",
     iconColor: "#0284C7",
     icon: (
@@ -90,7 +90,7 @@ const CATEGORY_OPTIONS: CategoryOption[] = [
     id: "offers-promotions",
     name: "Offers & Promotions",
     type: "Offer",
-    desc: "Add current offers, discounts, and campaigns.",
+    desc: "Current discounts, coupons and campaigns.",
     iconBg: "#FFFBEB",
     iconColor: "#F59E0B",
     icon: (
@@ -107,7 +107,7 @@ const CATEGORY_OPTIONS: CategoryOption[] = [
     id: "processes-timelines",
     name: "Processes & Timelines",
     type: "Process",
-    desc: "Add how things work and how long they take — e.g. order confirmation after a PO, dispatch and delivery lead times.",
+    desc: "How things work and how long they take — PO confirmation, dispatch and delivery times.",
     iconBg: "#ECFDF5",
     iconColor: "#059669",
     icon: (
@@ -120,6 +120,40 @@ const CATEGORY_OPTIONS: CategoryOption[] = [
     ),
   },
 ];
+
+/** Import tips that fit what each category's spreadsheet actually contains. */
+const IMPORT_TIPS: Record<ConcreteKnowledgeCategory, { title: string; body: string }[]> = {
+  "products-services": [
+    { title: "Use clear column headers", body: "e.g. Name, SKU, Description, Price, Currency, Availability." },
+    { title: "One product or service per row", body: "Variants (sizes, models) can each have their own row." },
+    { title: "Include the details customers ask about", body: "Specifications, pricing, warranty and stock where you have them." },
+  ],
+  "company-info": [
+    { title: "Use clear column headers", body: "e.g. Company name, Website, Email, Phone, Address, Business hours." },
+    { title: "One row per company or branch", body: "Add a row for each office or branch with its own contact details." },
+    { title: "Include how customers reach you", body: "Support and sales emails, phone numbers, address and working hours." },
+  ],
+  policies: [
+    { title: "Use clear column headers", body: "e.g. Policy name, Type, Details, Region, Effective from." },
+    { title: "One policy per row", body: "Keep refund, return, cancellation and warranty as separate rows." },
+    { title: "Write the rule exactly as you apply it", body: "Time limits, conditions and exceptions, in your own words." },
+  ],
+  "support-faqs": [
+    { title: "Use clear column headers", body: "e.g. Question, Answer, Topic, Related product." },
+    { title: "One question per row", body: "Phrase the question the way customers usually ask it." },
+    { title: "Give the approved answer", body: "Complete, accurate answers your team is happy to send." },
+  ],
+  "offers-promotions": [
+    { title: "Use clear column headers", body: "e.g. Offer name, Discount, Coupon code, Valid from, Valid until." },
+    { title: "One offer per row", body: "Separate rows for different products, codes or dates." },
+    { title: "Include the terms", body: "Eligible products, minimum order and any exclusions." },
+  ],
+  "processes-timelines": [
+    { title: "Use clear column headers", body: "e.g. Process, Starts when, Timeline, Steps, Conditions." },
+    { title: "One process per row", body: "e.g. \u201cPO confirmation\u201d, \u201cDispatch after payment\u201d, \u201cRefund processing\u201d." },
+    { title: "State the timeline you commit to", body: "e.g. \u201cWithin 24 working hours\u201d, plus exceptions like bulk orders." },
+  ],
+};
 
 /** Format bytes → "1.4 MB" / "340 KB" */
 function formatBytes(bytes: number): string {
@@ -147,7 +181,7 @@ function AddKnowledgeModalContent({
       : null;
   const startCategory = initialCategory || resumedCategory;
 
-  // Mode: "category-select" (9 cards view) vs "file-upload" (3-step import view)
+  // Mode: "category-select" (category picker) vs "file-upload" (import view)
   const [activeMode, setActiveMode] = useState<"category-select" | "file-upload">(
     startCategory ? "file-upload" : "category-select"
   );
@@ -394,422 +428,11 @@ function AddKnowledgeModalContent({
       {/* VIEW 1: "What would you like to add?" (COMPACT CATEGORY SELECTION)         */}
       {/* ========================================================================= */}
       {activeMode === "category-select" && (
-        <>
-          {/* Top Header */}
-          <Box
-            sx={{
-              p: { xs: 2, md: "24px 32px 14px 32px" },
-              display: "flex",
-              alignItems: "flex-start",
-              justifyContent: "space-between",
-              flexShrink: 0,
-            }}
-          >
-            <Box>
-              <Typography
-                sx={{
-                  color: "#3B82F6",
-                  fontSize: "0.75rem",
-                  fontWeight: 800,
-                  letterSpacing: "0.08em",
-                  textTransform: "uppercase",
-                  mb: 0.5,
-                }}
-              >
-                ADD KNOWLEDGE
-              </Typography>
-              <Typography
-                sx={{
-                  color: "#0F172A",
-                  fontSize: { xs: "1.35rem", md: "1.6rem" },
-                  fontWeight: 800,
-                  letterSpacing: "-0.02em",
-                  lineHeight: 1.2,
-                }}
-              >
-                What would you like to add?
-              </Typography>
-              <Typography sx={{ color: "#64748B", fontSize: "0.85rem", mt: 0.5, maxWidth: "620px" }}>
-                Choose a category to add the right type of information. This helps ProxiPilot understand your business better.
-              </Typography>
-            </Box>
-
-            {/* Close Button */}
-            <IconButton
-              onClick={onClose}
-              size="small"
-              aria-label="Close dialog"
-              sx={{
-                color: "#94A3B8",
-                p: 1,
-                borderRadius: "50%",
-                transition: "all 150ms ease",
-                "&:hover": {
-                  backgroundColor: "#F1F5F9",
-                  color: "#334155",
-                },
-              }}
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="18" y1="6" x2="6" y2="18" />
-                <line x1="6" y1="6" x2="18" y2="18" />
-              </svg>
-            </IconButton>
-          </Box>
-
-          {/* Body: 3x3 Cards Grid (Title only, no description) + Right Promotional Card */}
-          <DialogContent
-            sx={{
-              px: { xs: 2.5, md: 4 },
-              py: { xs: 1, md: 1.5 },
-              flex: "1 1 auto",
-              minHeight: 0,
-              overflowY: "auto",
-            }}
-          >
-            <Box
-              sx={{
-                display: "grid",
-                gridTemplateColumns: { xs: "1fr", lg: "1fr 310px" },
-                gap: 2.5,
-                alignItems: "stretch",
-              }}
-            >
-              {/* Left 3x3 Cards Grid */}
-              <Box
-                sx={{
-                  display: "grid",
-                  gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)", md: "repeat(3, 1fr)" },
-                  gap: 1.5,
-                }}
-              >
-                {CATEGORY_OPTIONS.map((cat) => {
-                  const isSelected = selectedCategory === cat.id;
-
-                  return (
-                    <Paper
-                      key={cat.id}
-                      elevation={0}
-                      onClick={() => handleSelectCategoryCard(cat.id)}
-                      sx={{
-                        p: "14px 16px",
-                        borderRadius: "14px",
-                        border: isSelected ? "2px solid #2563EB" : "1px solid #E2E8F0",
-                        backgroundColor: isSelected ? "#F8FAFC" : "#FFFFFF",
-                        boxShadow: isSelected
-                          ? "0 4px 14px rgba(37, 99, 235, 0.08)"
-                          : "0 1px 2px rgba(0,0,0,0.02)",
-                        cursor: "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 1.5,
-                        transition: "all 180ms cubic-bezier(0.4, 0, 0.2, 1)",
-                        "&:hover": {
-                          borderColor: "#2563EB",
-                          backgroundColor: "#F8FAFC",
-                          boxShadow: "0 4px 16px rgba(37, 99, 235, 0.10)",
-                          transform: "translateY(-2px)",
-                          "& .cat-chevron": {
-                            color: "#2563EB",
-                            transform: "translateX(2px)",
-                          },
-                        },
-                      }}
-                    >
-                      {/* Icon */}
-                      <Box
-                        sx={{
-                          width: 40,
-                          height: 40,
-                          borderRadius: "10px",
-                          backgroundColor: cat.iconBg,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          flexShrink: 0,
-                        }}
-                      >
-                        {cat.icon}
-                      </Box>
-
-                      {/* Title (Only Title shown, no description) */}
-                      <Box sx={{ flex: 1, minWidth: 0 }}>
-                        <Typography
-                          sx={{
-                            fontSize: "0.88rem",
-                            fontWeight: 650,
-                            color: "#0F172A",
-                            lineHeight: 1.25,
-                          }}
-                        >
-                          {cat.name}
-                        </Typography>
-                      </Box>
-
-                      {/* Right Chevron */}
-                      <Typography
-                        className="cat-chevron"
-                        component="span"
-                        sx={{
-                          color: isSelected ? "#2563EB" : "#94A3B8",
-                          fontSize: "1.15rem",
-                          fontWeight: 500,
-                          lineHeight: 1,
-                          flexShrink: 0,
-                          transition: "all 150ms ease",
-                        }}
-                      >
-                        ›
-                      </Typography>
-                    </Paper>
-                  );
-                })}
-              </Box>
-
-              {/* Right Side Info Card */}
-              <Box
-                sx={{
-                  background: "linear-gradient(180deg, #F0F5FF 0%, #EEF2FF 100%)",
-                  border: "1px solid #DBEAFE",
-                  borderRadius: "18px",
-                  p: { xs: 2.25, md: 2.5 },
-                  display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "space-between",
-                  position: "relative",
-                  overflow: "hidden",
-                }}
-              >
-                <Box>
-                  {/* Floating Document Graphic */}
-                  <Box
-                    sx={{
-                      width: "100%",
-                      height: 92,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      position: "relative",
-                      mb: 1.5,
-                    }}
-                  >
-                    <Box
-                      sx={{
-                        position: "absolute",
-                        width: 120,
-                        height: 65,
-                        borderRadius: "50%",
-                        background: "radial-gradient(circle, rgba(191, 219, 254, 0.6) 0%, rgba(238, 242, 255, 0) 70%)",
-                      }}
-                    />
-                    {/* Back Paper */}
-                    <Box
-                      sx={{
-                        position: "absolute",
-                        width: 110,
-                        height: 72,
-                        backgroundColor: "#FFFFFF",
-                        border: "1px solid #E2E8F0",
-                        borderRadius: "8px",
-                        transform: "rotate(-6deg) translate(-8px, -3px)",
-                        boxShadow: "0 4px 12px rgba(15, 23, 42, 0.04)",
-                        opacity: 0.75,
-                      }}
-                    />
-                    {/* Front Paper with skeleton lines and sparkle badge */}
-                    <Box
-                      sx={{
-                        position: "absolute",
-                        width: 124,
-                        height: 80,
-                        backgroundColor: "#FFFFFF",
-                        border: "1px solid #DBEAFE",
-                        borderRadius: "10px",
-                        boxShadow: "0 8px 20px rgba(37, 99, 235, 0.08)",
-                        p: 1.25,
-                        display: "flex",
-                        flexDirection: "column",
-                        justifyContent: "space-between",
-                      }}
-                    >
-                      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                        <Box sx={{ width: 36, height: 5, backgroundColor: "#E2E8F0", borderRadius: "3px", mt: 0.5 }} />
-                        <Box
-                          sx={{
-                            width: 22,
-                            height: 22,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                          }}
-                        >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src="/Proxipilot logo.svg"
-                            alt="ProxiPilot"
-                            width={20}
-                            height={20}
-                            style={{ objectFit: "contain", display: "block" }}
-                          />
-                        </Box>
-                      </Box>
-                      <Box sx={{ display: "flex", flexDirection: "column", gap: 0.65 }}>
-                        <Box sx={{ width: "80%", height: 4, backgroundColor: "#EEF2F6", borderRadius: "2px" }} />
-                        <Box sx={{ width: "65%", height: 4, backgroundColor: "#EEF2F6", borderRadius: "2px" }} />
-                        <Box sx={{ width: "45%", height: 4, backgroundColor: "#EEF2F6", borderRadius: "2px" }} />
-                      </Box>
-                    </Box>
-                  </Box>
-
-                  {/* Right Title */}
-                  <Typography
-                    sx={{
-                      fontSize: "0.98rem",
-                      fontWeight: 800,
-                      color: "#0F172A",
-                      lineHeight: 1.3,
-                      mb: 1.5,
-                    }}
-                  >
-                    Turn your business knowledge into smarter conversations.
-                  </Typography>
-
-                  {/* Feature Bullet List */}
-                  <Box sx={{ display: "flex", flexDirection: "column", gap: 1.1, mb: 2 }}>
-                    {[
-                      "More accurate AI responses",
-                      "Consistent and on-brand communication",
-                      "Better customer support",
-                      "Save time for your team",
-                    ].map((benefit) => (
-                      <Box key={benefit} sx={{ display: "flex", alignItems: "center", gap: 1.1 }}>
-                        <Box
-                          sx={{
-                            width: 17,
-                            height: 17,
-                            borderRadius: "50%",
-                            backgroundColor: "#2563EB",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            flexShrink: 0,
-                          }}
-                        >
-                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round">
-                            <polyline points="20 6 9 17 4 12" />
-                          </svg>
-                        </Box>
-                        <Typography sx={{ fontSize: "0.8rem", fontWeight: 600, color: "#1E293B" }}>
-                          {benefit}
-                        </Typography>
-                      </Box>
-                    ))}
-                  </Box>
-                </Box>
-
-                {/* Bottom Testimonial Quote Card */}
-                <Box
-                  sx={{
-                    pt: 1.5,
-                    borderTop: "1px solid rgba(219, 234, 254, 0.7)",
-                    display: "flex",
-                    gap: 1,
-                  }}
-                >
-                  <Typography sx={{ color: "#93C5FD", fontSize: "1.35rem", lineHeight: 0.8, fontFamily: "serif", fontWeight: 700 }}>
-                    “
-                  </Typography>
-                  <Box>
-                    <Typography sx={{ fontSize: "0.74rem", color: "#334155", lineHeight: 1.4, fontWeight: 500 }}>
-                      &ldquo;Well-organized knowledge helps us give faster, more relevant answers to our customers.&rdquo;
-                    </Typography>
-                    <Typography sx={{ fontSize: "0.7rem", color: "#64748B", fontWeight: 500, mt: 0.25 }}>
-                      — Early Access User
-                    </Typography>
-                  </Box>
-                </Box>
-              </Box>
-            </Box>
-          </DialogContent>
-
-          {/* Bottom Footer Bar */}
-          <Box
-            sx={{
-              borderTop: "1px solid #F1F5F9",
-              backgroundColor: "#FFFFFF",
-              px: { xs: 2.5, md: 4 },
-              py: 1.75,
-              display: "flex",
-              flexDirection: { xs: "column", sm: "row" },
-              alignItems: { xs: "flex-start", sm: "center" },
-              justifyContent: "space-between",
-              gap: 1.5,
-              flexShrink: 0,
-              borderBottomLeftRadius: "24px",
-              borderBottomRightRadius: "24px",
-            }}
-          >
-            {/* Left: Info icon + text */}
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1.25 }}>
-              <Box
-                sx={{
-                  width: 22,
-                  height: 22,
-                  borderRadius: "50%",
-                  backgroundColor: "#EFF6FF",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "#3B82F6",
-                  flexShrink: 0,
-                }}
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="12" y1="16" x2="12" y2="12" />
-                  <line x1="12" y1="8" x2="12.01" y2="8" />
-                </svg>
-              </Box>
-              <Typography sx={{ fontSize: "0.82rem", color: "#64748B", fontWeight: 500 }}>
-                Not sure what to add? Check out our documentation for examples and best practices.
-              </Typography>
-            </Box>
-
-            {/* Right: View guide button */}
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={() => window.open("/docs", "_blank")}
-              sx={{
-                textTransform: "none",
-                fontSize: "0.78rem",
-                fontWeight: 600,
-                color: "#334155",
-                borderColor: "#E2E8F0",
-                backgroundColor: "#FFFFFF",
-                borderRadius: "8px",
-                px: 1.75,
-                py: 0.65,
-                boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
-                display: "flex",
-                alignItems: "center",
-                gap: 0.75,
-                flexShrink: 0,
-                "&:hover": {
-                  backgroundColor: "#F8FAFC",
-                  borderColor: "#CBD5E1",
-                },
-              }}
-            >
-              <span>View guide</span>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                <polyline points="15 3 21 3 21 9" />
-                <line x1="10" y1="14" x2="21" y2="3" />
-              </svg>
-            </Button>
-          </Box>
-        </>
+        <AddKnowledgeCategoryPicker
+          categories={CATEGORY_OPTIONS}
+          onSelect={handleSelectCategoryCard}
+          onClose={onClose}
+        />
       )}
 
       {/* ========================================================================= */}
@@ -821,8 +444,8 @@ function AddKnowledgeModalContent({
           <Box
             sx={{
               px: { xs: 2.5, md: 4 },
-              pt: 2.5,
-              pb: 1,
+              pt: 2,
+              pb: 0.5,
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
@@ -877,7 +500,8 @@ function AddKnowledgeModalContent({
           <Box
             sx={{
               px: { xs: 2.5, md: 4 },
-              py: 1.5,
+              pt: 1,
+              pb: 1.25,
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
@@ -889,9 +513,9 @@ function AddKnowledgeModalContent({
             <Box sx={{ display: "flex", alignItems: "center", gap: 1.75 }}>
               <Box
                 sx={{
-                  width: 46,
-                  height: 46,
-                  borderRadius: "14px",
+                  width: 42,
+                  height: 42,
+                  borderRadius: "12px",
                   backgroundColor: currentCatOption.iconBg,
                   display: "flex",
                   alignItems: "center",
@@ -913,17 +537,17 @@ function AddKnowledgeModalContent({
           </Box>
 
           {/* Main 2-Column Upload Form Body */}
-          <DialogContent sx={{ px: { xs: 2.5, md: 4 }, py: 1.5, flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
+          <DialogContent sx={{ px: { xs: 2.5, md: 4 }, py: 1, flex: "1 1 auto", minHeight: 0, overflowY: { xs: "auto", md: "visible" } }}>
             <Box
                 sx={{
                   display: "grid",
-                  gridTemplateColumns: { xs: "1fr", lg: "1fr 340px" },
-                  gap: 3,
+                  gridTemplateColumns: { xs: "1fr", md: "1fr 300px" },
+                  gap: 2.5,
                   alignItems: "start",
                 }}
               >
                 {/* Left Column: Form & Dropzone */}
-                <Box sx={{ display: "flex", flexDirection: "column", gap: 2.2 }}>
+                <Box sx={{ display: "flex", flexDirection: "column", gap: 1.75 }}>
                   {/* Dataset name */}
                   <Box>
                     <Typography sx={{ fontSize: "0.82rem", fontWeight: 700, color: "#0F172A", mb: 0.5 }}>
@@ -997,19 +621,19 @@ function AddKnowledgeModalContent({
                           border: isDragging ? "2px dashed #2563EB" : "2px dashed #BFDBFE",
                           backgroundColor: isDragging ? "#EFF6FF" : "#F8FAFC",
                           borderRadius: "16px",
-                          p: { xs: 3, md: 3.5 },
+                          p: { xs: 2.5, md: 2.75 },
                           display: "flex",
                           flexDirection: "column",
                           alignItems: "center",
                           justifyContent: "center",
                           textAlign: "center",
-                          gap: 1.25,
+                          gap: 1,
                           transition: "all 150ms ease",
                         }}
                       >
                         {/* Big Document Icon */}
                         <Box sx={{ color: "#2563EB", mb: 0.5 }}>
-                          <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
                             <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
                             <polyline points="14 2 14 8 20 8" />
                             <line x1="16" y1="13" x2="8" y2="13" />
@@ -1231,11 +855,11 @@ function AddKnowledgeModalContent({
                   sx={{
                     backgroundColor: "#F8FAFC",
                     border: "1px solid #E2E8F0",
-                    borderRadius: "20px",
-                    p: 3,
+                    borderRadius: "16px",
+                    p: 2.25,
                     display: "flex",
                     flexDirection: "column",
-                    gap: 2.5,
+                    gap: 1.75,
                   }}
                 >
                   {/* Tips Header */}
@@ -1252,184 +876,26 @@ function AddKnowledgeModalContent({
                     </Typography>
                   </Box>
 
-                  {/* 4 Checkpoint Items */}
-                  <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                    <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1.25 }}>
-                      <Box
-                        sx={{
-                          width: 18,
-                          height: 18,
-                          borderRadius: "50%",
-                          backgroundColor: "#2563EB",
-                          color: "#FFFFFF",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          flexShrink: 0,
-                          mt: 0.25,
-                        }}
-                      >
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="20 6 9 17 4 12" />
-                        </svg>
-                      </Box>
-                      <Box>
-                        <Typography sx={{ fontSize: "0.8rem", fontWeight: 700, color: "#0F172A" }}>
-                          Use clear column headers
-                        </Typography>
-                        <Typography sx={{ fontSize: "0.72rem", color: "#64748B", fontStyle: "italic", mt: 0.25 }}>
-                          E.g. Name, Description, Category, Price, Availability, etc.
-                        </Typography>
-                      </Box>
-                    </Box>
-
-                    <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1.25 }}>
-                      <Box
-                        sx={{
-                          width: 18,
-                          height: 18,
-                          borderRadius: "50%",
-                          backgroundColor: "#2563EB",
-                          color: "#FFFFFF",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          flexShrink: 0,
-                          mt: 0.25,
-                        }}
-                      >
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="20 6 9 17 4 12" />
-                        </svg>
-                      </Box>
-                      <Box>
-                        <Typography sx={{ fontSize: "0.8rem", fontWeight: 700, color: "#0F172A" }}>
-                          Keep your data organized
-                        </Typography>
-                        <Typography sx={{ fontSize: "0.72rem", color: "#64748B", mt: 0.25 }}>
-                          One product or service per row.
-                        </Typography>
-                      </Box>
-                    </Box>
-
-                    <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1.25 }}>
-                      <Box
-                        sx={{
-                          width: 18,
-                          height: 18,
-                          borderRadius: "50%",
-                          backgroundColor: "#2563EB",
-                          color: "#FFFFFF",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          flexShrink: 0,
-                          mt: 0.25,
-                        }}
-                      >
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="20 6 9 17 4 12" />
-                        </svg>
-                      </Box>
-                      <Box>
-                        <Typography sx={{ fontSize: "0.8rem", fontWeight: 700, color: "#0F172A" }}>
-                          Include relevant details
-                        </Typography>
-                        <Typography sx={{ fontSize: "0.72rem", color: "#64748B", mt: 0.25 }}>
-                          Add features, specifications, pricing, and availability if possible.
-                        </Typography>
-                      </Box>
-                    </Box>
-
-                    <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1.25 }}>
-                      <Box
-                        sx={{
-                          width: 18,
-                          height: 18,
-                          borderRadius: "50%",
-                          backgroundColor: "#2563EB",
-                          color: "#FFFFFF",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          flexShrink: 0,
-                          mt: 0.25,
-                        }}
-                      >
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="20 6 9 17 4 12" />
-                        </svg>
-                      </Box>
-                      <Box>
-                        <Typography sx={{ fontSize: "0.8rem", fontWeight: 700, color: "#0F172A" }}>
-                          Use our template (optional)
-                        </Typography>
-                        <Typography sx={{ fontSize: "0.72rem", color: "#64748B", mt: 0.25 }}>
-                          Download the template to get the right format.
-                        </Typography>
-                      </Box>
-                    </Box>
-                  </Box>
-
-                  {/* Accepted File Formats */}
-                  <Box sx={{ pt: 1 }}>
-                    <Typography sx={{ fontSize: "0.78rem", fontWeight: 700, color: "#0F172A", mb: 1 }}>
-                      Accepted file formats
-                    </Typography>
-                    <Box sx={{ display: "flex", gap: 1.5 }}>
-                      {[".csv", ".xls", ".xlsx"].map((ext) => (
+                  {/* Category-aware tips */}
+                  <Box sx={{ display: "flex", flexDirection: "column", gap: 1.6 }}>
+                    {IMPORT_TIPS[currentCatOption.id].map((tip) => (
+                      <Box key={tip.title} sx={{ display: "flex", alignItems: "flex-start", gap: 1.25 }}>
                         <Box
-                          key={ext}
                           sx={{
-                            border: "1px solid #E2E8F0",
-                            borderRadius: "10px",
-                            backgroundColor: "#FFFFFF",
-                            p: 1.25,
-                            width: 60,
-                            display: "flex",
-                            flexDirection: "column",
-                            alignItems: "center",
-                            gap: 0.5,
+                            width: 18, height: 18, borderRadius: "50%", backgroundColor: "#2563EB", color: "#FFFFFF",
+                            display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, mt: 0.25,
                           }}
                         >
-                          <Box
-                            sx={{
-                              width: 28,
-                              height: 28,
-                              borderRadius: "6px",
-                              backgroundColor: "#ECFDF5",
-                              color: "#059669",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              fontSize: "0.62rem",
-                              fontWeight: 800,
-                            }}
-                          >
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-                              <polyline points="14 2 14 8 20 8" />
-                            </svg>
-                          </Box>
-                          <Typography sx={{ fontSize: "0.7rem", color: "#64748B", fontWeight: 600 }}>
-                            {ext}
-                          </Typography>
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
                         </Box>
-                      ))}
-                    </Box>
-                  </Box>
-
-                  {/* Data Security Guarantee */}
-                  <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1, pt: 1 }}>
-                    <Box sx={{ color: "#64748B", mt: 0.2 }}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
-                        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                      </svg>
-                    </Box>
-                    <Typography sx={{ fontSize: "0.72rem", color: "#64748B", lineHeight: 1.4 }}>
-                      Your data is secure. Files are processed safely and only used for your organization.
-                    </Typography>
+                        <Box>
+                          <Typography sx={{ fontSize: "0.8rem", fontWeight: 700, color: "#0F172A" }}>{tip.title}</Typography>
+                          <Typography sx={{ fontSize: "0.72rem", color: "#64748B", mt: 0.25, lineHeight: 1.45 }}>{tip.body}</Typography>
+                        </Box>
+                      </Box>
+                    ))}
                   </Box>
                 </Box>
               </Box>
@@ -1441,43 +907,17 @@ function AddKnowledgeModalContent({
               borderTop: "1px solid #F1F5F9",
               backgroundColor: "#FFFFFF",
               px: { xs: 2.5, md: 4 },
-              py: 2,
+              py: 1.5,
               display: "flex",
               flexDirection: { xs: "column", sm: "row" },
-              alignItems: { xs: "flex-start", sm: "center" },
-              justifyContent: "space-between",
+              alignItems: { xs: "stretch", sm: "center" },
+              justifyContent: "flex-end",
               gap: 1.5,
               flexShrink: 0,
               borderBottomLeftRadius: "24px",
               borderBottomRightRadius: "24px",
             }}
           >
-            {/* Left: Template link */}
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-              <Box sx={{ color: "#3B82F6", display: "flex" }}>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="12" y1="16" x2="12" y2="12" />
-                  <line x1="12" y1="8" x2="12.01" y2="8" />
-                </svg>
-              </Box>
-              <Typography sx={{ fontSize: "0.8rem", color: "#475569" }}>
-                Need a template? Download our{" "}
-                <Typography
-                  component="span"
-                  onClick={() => alert(`Downloading ${currentCatOption.name} template (.xlsx)`)}
-                  sx={{
-                    color: "#2563EB",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    "&:hover": { textDecoration: "underline" },
-                  }}
-                >
-                  {currentCatOption.name} template
-                </Typography>
-              </Typography>
-            </Box>
-
             {/* Right: Cancel and Direct Import */}
             <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
               <Button
@@ -1561,6 +1001,8 @@ export function AddKnowledgeDialog() {
           sx: {
             borderRadius: "24px",
             maxWidth: "1060px",
+            // The category picker is a compact step: a narrower dialog that fits without scrolling.
+            "&:has([data-mode='category-select'])": { maxWidth: "880px", borderRadius: "20px" },
             width: "100%",
             maxHeight: "calc(100vh - 48px)",
             display: "flex",
