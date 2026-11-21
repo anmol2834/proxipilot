@@ -104,9 +104,12 @@ class KnowledgeReconciliationService:
 
             for chk in doc.chunks:
                 content_hash = hashlib.sha256(chk.text.encode("utf-8")).hexdigest()
+                # A vector depends only on the text, the model and the tenant: keying by version would
+                # re-embed every unchanged section on each edit (a one-field Company Info change would
+                # pay for all its sections). Tenant stays in the key, so caches never cross workspaces.
                 cache_key = self.embedding_service.cache.build_cache_key(
                     tenant_id=tenant_id,
-                    version_id=version.id,
+                    version_id="content",
                     projection_version=projection_version,
                     content_hash=content_hash,
                     model_version=model_ver,

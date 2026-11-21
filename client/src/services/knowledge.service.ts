@@ -15,6 +15,7 @@
  */
 
 import { apiClient } from "@/lib/api/client";
+import type { CompanyInfoSaveRequest, CompanyInfoState } from "@/types/company-info.types";
 import { env } from "@/config/env";
 import {
   KnowledgeItem,
@@ -353,6 +354,16 @@ class KnowledgeService {
    * Real per-category item counts. Errors propagate so callers never mistake a
    * failed request for "every category is empty".
    */
+  /** Company Info editor state (shared facts with owner + share flag, Company-Info facts, index state). */
+  async getCompanyInfo(): Promise<CompanyInfoState> {
+    return (await apiClient.get<CompanyInfoState>(`${this.base}/company-info`)).data;
+  }
+
+  /** Partial, revision-checked save. 409 = someone else saved first (re-fetch and reapply). */
+  async saveCompanyInfo(body: CompanyInfoSaveRequest): Promise<CompanyInfoState> {
+    return (await apiClient.put<CompanyInfoState>(`${this.base}/company-info`, body)).data;
+  }
+
   async getCategoryCounts(): Promise<Record<string, number>> {
     const res = await apiClient.get<Record<string, number>>(`${this.base}/stats`);
     return res.data ?? {};

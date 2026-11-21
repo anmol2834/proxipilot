@@ -456,6 +456,8 @@ class DeterministicPlanValidator:
             fallback_intent=validated_intent,
             fallback_category=getattr(proposal, "target_category", None) or "products_services",
         )
+        requirements = MultiIntentDecomposer.add_model_requirements(
+            requirements, getattr(proposal, "search_requirements", None))
 
         return RequirementPlan(
             schema_version="1.0",

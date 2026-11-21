@@ -76,9 +76,16 @@ class KnowledgeUploadService:
         if category:
             from app.contracts.knowledge import KnowledgeInvalidCategoryError, normalize_category_key
             try:
-                normalize_category_key(category)
+                canonical = normalize_category_key(category)
             except KnowledgeInvalidCategoryError as exc:
                 raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+            # Company Info is a structured, ownership-aware record edited in Knowledge → Company Info.
+            # New file imports into it are refused (already-accepted jobs finish unchanged).
+            if canonical == "company_info":
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Company Info can't be imported from a file. Edit it in Knowledge → Company Info.",
+                )
         settings = get_settings()
         max_size_bytes = settings.storage.knowledge_max_upload_size_bytes
         now_utc = datetime.now(timezone.utc)

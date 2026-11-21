@@ -51,7 +51,7 @@ KNOWLEDGE_EVENTS_STREAM = "knowledge-events"
 @dataclass
 class SyncResult:
     item_id: str
-    state: str  # "indexed" | "already_synced" | "removed" | "failed" | "deferred"
+    state: str  # "indexed" | "already_synced" | "removed" | "superseded" | "failed" | "deferred"
     version_id: Optional[str] = None
     vectors: int = 0
     stale_removed: bool = False
@@ -61,7 +61,7 @@ class SyncResult:
 
     @property
     def ok(self) -> bool:
-        return self.state in ("indexed", "already_synced", "removed")
+        return self.state in ("indexed", "already_synced", "removed", "superseded")
 
 
 class KnowledgeSyncService:
@@ -122,8 +122,20 @@ class KnowledgeSyncService:
             raise ValueError("tenant_id and item_id are required for knowledge sync")
         t0 = time.perf_counter()
 
+        qdrant = self._qdrant()
+
         if removed:
-            item, version = None, None
+            # Archive/delete fast path: purge without a full read, then one cheap check. If the item
+            # became active again meanwhile (restore racing a slow purge), re-index its current version
+            # so the purge can never leave a live item unsearchable.
+            await qdrant.delete_item_vectors(tenant_id=tenant_id, knowledge_item_id=item_id)
+            if await self._current_version_id(tenant_id, item_id) is None:
+                return SyncResult(
+                    item_id=item_id, state="removed",
+                    duration_ms=round((time.perf_counter() - t0) * 1000, 2),
+                )
+            item, version = await self._load_current(tenant_id, item_id)
+            force = True
         elif item is not None and version is not None:
             async with db_manager.session_factory() as db:
                 row = (await db.execute(
@@ -141,8 +153,6 @@ class KnowledgeSyncService:
         else:
             item, version = await self._load_current(tenant_id, item_id)
 
-        qdrant = self._qdrant()
-
         # Not retrievable any more (deleted, archived, or no approved version): purge.
         if version is None:
             await qdrant.delete_item_vectors(tenant_id=tenant_id, knowledge_item_id=item_id)
@@ -154,21 +164,44 @@ class KnowledgeSyncService:
         vectors = 0
         state = "already_synced"
         if force or version.semantic_status != "synced":
-            doc = self._get_projector().project_item_version(item, version)
+            # `version` was just verified as current (fast-path check or authoritative read).
+            doc =self._get_projector().project_item_version(item, version)
             stats = await self._get_recon().index_documents(
                 tenant_id, [(item, version, doc)], mark_synced=True, wait=True,
             )
             vectors = stats.get("indexed", 0)
             state = "indexed"
 
-        # Remove every vector that does not belong to the current version.
+        # Remove every vector that is not the CURRENT generation. Re-read current_version_id right
+        # before deleting: if a newer version was published while this job ran, keep the newer one
+        # (deleting "all except my version" would wipe the newer generation's vectors). The stale
+        # vectors this job may have just written are removed by the same call.
+        keep_version_id = await self._current_version_id(tenant_id, item_id)
+        if keep_version_id is None:
+            await qdrant.delete_item_vectors(tenant_id=tenant_id, knowledge_item_id=item_id)
+            return SyncResult(item_id=item_id, state="removed",
+                              duration_ms=round((time.perf_counter() - t0) * 1000, 2))
         await qdrant.delete_item_vectors_except_version(
-            tenant_id=tenant_id, knowledge_item_id=item_id, keep_version_id=version.id,
+            tenant_id=tenant_id, knowledge_item_id=item_id, keep_version_id=keep_version_id,
         )
+        superseded = keep_version_id != version.id
         return SyncResult(
-            item_id=item_id, state=state, version_id=version.id, vectors=vectors,
+            item_id=item_id, state="superseded" if superseded else state, version_id=version.id, vectors=vectors,
             stale_removed=True, duration_ms=round((time.perf_counter() - t0) * 1000, 2),
+            details={"current_version_id": keep_version_id} if superseded else {},
         )
+
+    async def _current_version_id(self, tenant_id: str, item_id: str) -> Optional[str]:
+        """The item's current ACTIVE version id (None when inactive / no approved version)."""
+        async with db_manager.session_factory() as db:
+            row = (await db.execute(
+                select(KnowledgeItem.current_version_id, KnowledgeItem.is_active, KnowledgeVersion.status)
+                .join(KnowledgeVersion, KnowledgeVersion.id == KnowledgeItem.current_version_id, isouter=True)
+                .where(KnowledgeItem.id == item_id, KnowledgeItem.tenant_id == tenant_id)
+            )).first()
+        if row is None or not row.is_active or row.status != KnowledgeLifecycleStatus.ACTIVE.value:
+            return None
+        return row.current_version_id
 
     async def _load_current(self, tenant_id: str, item_id: str):
         """Authoritative read of the item and its current ACTIVE version (or None)."""

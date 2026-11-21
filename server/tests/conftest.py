@@ -81,6 +81,7 @@ CATEGORY = "products_services"
 # Every tenant-scoped table a seeded test tenant can touch, children first.
 _CLEANUP_TABLES = (
     # followups & intelligence
+    "company_info_profiles",
     "followup_notice_deliveries", "followup_occurrences", "message_assessments",
     "thread_followup_states", "thread_followup_controls", "contact_suppressions", "followup_policies",
     # memories written by the reply pipeline
@@ -117,6 +118,7 @@ async def _qdrant_delete_tenant(tenant_id: str) -> None:
 # ``_BACKGROUND`` task set. That work can write rows for a test tenant AFTER the test finished.
 _BACKGROUND_TASK_MODULES = (
     "app.services.thread_memory", "app.services.commitment_memory", "app.services.feedback_memory",
+    "app.services.company_info",
 )
 
 

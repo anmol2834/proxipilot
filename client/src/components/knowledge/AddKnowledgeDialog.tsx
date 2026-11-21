@@ -41,7 +41,7 @@ const CATEGORY_OPTIONS: CategoryOption[] = [
     id: "company-info",
     name: "Company Info",
     type: "Information",
-    desc: "Who you are, plus your contact details, address and business hours.",
+    desc: "A short form: who you are, contacts, hours and branches. No file needed.",
     iconBg: "#EEF2FF",
     iconColor: "#3B82F6",
     icon: (
@@ -122,16 +122,11 @@ const CATEGORY_OPTIONS: CategoryOption[] = [
 ];
 
 /** Import tips that fit what each category's spreadsheet actually contains. */
-const IMPORT_TIPS: Record<ConcreteKnowledgeCategory, { title: string; body: string }[]> = {
+const IMPORT_TIPS: Partial<Record<ConcreteKnowledgeCategory, { title: string; body: string }[]>> = {
   "products-services": [
     { title: "Use clear column headers", body: "e.g. Name, SKU, Description, Price, Currency, Availability." },
     { title: "One product or service per row", body: "Variants (sizes, models) can each have their own row." },
     { title: "Include the details customers ask about", body: "Specifications, pricing, warranty and stock where you have them." },
-  ],
-  "company-info": [
-    { title: "Use clear column headers", body: "e.g. Company name, Website, Email, Phone, Address, Business hours." },
-    { title: "One row per company or branch", body: "Add a row for each office or branch with its own contact details." },
-    { title: "Include how customers reach you", body: "Support and sales emails, phone numbers, address and working hours." },
   ],
   policies: [
     { title: "Use clear column headers", body: "e.g. Policy name, Type, Details, Region, Effective from." },
@@ -233,6 +228,11 @@ function AddKnowledgeModalContent({
     CATEGORY_OPTIONS[0];
 
   const handleSelectCategoryCard = (cat: ConcreteKnowledgeCategory) => {
+    if (cat === "company-info") {
+      // No file import for Company Info: open its structured editor instead.
+      useKnowledgeStore.getState().openAddDialog("company-info");
+      return;
+    }
     setSelectedCategory(cat);
     const catName = CATEGORY_OPTIONS.find((c) => c.id === cat)?.name || "Knowledge";
     setDatasetName(`My ${catName}`);
@@ -878,7 +878,7 @@ function AddKnowledgeModalContent({
 
                   {/* Category-aware tips */}
                   <Box sx={{ display: "flex", flexDirection: "column", gap: 1.6 }}>
-                    {IMPORT_TIPS[currentCatOption.id].map((tip) => (
+                    {(IMPORT_TIPS[currentCatOption.id] ?? []).map((tip) => (
                       <Box key={tip.title} sx={{ display: "flex", alignItems: "flex-start", gap: 1.25 }}>
                         <Box
                           sx={{

@@ -436,6 +436,40 @@ class StructuredRetriever:
             db=db, tenant_id=tenant_id, item_ids=list(rows), as_of=as_of)
         return [found[i] for i in rows if i in found]
 
+    async def fetch_reference_records(
+        self,
+        db: AsyncSession,
+        tenant_id: str,
+        categories: Sequence[str],
+        limit: int = 20,
+        as_of: Optional[datetime] = None,
+    ) -> List[Tuple[KnowledgeItem, KnowledgeVersion]]:
+        """Current approved records of small reference categories (Company Info, Processes &
+        Timelines) by an indexed tenant + category lookup. This is the exact, PostgreSQL-first path:
+        it does not depend on Qdrant, so a just-saved fact is answerable while vectors catch up and a
+        revoked one is gone immediately. The registration-backed Company Info record comes first."""
+        if not categories:
+            return []
+        stmt = (
+            select(KnowledgeVersion)
+            .join(KnowledgeItem, KnowledgeVersion.id == KnowledgeItem.current_version_id)
+            .where(
+                KnowledgeItem.tenant_id == tenant_id,
+                KnowledgeVersion.tenant_id == tenant_id,
+                KnowledgeItem.category.in_(list(categories)),
+                KnowledgeItem.is_active.is_(True),
+                build_current_version_filter(normalize_utc_timestamp(as_of)),
+            )
+            .options(selectinload(KnowledgeVersion.knowledge_item), selectinload(KnowledgeVersion.source))
+            .order_by(
+                (KnowledgeItem.external_identity_key == "company_profile").desc().nullslast(),
+                KnowledgeItem.updated_at.desc(),
+            )
+            .limit(max(1, min(limit, 50)))
+        )
+        versions = (await db.execute(stmt)).scalars().all()
+        return [(v.knowledge_item, v) for v in versions if v.knowledge_item is not None]
+
     async def fetch_contacts(
         self,
         db: AsyncSession,

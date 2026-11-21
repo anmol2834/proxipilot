@@ -207,8 +207,13 @@ OPENAI_PLANNER_JSON_SCHEMA: Dict[str, Any] = {
                             "items": {"type": "string"},
                             "description": "3-8 precise English nouns / verbs for keyword search",
                         },
+                        "category": {
+                            "type": "string",
+                            "enum": [c.value for c in KnowledgeCategory],
+                            "description": "The knowledge category that answers THIS need",
+                        },
                     },
-                    "required": ["original_text", "translated_standard_term", "search_concepts", "keywords"],
+                    "required": ["original_text", "translated_standard_term", "search_concepts", "keywords", "category"],
                     "additionalProperties": False,
                 },
             },
@@ -282,6 +287,13 @@ SEMANTIC_EXPANSION_INSTRUCTIONS = (
     "would satisfy the need. Cover different plausible angles (the kind of item, its function, where "
     "or how it is used) so at least one matches the way the record is written.\n"
     "  * keywords: 3-8 precise English nouns / verbs that a matching record title or category would contain.\n"
+    "  * category: the knowledge category that answers this need: products_services (items, prices, specs, "
+    "stock), company_info (who the company is, its contact routes, billing / sales / support contacts, "
+    "offices and branches, addresses, opening hours, visits, service coverage areas, languages), "
+    "processes_timelines (what happens next and how long it takes), policies (rules such as warranty, "
+    "returns, cancellation), support_faqs (how-to and troubleshooting), offers_promotions (discounts, "
+    "coupons). Each need gets its own entry, e.g. 'install in Jaipur? also send the rate' is two entries: "
+    "coverage -> company_info, rate -> products_services.\n"
     "Rules: never invent prices, stock, SKUs, model numbers or brands the customer did not mention; "
     "describe the kind of item, not a specific one. If the need is genuinely ambiguous, spread the "
     "plausible interpretations across the concepts instead of guessing one. Expansions only help "

@@ -33,6 +33,7 @@ from app.contracts.flexible_schema import (
     SchemaProfileCreateDTO,
     SchemaProfileResponseDTO,
 )
+from app.contracts.company_info import CompanyInfoUpdateRequest
 from app.contracts.knowledge_crud import (
     KnowledgeCursorPageDTO,
     KnowledgeItemCreateDTO,
@@ -391,6 +392,47 @@ async def create_knowledge_item(
         payload=payload,
         client_ip=client_ip,
     )
+
+
+# =============================================================================
+# Company Info — structured editor (registration-backed facts + Company-Info-owned facts)
+# =============================================================================
+
+
+@router.get(
+    "/company-info",
+    summary="Company Info editor state",
+    description="Shared facts (with their owner and share flag), Company-Info-owned facts, what the email AI "
+                "can share, and the indexing state of the saved revision.",
+)
+async def get_company_info(
+    db: AsyncSession = Depends(get_db),
+    tenant_context: TenantContext = Depends(require_permission("knowledge.read")),
+) -> Dict[str, Any]:
+    from app.services import company_info
+
+    return await company_info.get_state(db, tenant_context.organization_id, tenant_context.permissions)
+
+
+@router.put(
+    "/company-info",
+    summary="Save Company Info (partial, revision-checked)",
+    description="Only the sent keys change. A stale `revision` returns 409 with the current state so the "
+                "editor can refresh and reapply. Shared facts are written to their owners.",
+)
+async def save_company_info(
+    payload: CompanyInfoUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    tenant_context: TenantContext = Depends(require_permission("knowledge.read")),
+) -> Dict[str, Any]:
+    from app.services import company_info
+
+    try:
+        return await company_info.save(db, tenant_context.organization_id, tenant_context.user_id, payload,
+                                       tenant_context.permissions)
+    except ValueError as exc:      # merged facts failed validation
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
 
 @router.get(

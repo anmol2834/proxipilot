@@ -24,6 +24,13 @@ class _Result:
     def all(self):
         return self._value or []
 
+    def first(self):
+        # Guard query (current_version_id, is_active, status) answered from an item row.
+        v = self._value
+        if isinstance(v, KnowledgeItem):
+            return SimpleNamespace(current_version_id=v.current_version_id, is_active=v.is_active, status="active")
+        return v
+
 
 class _Session:
     def __init__(self, results: List[Any]):
@@ -171,12 +178,13 @@ async def test_fast_path_uses_committed_objects_with_one_check_query(svc, monkey
     class _Check(_Session):
         async def execute(self, stmt, params=None):
             executed.append(1)
-            return SimpleNamespace(first=lambda: SimpleNamespace(current_version_id="kv_2", is_active=True))
+            return SimpleNamespace(first=lambda: SimpleNamespace(current_version_id="kv_2", is_active=True, status="active"))
 
     monkeypatch.setattr(ks, "db_manager", SimpleNamespace(session_factory=lambda: _Check([])))
     res = await service.sync_item(T, "ki_1", item=_item(), version=_version())
     assert res.state == "indexed" and res.version_id == "kv_2"
-    assert len(executed) == 1  # only the concurrency guard, no full re-read
+    # Only the two cheap generation checks (before work, before stale cleanup); no full re-read.
+    assert len(executed) == 2
 
 
 async def test_fast_path_falls_back_when_a_newer_version_was_published(svc, monkeypatch):
@@ -185,9 +193,9 @@ async def test_fast_path_falls_back_when_a_newer_version_was_published(svc, monk
 
     class _Guard(_Session):  # guard query: someone published kv_9 meanwhile
         async def execute(self, stmt, params=None):
-            return SimpleNamespace(first=lambda: SimpleNamespace(current_version_id="kv_9", is_active=True))
+            return SimpleNamespace(first=lambda: SimpleNamespace(current_version_id="kv_9", is_active=True, status="active"))
 
-    factories = iter([_Guard([]), _Session([_item(version_id="kv_9"), newer])])
+    factories = iter([_Guard([]), _Session([_item(version_id="kv_9"), newer]), _Guard([])])
     monkeypatch.setattr(ks, "db_manager", SimpleNamespace(session_factory=lambda: next(factories)))
     res = await service.sync_item(T, "ki_1", item=_item(), version=_version())
     # Must index the NEWER version, never resurrect the stale one.
@@ -197,6 +205,25 @@ async def test_fast_path_falls_back_when_a_newer_version_was_published(svc, monk
 
 async def test_archive_and_delete_skip_reads_and_purge(svc, monkeypatch):
     ks, service, qdrant, calls = svc
-    monkeypatch.setattr(ks, "db_manager", SimpleNamespace(session_factory=lambda: (_ for _ in ()).throw(AssertionError("no DB read expected"))))
+    executed: List[int] = []
+
+    class _Gone(_Session):  # the one cheap check: the item is no longer active
+        async def execute(self, stmt, params=None):
+            executed.append(1)
+            return _Result(_item(active=False))
+
+    monkeypatch.setattr(ks, "db_manager", SimpleNamespace(session_factory=lambda: _Gone([])))
+    monkeypatch.setattr("app.services.knowledge_search_index.upsert_items", AsyncMock())
     res = await service.sync_after_commit(T, "ki_1", "archived")
     assert res.state == "removed" and calls == ["delete_all"]
+    assert len(executed) == 1  # no full read of the item or version
+
+
+async def test_delayed_purge_restores_an_item_reactivated_meanwhile(svc, monkeypatch):
+    """A slow archive purge that lands after a restore must not leave the live item unsearchable."""
+    ks, service, qdrant, calls = svc
+    restored = _version(semantic_status="synced")  # already embedded before the archive
+    monkeypatch.setattr(ks, "db_manager", SimpleNamespace(session_factory=lambda: _Session([_item(), restored])))
+    res = await service.sync_item(T, "ki_1", removed=True)
+    assert res.state == "indexed" and res.version_id == "kv_2"
+    assert calls == ["delete_all", "upsert", "delete_stale"]

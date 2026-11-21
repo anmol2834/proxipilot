@@ -20,6 +20,7 @@ import {
   DeleteConfirmationDialog,
   BulkActionBar,
 } from "@/components/knowledge";
+import { CompanyInfoEditor } from "@/components/knowledge/CompanyInfoEditor";
 
 // ---------------------------------------------------------------------------
 // Skeleton loader for the table while fetching
@@ -231,7 +232,9 @@ function KnowledgeContent() {
     fetchCategoryCounts,
     openAddDialog,
     totalCount,
+    selectedCategory,
   } = useKnowledgeStore();
+  const isCompanyInfo = selectedCategory === "company-info";
 
   const isTableLoading =
     isLoading ||
@@ -287,16 +290,23 @@ function KnowledgeContent() {
       {/* 2. Category Cards */}
       <CategoryCardsGrid />
 
-      {/* 3. Toolbar */}
-      <KnowledgeToolbar />
+      {/* 3. Company Info is one structured editor (no file import); older rows, if any, follow it */}
+      {isCompanyInfo && (
+        <Box id="company-info-editor" sx={{ mt: 2.5, scrollMarginTop: "80px" }}>
+          <CompanyInfoEditor />
+        </Box>
+      )}
 
-      {/* 4. Error Banner */}
+      {/* 4. Toolbar */}
+      {(!isCompanyInfo || items.length > 0 || isTableLoading) && <KnowledgeToolbar />}
+
+      {/* 5. Error Banner */}
       {fetchError && !isTableLoading && (
         <FetchErrorBanner error={fetchError} onRetry={() => fetchItems(true, 1)} />
       )}
 
-      {/* 5. Content: Loading skeleton / Empty state / Table */}
-      {isTableLoading ? (
+      {/* 6. Content: Loading skeleton / Empty state / Table */}
+      {isCompanyInfo && !isTableLoading && items.length === 0 ? null : isTableLoading ? (
         <>
           <TableSkeleton />
           <KnowledgePagination totalItems={totalCount} />

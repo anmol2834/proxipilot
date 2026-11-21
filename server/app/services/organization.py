@@ -181,8 +181,15 @@ class OrganizationService:
                 metadata={"role": SystemRole.OWNER, "status": MembershipStatus.ACTIVE},
             )
 
+            # Company Info: seed the public projection from the facts just entered (same transaction,
+            # no remote I/O; vectors are published after commit).
+            from app.services import company_info
+            ci_result = await company_info.refresh_after_owner_change(db, org.id, user_id, "registration")
+
             # Commit all inserts together in a single atomic database round trip
             await db.commit()
+            if ci_result:
+                company_info.schedule_sync(org.id, *ci_result, reason="created")
 
             # Evict and pre-seed caches for ultra-fast subsequent requests
             from app.services.onboarding import onboarding_service
@@ -320,7 +327,13 @@ class OrganizationService:
                 actor_user_id=user_id,
                 metadata={"changed_fields": list(changes.keys())},
             )
+            from app.services import company_info
+            ci_result = None
+            if set(changes) & {"name", "website", "industry"}:
+                ci_result = await company_info.refresh_after_owner_change(db, organization_id, user_id, "organization edited")
             await db.commit()
+            if ci_result:
+                company_info.schedule_sync(organization_id, *ci_result)
             await db.refresh(org)
             logger.info(
                 "Audit: Organization updated",

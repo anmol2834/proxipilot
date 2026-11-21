@@ -15,6 +15,7 @@ The core routing decision and execution coordinator:
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import datetime, timezone
 import time
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -762,6 +763,48 @@ class RetrievalRouter:
                 # loaded and trigger lazy IO): retrieval degrades to the branches that finished
                 # instead of failing outright.
                 deadline_hit = True
+
+        # Exact reference lookup: when a requirement asks about the company itself or about a
+        # process/timeline, add the tenant's current approved records of that category straight
+        # from PostgreSQL. Company/process questions are otherwise routed with the product default
+        # and depend on a semantic hit among thousands of catalogue chunks (and on Qdrant being up
+        # to date). These are authoritative facts of the requested category, so they are "exact".
+        reference_categories = sorted({
+            (r.category or "") for r in (plan.requirements or [])
+            if (r.category or "") in ("company_info", "processes_timelines", "policies")
+        } | ({"company_info"} if is_contact_request else set()))
+        if reference_categories:
+            try:
+                async with db_manager.session_factory() as ref_db:
+                    reference_items = await self._structured_retriever.fetch_reference_records(
+                        db=ref_db, tenant_id=tenant_id, categories=reference_categories, limit=20, as_of=as_of,
+                    )
+                have = {it.id for it, _v in structured_results}
+                # Policies: only those the question names ("warranty", "refund"...), never every policy.
+                policy_words = {w for r in (plan.requirements or []) if (r.category or "") == "policies"
+                                for w in re.findall(r"[a-z]{4,}", (r.query_text or r.description or "").lower())}
+                reference_items = [
+                    (it, ver) for it, ver in reference_items
+                    if it.category != "policies" or (policy_words & set(re.findall(r"[a-z]{4,}", " ".join(
+                        str(x) for x in (it.title, (ver.canonical_data or {}).get("policy_type"),
+                                         (ver.canonical_data or {}).get("policy_name")) if x).lower())))]
+                for it, ver in reference_items:
+                    if it.id not in have:
+                        structured_results.append((it, ver))
+                        have.add(it.id)
+                    structured_origin[it.id] = ("exact_structured", 1.0)
+            except Exception as ref_err:  # noqa: BLE001 - the other branches still answer
+                logger.warning("Reference lookup failed", tenant_id=tenant_id, error=str(ref_err)[:200])
+            # A (sub-)plan that asks ONLY about the company / a process is answered from those
+            # categories: a catalogue item that happens to rank higher semantically ("installation in
+            # Jaipur" -> an installation product) must not take the requirement's result slot.
+            plan_cats = {(r.category or "") for r in (plan.requirements or [])}
+            if plan_cats and plan_cats <= set(reference_categories):
+                keep = set(reference_categories)
+                structured_results = [(it, v) for it, v in structured_results if it.category in keep]
+                semantic_results = [h for h in semantic_results if (h.category or "") in keep]
+                lexical_results = [t for t in lexical_results if t[0].category in keep]
+                expansion_lexical = [t for t in expansion_lexical if t[0].category in keep]
 
         # An unconstrained category listing says nothing about the customer's question.
         # It used to enter the verifier as "exact" evidence (base score 100), so the same

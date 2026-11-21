@@ -65,6 +65,20 @@ from app.services.version_diff import VersionDiffEngine
 _PRODUCT_ENTITY_TYPES = {"PRODUCT", "SERVICE", "PACKAGE", "PLAN", "PART", "RAW_MATERIAL", "ACCESSORY"}
 
 
+def _reject_managed_company_info(item: KnowledgeItem) -> None:
+    """The registration-backed Company Info item is edited only through the Company Info editor
+    (its facts are owned by the organization / business profile). Generic edits, version
+    publish/rollback, archive and delete would bypass that ownership and could reintroduce an
+    outdated value, so they are refused."""
+    from app.services.company_info import is_managed
+
+    if is_managed(item):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Company Info is edited in Knowledge → Company Info. Use that editor to change or hide these facts.",
+        )
+
+
 def _products_entity_type(ui_type: Optional[str]) -> str:
     """Map the UI 'type' label to a valid products_services entity type.
 
@@ -103,6 +117,12 @@ class KnowledgeCRUDService:
             canonical_cat = normalize_category_key(payload.category)
         except KnowledgeInvalidCategoryError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+        if canonical_cat == "company_info":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Company Info is managed in Knowledge → Company Info. Add or change these facts there.",
+            )
 
         # 3. Fetch tenant custom attribute definitions
         stmt = select(KnowledgeAttributeDefinition).where(
@@ -397,7 +417,12 @@ class KnowledgeCRUDService:
 
         limit = min(max(limit, 1), 100)
 
-        base_conditions = [KnowledgeItem.tenant_id == tenant_id]
+        # The registration-backed Company Info record is shown and edited in the Company Info editor,
+        # not as a generic row (generic edits to it are refused anyway).
+        base_conditions = [
+            KnowledgeItem.tenant_id == tenant_id,
+            or_(KnowledgeItem.external_identity_key.is_(None), KnowledgeItem.external_identity_key != "company_profile"),
+        ]
 
         # 1. Category filter
         if category and category.lower() != "all":
@@ -602,6 +627,7 @@ class KnowledgeCRUDService:
                 detail=f"Knowledge item '{item_id}' not found for this organization.",
             )
 
+        _reject_managed_company_info(item)
         # Resolve current version
         current_version = None
         if item.current_version_id and item.versions:
@@ -887,6 +913,7 @@ class KnowledgeCRUDService:
                 detail=f"Knowledge item '{item_id}' not found for this organization.",
             )
 
+        _reject_managed_company_info(item)
         now_utc = datetime.now(timezone.utc)
 
         if hard_delete:
@@ -1141,6 +1168,7 @@ class KnowledgeCRUDService:
                 detail=f"Knowledge item '{item_id}' not found for this organization.",
             )
 
+        _reject_managed_company_info(item)
         if version_number is None:
             draft_versions = [
                 v for v in item.versions 
@@ -1257,6 +1285,7 @@ class KnowledgeCRUDService:
                 detail=f"Knowledge item '{item_id}' not found for this organization.",
             )
 
+        _reject_managed_company_info(item)
         target_ver = next((v for v in item.versions if v.version_number == target_version_number), None)
         if not target_ver:
             raise HTTPException(

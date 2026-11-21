@@ -39,6 +39,11 @@ _CONTACT_FACT_FIELDS = (
 _CONTACT_ATTRS = {f for f, _ in _CONTACT_FACT_FIELDS} - {"department", "escalation_tier"}
 
 
+def is_managed_company_doc(attrs: Dict[str, Any]) -> bool:
+    """Registration-backed Company Info version (allowlisted public document)."""
+    return bool(attrs.get("schema_version") and attrs.get("_content_hash"))
+
+
 def provides_contact_details(candidate: Any) -> bool:
     """A candidate that can answer 'how do I reach you': a contact card, or a Company Info record
     that actually carries an email, phone, address or business hours."""
@@ -47,7 +52,61 @@ def provides_contact_details(candidate: Any) -> bool:
     if (getattr(candidate, "category", "") or "").lower() != "company_info":
         return False
     attrs = getattr(candidate, "attributes", None) or {}
+    if is_managed_company_doc(attrs):
+        return bool(attrs.get("contact_routes") or attrs.get("branches") or attrs.get("hours"))
     return any(attrs.get(k) for k in _CONTACT_ATTRS)
+
+
+# Company Info section kind -> fact name. Names contain the words requirement planners ask for
+# ("email", "phone", "address", "business_hours", "description"...), so requirement-level
+# attribute filtering keeps the relevant facts.
+_CHANNEL_FACT = {"email": "contact_email", "phone": "contact_phone", "whatsapp": "contact_phone_whatsapp",
+                 "form": "contact_form_link", "link": "contact_link"}
+
+
+def company_info_facts(attrs: Dict[str, Any]) -> List[Tuple[str, str]]:
+    """(fact_name, text) for every section of a managed Company Info document. Each text names the
+    company and the fact, and is exactly what the editor shows under "what the AI can share"."""
+    from app.services.company_info import project_sections
+
+    routes = {r.get("id"): r for r in attrs.get("contact_routes") or []}
+    out: List[Tuple[str, str]] = []
+    for sid, txt in project_sections(attrs):
+        kind, _, rid = sid.partition(":")
+        if kind == "overview":
+            name = "company_description_website"
+        elif kind == "offerings":
+            name = "company_offerings"
+        elif kind == "audience":
+            name = "company_customers_industries"
+        elif kind == "contact":
+            name = _CHANNEL_FACT.get((routes.get(rid) or {}).get("channel"), "contact_note")
+        elif kind == "hours":
+            name = "contact_business_hours"
+        elif kind == "branch":
+            name = "contact_address_branch"
+        elif kind == "coverage":
+            name = "company_service_coverage"
+        elif kind == "languages":
+            name = "company_languages"
+        elif kind == "link":
+            name = "company_enquiry_link"
+        else:
+            name = "company_fact"
+        out.append((name, txt))
+    return out
+
+
+_PROCESS_FIELDS = (("trigger", "Starts"), ("timeline", "Timeline"), ("working_hours", "Counted in"),
+                   ("steps", "Steps"), ("customer_action", "Customer needs to"),
+                   ("conditions", "Conditions & exceptions"), ("applies_to", "Applies to"), ("region", "Region"))
+
+
+def process_fact(title: str, attrs: Dict[str, Any]) -> Optional[str]:
+    """One composed, verbatim fact for a Processes & Timelines record."""
+    name = attrs.get("process_name") or title
+    parts = [f"{label}: {attrs[key]}" for key, label in _PROCESS_FIELDS if attrs.get(key)]
+    return f"{name} — " + "; ".join(parts) if parts else None
 
 
 class CandidateNormalizer:
@@ -297,6 +356,35 @@ class CandidateNormalizer:
                     )
                 )
 
+        def _fact(name: str, value: Any) -> VerifiedFact:
+            return VerifiedFact(
+                attribute_name=name,
+                entity_id=candidate.entity_id,
+                external_identity_key=candidate.external_identity_key,
+                typed_value=value,
+                source_system=candidate.provenance.source_system,
+                source_version_id=candidate.provenance.version_id,
+                authority_level=candidate.provenance.authority_level,
+                authority_score=candidate.provenance.authority_score,
+                verification_status=candidate.verification_status,
+            )
+
+        attrs_all = candidate.attributes or {}
+        cat = (candidate.category or "").lower()
+
+        # Registration-backed Company Info: every approved public fact, labelled. The version is
+        # the allowlisted document, so nothing private can be emitted here.
+        if cat == "company_info" and is_managed_company_doc(attrs_all):
+            for name, txt in company_info_facts(attrs_all):
+                facts.append(_fact(name, txt))
+            return facts
+
+        # Processes & Timelines: the timeline is passed verbatim (never paraphrased into a promise).
+        if cat == "processes_timelines":
+            composed = process_fact(candidate.title, attrs_all)
+            if composed:
+                facts.append(_fact("process_timeline", composed))
+
         # Contact Details (Company Info is the home of the company's contact details)
         if provides_contact_details(candidate):
             attrs = candidate.attributes or {}
@@ -332,14 +420,20 @@ class CandidateNormalizer:
                 )
             )
 
-        # Policy Document
+        # Policy Document: the policy's own text (details / summary) when no passage was retrieved,
+        # e.g. on the exact PostgreSQL path; the title alone tells the customer nothing.
         if candidate.candidate_role == CandidateRole.POLICY_DOCUMENT:
+            pol = candidate.attributes or {}
+            pol_text = None
+            if pol.get("details") or pol.get("summary"):
+                pol_text = f"{pol.get('policy_name') or candidate.title}: " + " ".join(
+                    str(pol[k]) for k in ("summary", "details", "applicability", "scope") if pol.get(k))
             facts.append(
                 VerifiedFact(
                     attribute_name="policy_statement",
                     entity_id=candidate.entity_id,
                     external_identity_key=candidate.external_identity_key,
-                    typed_value=candidate.semantic_passages[0] if candidate.semantic_passages else candidate.title,
+                    typed_value=pol_text or (candidate.semantic_passages[0] if candidate.semantic_passages else candidate.title),
                     source_system=candidate.provenance.source_system,
                     source_version_id=candidate.provenance.version_id,
                     authority_level=candidate.provenance.authority_level,

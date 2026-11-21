@@ -131,6 +131,8 @@ def _format_currency_amount(amount: Any, currency: Optional[str] = None) -> Opti
 
 
 _INTERNAL_KEYS_TO_IGNORE: Set[str] = {
+    "_content_hash",
+    "schema_version",
     "custom_attributes",
     "custom_attributes_json",
     "version",
@@ -621,6 +623,17 @@ class _CompanyInfoProjector(_BaseCategoryProjector):
         custom_attrs: Dict[str, Any],
         consumed_keys: Optional[Set[str]] = None,
     ) -> List[Tuple[str, str]]:
+        # Registration-backed Company Info (Company Info editor): the version holds only the
+        # allowlisted public document; project it with the same deterministic sections the
+        # editor previews, so "what the AI can share" and what is indexed are identical.
+        if attrs.get("schema_version") and attrs.get("_content_hash"):
+            from app.services.company_info import project_sections
+
+            if consumed_keys is not None:
+                consumed_keys.update(attrs.keys())
+                consumed_keys.update(custom_attrs.keys())
+            return [(sid.replace(":", "_"), txt) for sid, txt in project_sections(attrs)]
+
         sections: List[Tuple[str, str]] = []
 
         lines = [f"Company: {item.title}"]
@@ -911,7 +924,12 @@ class KnowledgeProjectionService:
             KnowledgeCategory.SUPPORT_FAQS.value,
             "support-faqs",
         }
-        if item.category in structured_categories or clean_cat in structured_categories or len(full_text) <= self.max_chars:
+        # Company Info is always chunked by fact (overview, each contact route, each branch, hours,
+        # coverage...): each section already names the company and the fact, so a question about one
+        # branch or one contact matches that chunk instead of a diluted whole-profile vector.
+        if clean_cat == KnowledgeCategory.COMPANY_INFO.value and len(sections) > 1:
+            sections_to_chunk = sections
+        elif item.category in structured_categories or clean_cat in structured_categories or len(full_text) <= self.max_chars:
             sections_to_chunk = [("entity", full_text)]
         else:
             sections_to_chunk = sections

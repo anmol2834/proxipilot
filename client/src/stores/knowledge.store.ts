@@ -279,8 +279,23 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
   clearSelection: () => set({ selectedIds: [] }),
   dismissBanner: () => set({ bannerDismissed: true }),
 
-  openAddDialog: (preselectedCat) =>
-    set({ isAddDialogOpen: true, selectedCategoryForAdd: preselectedCat ?? null }),
+  openAddDialog: (preselectedCat) => {
+    // Company Info has no file import: it is one structured editor on the Company Info tab.
+    if (preselectedCat === "company-info") {
+      set({ isAddDialogOpen: false, selectedCategoryForAdd: null });
+      if (get().selectedCategory !== "company-info") get().setSelectedCategory("company-info");
+      if (typeof window !== "undefined") {
+        const url = new URL(window.location.href);
+        if (url.searchParams.get("category") !== "company-info") {
+          url.searchParams.set("category", "company-info");
+          window.history.replaceState(window.history.state, "", url.toString());
+        }
+        window.setTimeout(() => document.getElementById("company-info-editor")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+      }
+      return;
+    }
+    set({ isAddDialogOpen: true, selectedCategoryForAdd: preselectedCat ?? null });
+  },
   closeAddDialog: () => {
     const state = get();
     const wasDone = state.upload.phase === "done";

@@ -126,6 +126,7 @@ from app.models.auth import (
 # Onboarding Domain
 from app.models.onboarding import (
     BusinessProfile,
+    CompanyInfoProfile,
     OnboardingState,
     WorkspacePreferences,
 )
@@ -210,6 +211,7 @@ __all__ = [
     "ProviderEventStatus",
     # Thread & Conversation Memory
     "ThreadMemory",
+    "CompanyInfoProfile",
     # Organizational Experience Memory
     "OrgPractice",
     "PracticeSituation",

@@ -75,6 +75,10 @@ def price_order(criterion: Optional[str]) -> Optional[str]:
     return "asc"
 
 
+
+# Categories whose records are answered from their own canonical facts (not catalogue fields).
+_REFERENCE_CATEGORIES = frozenset({"company_info", "processes_timelines", "policies"})
+
 class CandidateVerificationResult:
     """Internal container for evaluated evidence."""
 
@@ -432,6 +436,11 @@ class FactVerifier:
                 warranty=canonical.get("warranty"),
                 sla=canonical.get("sla"),
                 attributes={
+                    # Reference categories carry their facts in canonical fields (Company Info's
+                    # allowlisted public document, a process's timeline, a policy's details); evidence
+                    # fusion turns them into labelled facts. Catalogue items keep the previous shape.
+                    **({k: v for k, v in canonical.items() if k != "custom_attributes"}
+                       if item.category in _REFERENCE_CATEGORIES else {}),
                     **(canonical.get("custom_attributes") or {}),
                     **({"product_role": elig.facets.role.value,
                         "product_family": elig.facets.family or None,

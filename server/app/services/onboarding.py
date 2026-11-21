@@ -270,7 +270,14 @@ class OnboardingService:
             },
         )
 
+        # Company Info: keep the public projection in step with the business profile (same
+        # transaction; vectors are published after commit, never blocking signup).
+        from app.services import company_info
+        ci_result = await company_info.refresh_after_owner_change(db, organization_id, user_id, "business profile saved")
+
         await db.commit()
+        if ci_result:
+            company_info.schedule_sync(organization_id, *ci_result)
         await self.invalidate_cache(user_id)
 
         logger.info(

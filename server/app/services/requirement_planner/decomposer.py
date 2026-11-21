@@ -34,6 +34,15 @@ from app.services.context_resolver import ContextEnvelope
 from app.services.requirement_planner.preprocessor import PreprocessedEmail
 
 
+_DEFAULT_INTENTS = {
+    "products_services": IntentType.PRODUCT_DISCOVERY,
+    "company_info": IntentType.SERVICE_LOOKUP,
+    "processes_timelines": IntentType.ORDER_OR_DELIVERY_QUESTION,
+    "policies": IntentType.POLICY_QUESTION,
+    "support_faqs": IntentType.SUPPORT_ISSUE,
+    "offers_promotions": IntentType.PRICE_QUERY,
+}
+
 # Segment-level "process / timeline" wording (generic; no business vocabulary).
 _PROCESS_TIMELINE_SEGMENT = re.compile(
     r"\bhow\s+(?:long|soon)\b|\bhow\s+many\s+(?:working\s+|business\s+)?(?:days|hours|weeks)\b|\bby\s+when\b"
@@ -131,7 +140,7 @@ class MultiIntentDecomposer:
                 continue
 
             # Identify category and intent
-            cat, intent, strategy = cls._classify_segment(seg_text)
+            cat, intent, strategy = cls._classify_segment(seg_text, default_category=fallback_category)
 
             # Extract numeric constraints/ranges
             p_range, p_filters = cls._extract_segment_constraints(seg_text, preprocessed)
@@ -312,7 +321,8 @@ class MultiIntentDecomposer:
         return segments
 
     @classmethod
-    def _classify_segment(cls, text: str) -> Tuple[str, IntentType, RetrievalStrategy]:
+    def _classify_segment(cls, text: str, default_category: str = "products_services"
+                          ) -> Tuple[str, IntentType, RetrievalStrategy]:
         """Classify a text segment into target category, intent, and retrieval strategy."""
         text_lower = text.lower()
 
@@ -352,8 +362,45 @@ class MultiIntentDecomposer:
         if any(w in text_lower for w in ("compare", "versus", "vs", "difference")):
             return "products_services", IntentType.PRODUCT_COMPARISON, RetrievalStrategy.HYBRID
 
-        # Default to products & services
+        # No keyword matched: use the category AI #1 chose for the message (it understands paraphrases,
+        # typos and mixed languages); products & services only when nothing better is known.
+        if default_category and default_category != "products_services" and default_category in _DEFAULT_INTENTS:
+            return default_category, _DEFAULT_INTENTS[default_category], RetrievalStrategy.HYBRID
         return "products_services", IntentType.PRODUCT_DISCOVERY, RetrievalStrategy.HYBRID
+
+    @classmethod
+    def add_model_requirements(
+        cls, requirements: List[PlannedRequirement], search_requirements: Optional[List[Dict[str, Any]]],
+    ) -> List[PlannedRequirement]:
+        """Per-need categories from AI #1 complete the keyword decomposition: any category the model
+        tagged that no requirement covers yet becomes its own requirement (classification stays per
+        requirement in mixed-intent mail, e.g. 'install in Jaipur? also send the rate')."""
+        have = {r.category for r in requirements}
+        added = 0
+        for entry in list(search_requirements or [])[:8]:
+            if not isinstance(entry, dict):
+                continue
+            cat = str(entry.get("category") or "").strip()
+            if cat not in _DEFAULT_INTENTS or cat in have:
+                continue
+            text = str(entry.get("original_text") or entry.get("translated_standard_term") or "").strip()[:300]
+            if not text:
+                continue
+            added += 1
+            requirements.append(PlannedRequirement(
+                requirement_id=f"req_ai_{added}_{cat[:4]}",
+                intent=_DEFAULT_INTENTS[cat],
+                category=cat,
+                description=text,
+                query_text=str(entry.get("translated_standard_term") or text)[:300],
+                entities=cls._extract_segment_entities(text),
+                requested_attributes=cls._infer_requested_attributes(cat, text),
+                retrieval_strategy=RetrievalStrategy.HYBRID,
+                dependencies=[],
+                requested_count=cls._infer_requested_count(cat, text),
+            ))
+            have.add(cat)
+        return requirements
 
     @classmethod
     def _extract_segment_constraints(
@@ -463,7 +510,8 @@ class MultiIntentDecomposer:
         if category == "products_services":
             return ["name", "price", "sku", "description", "warranty"]
         elif category == "policies":
-            return ["policy_name", "details", "effective_from", "effective_until"]
+            # The policy's own wording (one verified statement), same as single-question policy groups.
+            return ["policy_statement"]
         elif category == "support_faqs":
             return ["question", "answer", "category", "topic"]
         elif category == "offers_promotions":

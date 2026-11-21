@@ -153,7 +153,11 @@ class RequirementGrouper:
                         description=req.description or req.query_text or f"Requirement {req.requirement_id}",
                         requested_targets=targets,
                         requested_count=req.requested_count or 1,
-                        required_attributes=req.requested_attributes or [],
+                        # Company Info / process facts are compact, labelled statements: keep them all
+                        # (product-style attribute names would drop e.g. the coverage fact).
+                        required_attributes=(
+                            [] if req_type == RequirementType.GENERAL_INQUIRY and cat in ("company_info", "processes_timelines")
+                            else req.requested_attributes or []),
                         applicable_candidate_roles=candidate_roles,
                         is_operational=is_op,
                         operational_type=op_type,
@@ -330,7 +334,9 @@ class RequirementGrouper:
                     requirement_type=RequirementType.CONTACT_RESOLUTION,
                     intent="contact_lookup",
                     description="Authorized corporate billing and escalation contact resolution",
-                    requested_targets=["billing", "escalation"],
+                    # No title targets: the company's contact details are matched by role and facts,
+                    # not by records literally titled "billing" / "escalation".
+                    requested_targets=[],
                     requested_count=1,
                     required_attributes=["contact_email", "contact_phone"],
                     # The company's contact details live in Company Info.
@@ -358,6 +364,30 @@ class RequirementGrouper:
                     required_attributes=[],
                     applicable_candidate_roles={CandidateRole.PROCESS_TIMELINE},
                     target_category="processes_timelines",
+                )
+            )
+
+        # ---------------------------------------------------------------------
+        # 5c. Company Info Requirement ("introduce your company", "Pune branch hours", "do you cover
+        #     Jaipur?") — previously these fell into the product fallback group whose roles exclude
+        #     company records, so the reply had no company evidence at all.
+        # ---------------------------------------------------------------------
+        has_company = (
+            not has_contact
+            and any((r.category or "") == "company_info" for r in (plan.requirements or []))
+        )
+        if has_company:
+            groups.append(
+                RequirementGroupDefinition(
+                    requirement_id=f"req_company_{plan.plan_id[-6:]}",
+                    requirement_type=RequirementType.GENERAL_INQUIRY,
+                    intent="company_info",
+                    description="Company facts the business has approved for customer replies",
+                    requested_targets=[],
+                    requested_count=1,
+                    required_attributes=[],
+                    applicable_candidate_roles={CandidateRole.GENERAL_KNOWLEDGE, CandidateRole.CONTACT_CARD},
+                    target_category="company_info",
                 )
             )
 

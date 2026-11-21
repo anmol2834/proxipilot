@@ -16,7 +16,8 @@ Architectural rules:
 
 import uuid
 from typing import Optional, TYPE_CHECKING
-from sqlalchemy import Boolean, ForeignKey, String, Text
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base, TimestampMixin
 
@@ -237,3 +238,25 @@ class WorkspacePreferences(Base, TimestampMixin):
             f"<WorkspacePreferences id={self.id} "
             f"org={self.organization_id} tz={self.timezone}>"
         )
+
+
+class CompanyInfoProfile(Base, TimestampMixin):
+    """Company-Info-owned public facts and share flags for one workspace.
+
+    Shared facts (name, website, industry, description, industries served, offerings, customer
+    types) remain owned by ``organizations`` / ``business_profiles``; this row holds only what the
+    Company Info editor owns plus the share flags. The searchable Company Info knowledge item is a
+    derived projection of these three sources (see ``services/company_info.py``).
+    """
+
+    __tablename__ = "company_info_profiles"
+
+    tenant_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("organizations.id", ondelete="CASCADE"), primary_key=True,
+    )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    facts: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    share: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    content_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    knowledge_item_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    updated_by_user_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)

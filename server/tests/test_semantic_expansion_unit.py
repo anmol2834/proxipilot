@@ -127,7 +127,7 @@ def test_strict_schema_requires_every_expansion_field():
     assert "search_requirements" in schema["required"]
     item = schema["properties"]["search_requirements"]["items"]
     assert set(item["required"]) == set(item["properties"]) == {
-        "original_text", "translated_standard_term", "search_concepts", "keywords"}
+        "original_text", "translated_standard_term", "search_concepts", "keywords", "category"}
     assert item["additionalProperties"] is False
 
 
