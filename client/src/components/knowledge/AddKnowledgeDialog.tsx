@@ -205,14 +205,12 @@ function AddKnowledgeModalContent({
   const isDone = upload.phase === "done";
   const isError = upload.phase === "error";
 
-  // Auto-close dialog 1.2 s after success
+  // Close shortly after success (long enough to read "Import complete!"). The store keeps the
+  // upload in "done" until the dialog closes, so nothing can cancel this timer early.
   useEffect(() => {
-    if (isDone) {
-      const t = setTimeout(() => {
-        onClose();
-      }, 1200);
-      return () => clearTimeout(t);
-    }
+    if (!isDone) return;
+    const t = setTimeout(() => onClose(), 900);
+    return () => clearTimeout(t);
   }, [isDone, onClose]);
 
   // Reset upload state whenever the dialog unmounts (unless an import just completed and post-fetch is in flight)

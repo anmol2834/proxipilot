@@ -171,7 +171,8 @@ interface KnowledgeState {
 
   // ── Async Server Actions ──────────────────────────────────────────────────
   /** Fetch/refresh knowledge items in batches from the server */
-  fetchItems: (reset?: boolean, targetPage?: number) => Promise<void>;
+  /** `afterImport`: the list is reloaded right after an import, so retry once if it comes back empty. */
+  fetchItems: (reset?: boolean, targetPage?: number, afterImport?: boolean) => Promise<void>;
 
   /** Fetch live category item counts for dashboard cards */
   fetchCategoryCounts: () => Promise<void>;
@@ -305,8 +306,10 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
     set((prev) => ({
       isAddDialogOpen: false,
       selectedCategoryForAdd: null,
+      // After an import the table shows its skeleton until the fresh page arrives.
       isLoading: wasDone ? true : prev.isLoading,
       isFetching: wasDone ? true : prev.isFetching,
+      upload: wasDone ? INITIAL_UPLOAD_STATE : prev.upload,
     }));
 
     if (wasDone) {
@@ -314,7 +317,7 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
         `${rows.toLocaleString()} records are mapped, indexed and ready to use.`,
         `"${label}" imported`
       );
-      void get().fetchItems(true, 1);
+      void get().fetchItems(true, 1, true);
       void get().fetchCategoryCounts();
     }
   },
@@ -332,7 +335,7 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
 
   // ── Async Actions ─────────────────────────────────────────────────────────
 
-  fetchItems: async (reset = false, targetPage?: number) => {
+  fetchItems: async (reset = false, targetPage?: number, afterImport = false) => {
     const state = get();
     // Only the newest request may write the list: a slower response for a category the user
     // has already left must never replace the current one.
@@ -360,8 +363,8 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
         limit: state.pageSize, // batch size = 10
       });
 
-      // If called right after import completion but result is empty (e.g. DB replica delay), retry once
-      if (result.items.length === 0 && get().upload.phase === "done") {
+      // Right after an import an empty page can be a lagging read: retry once.
+      if (result.items.length === 0 && afterImport) {
         await new Promise((r) => setTimeout(r, 600));
         result = await knowledgeService.listItems({
           category: state.selectedCategory,
@@ -382,7 +385,6 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
         hasMore: result.hasMore,
         isLoading: false,
         isFetching: false,
-        upload: get().upload.phase === "done" ? INITIAL_UPLOAD_STATE : get().upload,
       });
     } catch (err) {
       if (seq !== fetchSeq) return;
@@ -391,7 +393,6 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
         fetchError: msg,
         isLoading: false,
         isFetching: false,
-        upload: get().upload.phase === "done" ? INITIAL_UPLOAD_STATE : get().upload,
       });
     }
   },
@@ -617,19 +618,21 @@ async function trackImportJob(
       currentPage: 1,
     }));
 
-    // Trigger immediate refresh so skeleton loader is shown and fresh items load
-    void getState().fetchItems(true, 1);
-    void getState().fetchCategoryCounts();
-
-    if (!getState().isAddDialogOpen) {
-      const rows = finalJob.processed_rows ?? finalJob.row_count ?? 0;
-      const label = meta.datasetName || meta.fileName || "Your file";
-      toast.success(
-        `${rows.toLocaleString()} records are mapped, indexed and ready to use.`,
-        `"${label}" imported`
-      );
-      setState({ upload: INITIAL_UPLOAD_STATE });
+    if (getState().isAddDialogOpen) {
+      // The dialog shows the success state and closes itself; closeAddDialog reloads the list.
+      // (Reloading here and resetting the upload raced the dialog's close and left it open.)
+      return;
     }
+    // Background import (dialog closed, e.g. resumed after a reload): refresh the list here.
+    const rows = finalJob.processed_rows ?? finalJob.row_count ?? 0;
+    const label = meta.datasetName || meta.fileName || "Your file";
+    toast.success(
+      `${rows.toLocaleString()} records are mapped, indexed and ready to use.`,
+      `"${label}" imported`
+    );
+    setState({ upload: INITIAL_UPLOAD_STATE });
+    void getState().fetchItems(true, 1, true);
+    void getState().fetchCategoryCounts();
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Import failed";
     const stillRunning = msg.startsWith("Import is still running");
