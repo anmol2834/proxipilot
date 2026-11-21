@@ -281,7 +281,7 @@ async def test_shared_fields_write_to_their_owner_and_need_org_permission(world)
 async def test_competing_write_paths_are_refused(world):
     from fastapi import HTTPException
 
-    from app.contracts.knowledge_crud import KnowledgeItemCreateDTO, KnowledgeItemUpdateDTO
+    from app.contracts.knowledge_crud import KnowledgeItemCreateDTO
     from app.core.database import db_manager
     from app.services.knowledge_crud import knowledge_crud_service
 
@@ -289,9 +289,7 @@ async def test_competing_write_paths_are_refused(world):
     async with db_manager.session_factory() as db:
         item_id = (await ci.managed_item(db, world.tenant_id)).id
         for call in (
-            lambda: knowledge_crud_service.update_item(db, world.tenant_id, world.users["owner"], item_id,
-                                                       KnowledgeItemUpdateDTO(title="x")),
-            lambda: knowledge_crud_service.archive_item(db, world.tenant_id, world.users["owner"], item_id),
+            lambda: knowledge_crud_service.delete_item(db, world.tenant_id, world.users["owner"], item_id),
             lambda: knowledge_crud_service.create_item(db, world.tenant_id, world.users["owner"], KnowledgeItemCreateDTO(
                 category="company-info", title="Contact", canonical_data={"company_name": "x"})),
         ):

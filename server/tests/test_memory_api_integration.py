@@ -127,38 +127,44 @@ def ok(r: httpx.Response, code: int = 200):
 
 
 # ---------------------------------------------------------------------------
-# Memory 1 + 8: Company Knowledge, Update & Publish, versions, rollback
+# Memory 1 + 8: Company Knowledge — one item per real-world record, no in-place edits, real delete
 # ---------------------------------------------------------------------------
 
 
-async def test_memory_1_and_8_knowledge_update_publish_rollback(env):
+async def test_memory_1_and_8_knowledge_identity_and_permanent_delete(env):
     a, v, o = env["c"]["agent"], env["c"]["viewer"], env["c"]["other"]
-    item = ok(await a.post("/knowledge", json={
-        "category": "products_services", "title": "ITEST Grab Bar 600 mm", "description": "304 SS grab bar",
-        "pricing": "1450", "currency": "INR", "code": f"ITEST-GB-{uuid.uuid4().hex[:6]}"}), 201)
+    code = f"ITEST-GB-{uuid.uuid4().hex[:6]}"
+    body = {"category": "products_services", "title": "ITEST Grab Bar 600 mm", "description": "304 SS grab bar",
+            "pricing": "1450", "currency": "INR", "code": code}
+    item = ok(await a.post("/knowledge", json=body), 201)
     item_id = item["id"]
-    ok(await a.patch(f"/knowledge/{item_id}", json={"pricing": "1550", "currency": "INR",
-                                                     "change_summary": "price increase"}))
-    versions = ok(await a.get(f"/knowledge/{item_id}/versions"))
-    vlist = versions if isinstance(versions, list) else versions.get("items", versions.get("versions", []))
-    assert len(vlist) >= 2, versions
+    # The same record (same code) can never be stored twice — manual create and import share identity.
+    dup = await a.post("/knowledge", json={**body, "title": "ITEST Grab Bar (again)"})
+    assert dup.status_code == 409, dup.text
+    # Knowledge is changed by re-importing, never edited in place: edit / publish / rollback are gone.
+    assert (await a.patch(f"/knowledge/{item_id}", json={"pricing": "1550"})).status_code == 405
+    assert (await a.post(f"/knowledge/{item_id}/rollback", json={"target_version_number": 1})).status_code in (404, 405)
     # worst cases
-    assert (await a.post(f"/knowledge/{item_id}/rollback", json={"target_version_number": 999})).status_code in (404, 409, 422)
     assert (await a.post("/knowledge", json={"category": "not_a_category", "title": "x"})).status_code in (400, 422)
     assert (await o.get(f"/knowledge/{item_id}")).status_code == 404            # other tenant can't see it
-    assert (await v.patch(f"/knowledge/{item_id}", json={"title": "hack"})).status_code == 403
-    # rollback to version 1 restores the old price, and only one vector (the current version) is searchable
-    ok(await a.post(f"/knowledge/{item_id}/rollback", json={"target_version_number": 1, "reason": "itest"}))
-    cur = ok(await a.get(f"/knowledge/{item_id}"))
-    assert "1450" in json.dumps(cur), "rollback did not restore version 1 content"
+    assert (await o.delete(f"/knowledge/{item_id}")).status_code == 404         # ... or delete it
+    assert (await v.delete(f"/knowledge/{item_id}")).status_code == 403         # viewer can't delete
     from app.core.config import get_settings
     url = str(get_settings().qdrant.url).rstrip("/")
-    async with httpx.AsyncClient(base_url=url, timeout=30) as q:
-        pts = (await q.post("/collections/proxipilot_knowledge/points/scroll", json={
-            "limit": 10, "with_payload": True, "filter": {"must": [
-                {"key": "knowledge_item_id", "match": {"value": item_id}}]}})).json()["result"]["points"]
-    assert len(pts) == 1, f"expected exactly one live vector after rollback, found {len(pts)}"
-    ok(await a.delete(f"/knowledge/{item_id}"))
+
+    async def live_vectors() -> int:
+        async with httpx.AsyncClient(base_url=url, timeout=30) as q:
+            return len((await q.post("/collections/proxipilot_knowledge/points/scroll", json={
+                "limit": 10, "with_payload": True, "filter": {"must": [
+                    {"key": "knowledge_item_id", "match": {"value": item_id}}]}})).json()["result"]["points"])
+
+    assert await live_vectors() == 1, "exactly one live vector for the item"
+    # Delete is permanent: row gone, vectors gone, and the same record can be added again cleanly.
+    assert ok(await a.delete(f"/knowledge/{item_id}"))["status"] == "deleted"
+    assert (await a.get(f"/knowledge/{item_id}")).status_code == 404
+    assert await live_vectors() == 0, "vectors must be purged on delete"
+    again = ok(await a.post("/knowledge", json=body), 201)
+    ok(await a.delete(f"/knowledge/{again['id']}"))
 
 
 # ---------------------------------------------------------------------------

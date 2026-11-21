@@ -162,8 +162,8 @@ operation (pick exactly one):
 - CHAT: greetings, thanks, small talk, or questions about the copilot itself ("hi", "what can you do?").
   Put a short, friendly, helpful reply in "reply". No draft, no search.
 - ANSWER: the employee asks YOU something or tells YOU something, without asking to change the email:
-  "what is the price of the paper dispenser?", "do we have hand dryers?", "which is cheaper?",
-  "note that I can give a discount on paper dispensers", "tell my agent/you that ...". Create fact_requests for
+  "what is the price of <product X>?", "do we have <product Y>?", "which is cheaper?",
+  "note that I can give a discount on <product X>", "tell my agent/you that ...". Create fact_requests for
   every product or category named so it is looked up. The answer goes to the chat, not into the email.
 - WRITING_ONLY: only wording changes to the email (tone, length, grammar, translation, order, clarity), or the
   employee dictates a statement for the email that names NO product ("tell them we received the PO").

@@ -30,7 +30,6 @@ from app.contracts.knowledge_crud import (
     KnowledgeCursorPageDTO,
     KnowledgeItemCreateDTO,
     KnowledgeItemResponseDTO,
-    KnowledgeItemUpdateDTO,
     KnowledgeVersionHistoryDTO,
     decode_cursor,
     encode_cursor,
@@ -55,14 +54,29 @@ from app.services.knowledge_read_contract import (
     compute_temporal_status,
     normalize_utc_timestamp,
 )
-from app.services.lifecycle_state_machine import (
-    InvalidLifecycleTransitionError,
-    LifecycleStateMachine,
-)
 from app.services.version_diff import VersionDiffEngine
 
 # Valid entity types for the products_services category (mirrors the category registry).
 _PRODUCT_ENTITY_TYPES = {"PRODUCT", "SERVICE", "PACKAGE", "PLAN", "PART", "RAW_MATERIAL", "ACCESSORY"}
+
+
+def _manual_identity_key(tenant_id: str, category: str, val_result: Any) -> Optional[str]:
+    """Stored identity key for a manually created record, or None when it has no real identity
+    (a record with no content at all has no identity)."""
+    from app.algorithms.deduplication.category_identity import CategoryIdentityResolver
+    from app.services.knowledge_persistence import _strip_identity_key
+
+    full_key = CategoryIdentityResolver.resolve_identity_key(
+        tenant_id=tenant_id,
+        category=category,
+        canonical_data=dict(val_result.cleaned_canonical_data or {}),
+        custom_attributes=dict(val_result.cleaned_custom_attributes or {}),
+        row_number=None,
+    )
+    key = _strip_identity_key(full_key)
+    if not key or key == "fp:empty" or key.startswith("row:"):
+        return None
+    return key[:512]
 
 
 def _reject_managed_company_info(item: KnowledgeItem) -> None:
@@ -172,8 +186,10 @@ class KnowledgeCRUDService:
             record_data["answer"] = payload.answer
         if payload.discount and "discount_value" not in record_data:
             record_data["discount_value"] = payload.discount
-        if payload.code and "discount_code" not in record_data:
-            record_data["discount_code"] = payload.code
+        if payload.code:
+            # A "code" means different things per category: a product's SKU, an offer's discount code.
+            code_field = {"products_services": "sku", "offers_promotions": "discount_code"}.get(canonical_cat, "code")
+            record_data.setdefault(code_field, payload.code)
         if payload.city and "city" not in record_data:
             record_data["city"] = payload.city
         if "name" not in record_data:
@@ -193,6 +209,25 @@ class KnowledgeCRUDService:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail={"message": "Knowledge validation failed", "errors": val_result.errors},
             )
+
+        # 5b. Identity: the same deterministic key an import would give this record (SKU / code /
+        # name + variant / policy name ...). One item per real-world thing, whichever path adds it:
+        # an existing item is refused here, and a later import of the same record updates this one.
+        identity_key = _manual_identity_key(tenant_id, canonical_cat, val_result)
+        if identity_key:
+            dup = (await db.execute(
+                select(KnowledgeItem.id).where(
+                    KnowledgeItem.tenant_id == tenant_id,
+                    KnowledgeItem.category == canonical_cat,
+                    KnowledgeItem.external_identity_key == identity_key,
+                ).limit(1)
+            )).scalar_one_or_none()
+            if dup:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={"message": "This item already exists in your knowledge. Re-import your file "
+                                       "to update it.", "existing_item_id": dup},
+                )
 
         # 6. Resolve KnowledgeSource with strict tenant verification
         if payload.source_id:
@@ -223,6 +258,7 @@ class KnowledgeCRUDService:
             tags=tags_json,
             is_active=True,
             created_by_user_id=user_id,
+            external_identity_key=identity_key,
         )
         db.add(item)
         await db.flush()
@@ -589,324 +625,29 @@ class KnowledgeCRUDService:
         return counts
 
     # =========================================================================
-    # 4. Update Knowledge Item (Creates Immutable New Version)
+    # 5. Delete Knowledge Item (permanent)
     # =========================================================================
 
-    async def update_item(
+    async def delete_item(
         self,
         db: AsyncSession,
         tenant_id: str,
         user_id: str,
         item_id: str,
-        payload: KnowledgeItemUpdateDTO,
-        client_ip: Optional[str] = None,
-    ) -> KnowledgeItemResponseDTO:
-        """Update an existing KnowledgeItem by creating a new immutable KnowledgeVersion snapshot."""
-        try:
-            payload.validate_temporal_dates()
-        except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
-
-        stmt = (
-            select(KnowledgeItem)
-            .where(
-                KnowledgeItem.id == item_id,
-                KnowledgeItem.tenant_id == tenant_id,
-            )
-            .options(
-                selectinload(KnowledgeItem.versions),
-                selectinload(KnowledgeItem.source),
-            )
-            .with_for_update()
-        )
-        res = await db.execute(stmt)
-        item = res.scalar_one_or_none()
-        if not item:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Knowledge item '{item_id}' not found for this organization.",
-            )
-
-        _reject_managed_company_info(item)
-        # Resolve current version
-        current_version = None
-        if item.current_version_id and item.versions:
-            current_version = next((v for v in item.versions if v.id == item.current_version_id), None)
-        if not current_version and item.versions:
-            current_version = max(item.versions, key=lambda v: v.version_number)
-
-        now_utc = datetime.now(timezone.utc)
-        next_version_num = (current_version.version_number + 1) if current_version else 1
-
-        # Fetch custom attribute definitions for category validation
-        stmt_defs = select(KnowledgeAttributeDefinition).where(
-            KnowledgeAttributeDefinition.tenant_id == tenant_id,
-            KnowledgeAttributeDefinition.category == item.category,
-        )
-        res_defs = await db.execute(stmt_defs)
-        custom_attrs = res_defs.scalars().all()
-        custom_defs = {
-            ca.key: type(
-                "CustDef",
-                (),
-                {
-                    "is_required": ca.is_required,
-                    "value_type": ca.value_type,
-                    "allowed_values": json.loads(ca.allowed_values_json) if ca.allowed_values_json else None,
-                },
-            )()
-            for ca in custom_attrs
-        }
-
-        # Merge existing and updated attributes
-        existing_canonical, existing_custom = self._extract_attributes_from_version(current_version, item.category)
-        merged_attrs: Dict[str, Any] = dict(existing_canonical)
-        merged_attrs.update(existing_custom)
-
-        if payload.canonical_data:
-            merged_attrs.update(payload.canonical_data)
-        if payload.custom_attributes:
-            merged_attrs.update(payload.custom_attributes)
-
-        # Merge convenience UI properties
-        if payload.pricing:
-            merged_attrs["price"] = payload.pricing
-        if payload.currency:
-            merged_attrs["currency"] = payload.currency
-        if payload.warranty:
-            merged_attrs["warranty"] = payload.warranty
-        if payload.serviceRegions:
-            merged_attrs["region"] = payload.serviceRegions
-        if payload.email:
-            merged_attrs["email"] = payload.email
-        if payload.phone:
-            merged_attrs["phone"] = payload.phone
-        if payload.role:
-            merged_attrs["role_title"] = payload.role
-        if payload.conditions:
-            merged_attrs["terms_conditions"] = payload.conditions
-        if payload.question:
-            merged_attrs["question"] = payload.question
-        if payload.answer:
-            merged_attrs["answer"] = payload.answer
-        if payload.discount:
-            merged_attrs["discount_value"] = payload.discount
-        if payload.code:
-            merged_attrs["discount_code"] = payload.code
-        if payload.city:
-            merged_attrs["city"] = payload.city
-
-        # Validate through canonical category registry
-        val_result = category_registry.validate_record(
-            category=item.category,
-            record=merged_attrs,
-            custom_definitions=custom_defs,
-            strict_custom=False,
-        )
-        if not val_result.is_valid:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail={"message": "Knowledge validation failed", "errors": val_result.errors},
-            )
-
-        # Determine version status
-        new_status = KnowledgeLifecycleStatus.ACTIVE.value
-        if payload.status:
-            if payload.status.lower() in {"draft", "drafts"}:
-                new_status = KnowledgeLifecycleStatus.DRAFT.value
-            elif payload.status.lower() in {"archived"}:
-                new_status = KnowledgeLifecycleStatus.ARCHIVED.value
-
-        # Prepare diff structures
-        old_headers = {
-            "title": item.title,
-            "description": item.description,
-            "tags": json.loads(item.tags) if item.tags else None,
-            "is_active": item.is_active,
-        }
-        new_headers = {
-            "title": payload.title.strip() if payload.title else item.title,
-            "description": payload.description.strip() if payload.description else item.description,
-            "tags": payload.tags if payload.tags is not None else (json.loads(item.tags) if item.tags else None),
-            "is_active": item.is_active,
-        }
-        old_temp = {
-            "effective_from": current_version.effective_from if current_version else None,
-            "effective_until": current_version.effective_until if current_version else None,
-        }
-        new_temp = {
-            "effective_from": payload.effective_from if payload.effective_from is not None else (current_version.effective_from if current_version else None),
-            "effective_until": payload.effective_until if payload.effective_until is not None else (current_version.effective_until if current_version else None),
-        }
-
-        diff = VersionDiffEngine.compute_diff(
-            item_id=item.id,
-            from_version=current_version.version_number if current_version else None,
-            to_version=next_version_num,
-            old_headers=old_headers,
-            new_headers=new_headers,
-            old_content=current_version.content_text if current_version else None,
-            new_content=payload.content or payload.description or (current_version.content_text if current_version else None),
-            old_canonical=existing_canonical,
-            new_canonical=val_result.cleaned_canonical_data,
-            old_custom=existing_custom,
-            new_custom=val_result.cleaned_custom_attributes,
-            old_temporal=old_temp,
-            new_temporal=new_temp,
-        )
-
-        # Check for no-op update
-        if diff.is_no_op and (current_version and current_version.status == new_status):
-            return self._format_response(
-                item=item,
-                version=current_version,
-                canonical_data=existing_canonical,
-                custom_attributes=existing_custom,
-                ui_type=payload.type or "Information",
-            )
-
-        # Archive old active version if new version is active
-        if current_version and current_version.status == KnowledgeLifecycleStatus.ACTIVE.value and new_status == KnowledgeLifecycleStatus.ACTIVE.value:
-            current_version.status = KnowledgeLifecycleStatus.ARCHIVED.value
-            current_version.archived_at = now_utc
-            if not current_version.effective_until:
-                current_version.effective_until = new_temp.get("effective_from") or now_utc
-
-        # Update item headers
-        if payload.title:
-            item.title = payload.title.strip()
-        if payload.description:
-            item.description = payload.description.strip()
-        if payload.tags is not None:
-            item.tags = json.dumps(payload.tags)
-        item.updated_at = now_utc
-
-        # Resolve source lineage for new version
-        new_source_id = item.source_id
-        new_authority = current_version.authority_level if current_version else SourceAuthorityLevel.MANUAL.value
-        if payload.source_id:
-            src_stmt = select(KnowledgeSource).where(
-                KnowledgeSource.id == payload.source_id,
-                KnowledgeSource.tenant_id == tenant_id,
-            )
-            src_res = await db.execute(src_stmt)
-            updated_src = src_res.scalar_one_or_none()
-            if not updated_src:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Knowledge source '{payload.source_id}' not found for this organization.",
-                )
-            new_source_id = updated_src.id
-            new_authority = updated_src.authority_level
-            item.source_id = new_source_id
-            item.source_type = updated_src.source_type
-
-        if payload.authority_level:
-            new_authority = payload.authority_level
-
-        canonical_dict = dict(val_result.cleaned_canonical_data)
-        if val_result.cleaned_custom_attributes:
-            canonical_dict["custom_attributes"] = dict(val_result.cleaned_custom_attributes)
-
-        # Create new immutable KnowledgeVersion
-        new_version = KnowledgeVersion(
-            tenant_id=tenant_id,
-            knowledge_item_id=item.id,
-            version_number=next_version_num,
-            status=new_status,
-            source_id=new_source_id,
-            authority_level=new_authority,
-            content_text=payload.content or payload.description or (current_version.content_text if current_version else None),
-            change_summary=payload.change_summary or VersionDiffEngine.generate_summary(diff),
-            canonical_data=canonical_dict,
-            projection_status="pending",
-            semantic_status="pending",
-            published_at=now_utc if new_status == KnowledgeLifecycleStatus.ACTIVE.value else None,
-            effective_from=new_temp.get("effective_from") or now_utc,
-            effective_until=new_temp.get("effective_until"),
-            created_by_user_id=user_id,
-        )
-        db.add(new_version)
-        await db.flush()
-
-        if new_status == KnowledgeLifecycleStatus.ACTIVE.value:
-            item.current_version_id = new_version.id
-
-        # Version update complete (authoritative canonical_data stored on KnowledgeVersion)
-        await db.commit()
-        await db.refresh(item)
-
-        # Audit events with sanitized metadata (Phase 9.5)
-        await audit_service.record(
-            db=db,
-            action=AuditAction.KNOWLEDGE_UPDATED,
-            resource_type="knowledge_item",
-            resource_id=item.id,
-            organization_id=tenant_id,
-            actor_user_id=user_id,
-            metadata={
-                "previous_version": current_version.version_number if current_version else None,
-                "new_version": next_version_num,
-                "changed_fields": diff.changed_fields,
-                "change_summary": new_version.change_summary,
-                "source": item.source_type,
-                "actor": user_id,
-                "ip_address": client_ip,
-            },
-        )
-        await audit_service.record(
-            db=db,
-            action=AuditAction.KNOWLEDGE_VERSION_CREATED,
-            resource_type="knowledge_version",
-            resource_id=new_version.id,
-            organization_id=tenant_id,
-            actor_user_id=user_id,
-            metadata={
-                "item_id": item.id,
-                "version_number": next_version_num,
-                "status": new_status,
-                "actor": user_id,
-            },
-        )
-        await self._finalize_change(
-            db, tenant_id, item.id, "updated", new_version.id,
-            item=item, version=new_version if new_status == KnowledgeLifecycleStatus.ACTIVE.value else None,
-        )
-
-        return self._format_response(
-            item=item,
-            version=new_version,
-            canonical_data=merged_attrs,
-            custom_attributes={},
-            ui_type=payload.type or "Information",
-        )
-
-    # =========================================================================
-    # 5. Archive / Delete Knowledge Item
-    # =========================================================================
-
-    async def archive_item(
-        self,
-        db: AsyncSession,
-        tenant_id: str,
-        user_id: str,
-        item_id: str,
-        hard_delete: bool = False,
         client_ip: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Soft-archive (preferred) or hard-delete a knowledge item strictly within tenant."""
-        stmt = (
-            select(KnowledgeItem)
-            .where(
-                KnowledgeItem.id == item_id,
-                KnowledgeItem.tenant_id == tenant_id,
-            )
-            .options(
-                selectinload(KnowledgeItem.versions),
-            )
+        """Permanently delete a knowledge item strictly within the tenant.
+
+        Versions and semantic chunks cascade in PostgreSQL; the post-commit sync removes the item's
+        vectors and its search-index row, so a deleted item can never be retrieved again. There is
+        no soft-archive: an archived row would keep its identity key and turn a later re-import of
+        the same product into an invisible update instead of a visible item.
+        """
+        stmt = select(KnowledgeItem).where(
+            KnowledgeItem.id == item_id,
+            KnowledgeItem.tenant_id == tenant_id,
         )
-        res = await db.execute(stmt)
-        item = res.scalar_one_or_none()
+        item = (await db.execute(stmt)).scalar_one_or_none()
         if not item:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -914,46 +655,20 @@ class KnowledgeCRUDService:
             )
 
         _reject_managed_company_info(item)
-        now_utc = datetime.now(timezone.utc)
-
-        if hard_delete:
-            await db.delete(item)
-            await db.commit()
-            await audit_service.record(
-                db=db,
-                action=AuditAction.KNOWLEDGE_DELETED,
-                resource_type="knowledge_item",
-                resource_id=item_id,
-                organization_id=tenant_id,
-                actor_user_id=user_id,
-                metadata={"title": item.title, "hard_delete": True, "ip_address": client_ip},
-            )
-            await self._finalize_change(db, tenant_id, item_id, "deleted")
-            return {"status": "deleted", "id": item_id}
-
-        # Soft-archive
-        item.is_active = False
-        item.updated_at = now_utc
-        if item.versions:
-            for v in item.versions:
-                if v.status == KnowledgeLifecycleStatus.ACTIVE.value:
-                    v.status = KnowledgeLifecycleStatus.ARCHIVED.value
-                    v.archived_at = now_utc
-
+        title = item.title
+        await db.delete(item)
         await db.commit()
-
         await audit_service.record(
             db=db,
-            action=AuditAction.KNOWLEDGE_VERSION_ARCHIVED,
+            action=AuditAction.KNOWLEDGE_DELETED,
             resource_type="knowledge_item",
-            resource_id=item.id,
+            resource_id=item_id,
             organization_id=tenant_id,
             actor_user_id=user_id,
-            metadata={"title": item.title, "ip_address": client_ip},
+            metadata={"title": title, "hard_delete": True, "ip_address": client_ip},
         )
-        await self._finalize_change(db, tenant_id, item.id, "archived")
-
-        return {"status": "archived", "id": item_id}
+        await self._finalize_change(db, tenant_id, item_id, "deleted")
+        return {"status": "deleted", "id": item_id}
 
     # =========================================================================
     # 6. Version History
@@ -1132,241 +847,6 @@ class KnowledgeCRUDService:
             new_custom=target_custom,
             old_temporal=old_temp,
             new_temporal=new_temp,
-        )
-
-    # =========================================================================
-    # 8. Publish & Rollback Lifecycle Operations
-    # =========================================================================
-
-    async def publish_version(
-        self,
-        db: AsyncSession,
-        tenant_id: str,
-        user_id: str,
-        item_id: str,
-        version_number: Optional[int] = None,
-        client_ip: Optional[str] = None,
-    ) -> KnowledgeItemResponseDTO:
-        """Publish a specific draft version to active state with strict lifecycle transition enforcement."""
-        stmt = (
-            select(KnowledgeItem)
-            .where(
-                KnowledgeItem.id == item_id,
-                KnowledgeItem.tenant_id == tenant_id,
-            )
-            .options(
-                selectinload(KnowledgeItem.versions),
-                selectinload(KnowledgeItem.source),
-            )
-            .with_for_update()
-        )
-        res = await db.execute(stmt)
-        item = res.scalar_one_or_none()
-        if not item:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Knowledge item '{item_id}' not found for this organization.",
-            )
-
-        _reject_managed_company_info(item)
-        if version_number is None:
-            draft_versions = [
-                v for v in item.versions 
-                if v.status in {KnowledgeLifecycleStatus.DRAFT.value, KnowledgeLifecycleStatus.VALIDATED.value}
-            ]
-            if draft_versions:
-                target_ver = max(draft_versions, key=lambda v: v.version_number)
-            elif item.versions:
-                target_ver = max(item.versions, key=lambda v: v.version_number)
-            else:
-                target_ver = None
-        else:
-            target_ver = next((v for v in item.versions if v.version_number == version_number), None)
-
-        if not target_ver:
-            desc = f"Version {version_number}" if version_number is not None else "No publishable version"
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"{desc} found for knowledge item '{item_id}'.",
-            )
-
-        now_utc = datetime.now(timezone.utc)
-        # Validate transition using LifecycleStateMachine
-        try:
-            LifecycleStateMachine.validate_transition(
-                current_status=target_ver.status,
-                target_status=KnowledgeLifecycleStatus.ACTIVE.value,
-                is_current_version=True,
-            )
-        except InvalidLifecycleTransitionError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=str(exc),
-            )
-
-        # Archive any currently active versions
-        for v in item.versions:
-            if v.id != target_ver.id and v.status == KnowledgeLifecycleStatus.ACTIVE.value:
-                v.status = KnowledgeLifecycleStatus.ARCHIVED.value
-                v.archived_at = now_utc
-                if not v.effective_until:
-                    v.effective_until = target_ver.effective_from or now_utc
-
-        # Activate target version
-        target_ver.status = KnowledgeLifecycleStatus.ACTIVE.value
-        target_ver.published_at = now_utc
-        if not target_ver.effective_from:
-            target_ver.effective_from = now_utc
-
-        item.current_version_id = target_ver.id
-        item.is_active = True
-        item.updated_at = now_utc
-
-        # Extract attributes before commit to avoid async lazy loading post-commit
-        c_data, cust_attrs = self._extract_attributes_from_version(target_ver, item.category)
-
-        await db.commit()
-
-        # Record audit event
-        await audit_service.record(
-            db=db,
-            action=AuditAction.KNOWLEDGE_VERSION_PUBLISHED,
-            resource_type="knowledge_version",
-            resource_id=target_ver.id,
-            organization_id=tenant_id,
-            actor_user_id=user_id,
-            metadata={
-                "item_id": item.id,
-                "version_number": target_ver.version_number,
-                "source": item.source_type,
-                "actor": user_id,
-                "ip_address": client_ip,
-            },
-        )
-
-        # Instant sync (inline, with durable event + sweep fallback)
-        await self._finalize_change(db, tenant_id, item.id, "published", target_ver.id, item=item, version=target_ver)
-
-        return self._format_response(
-            item=item,
-            version=target_ver,
-            canonical_data=c_data,
-            custom_attributes=cust_attrs,
-        )
-
-    async def rollback_to_version(
-        self,
-        db: AsyncSession,
-        tenant_id: str,
-        user_id: str,
-        item_id: str,
-        target_version_number: int,
-        reason: Optional[str] = None,
-        client_ip: Optional[str] = None,
-    ) -> KnowledgeItemResponseDTO:
-        """Rollback to a historical version by creating a new monotonic version mirroring the target snapshot."""
-        stmt = (
-            select(KnowledgeItem)
-            .where(
-                KnowledgeItem.id == item_id,
-                KnowledgeItem.tenant_id == tenant_id,
-            )
-            .options(
-                selectinload(KnowledgeItem.versions),
-                selectinload(KnowledgeItem.source),
-            )
-            .with_for_update()
-        )
-        res = await db.execute(stmt)
-        item = res.scalar_one_or_none()
-        if not item:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Knowledge item '{item_id}' not found for this organization.",
-            )
-
-        _reject_managed_company_info(item)
-        target_ver = next((v for v in item.versions if v.version_number == target_version_number), None)
-        if not target_ver:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Target rollback version {target_version_number} not found for knowledge item '{item_id}'.",
-            )
-
-        now_utc = datetime.now(timezone.utc)
-        current_active = next((v for v in item.versions if v.status == KnowledgeLifecycleStatus.ACTIVE.value), None)
-
-        # Archive current active version
-        if current_active:
-            current_active.status = KnowledgeLifecycleStatus.ARCHIVED.value
-            current_active.archived_at = now_utc
-            if not current_active.effective_until:
-                current_active.effective_until = now_utc
-
-        # Monotonic new version (Approach B)
-        next_version_num = max((v.version_number for v in item.versions), default=0) + 1
-
-        summary = f"Rollback to version {target_version_number}"
-        if reason:
-            summary += f": {reason}"
-
-        new_version = KnowledgeVersion(
-            tenant_id=tenant_id,
-            knowledge_item_id=item.id,
-            version_number=next_version_num,
-            status=KnowledgeLifecycleStatus.ACTIVE.value,
-            source_id=target_ver.source_id,
-            authority_level=target_ver.authority_level,
-            content_text=target_ver.content_text,
-            change_summary=summary,
-            published_at=now_utc,
-            effective_from=now_utc,
-            effective_until=None,
-            created_by_user_id=user_id,
-        )
-        db.add(new_version)
-        await db.flush()
-
-        item.current_version_id = new_version.id
-        item.is_active = True
-        item.updated_at = now_utc
-
-        # Copy canonical and custom data from target_ver
-        c_data, cust_attrs = self._extract_attributes_from_version(target_ver, item.category)
-        canonical_dict = dict(c_data)
-        if cust_attrs:
-            canonical_dict["custom_attributes"] = dict(cust_attrs)
-        new_version.canonical_data = canonical_dict
-
-        await db.commit()
-
-        # Audit rollback event (Phase 9.5)
-        await audit_service.record(
-            db=db,
-            action=AuditAction.KNOWLEDGE_ROLLED_BACK,
-            resource_type="knowledge_item",
-            resource_id=item.id,
-            organization_id=tenant_id,
-            actor_user_id=user_id,
-            metadata={
-                "previous_version": current_active.version_number if current_active else None,
-                "target_version": target_version_number,
-                "new_version": next_version_num,
-                "reason": reason,
-                "source": item.source_type,
-                "actor": user_id,
-                "ip_address": client_ip,
-            },
-        )
-
-        # Instant sync (inline, with durable event + sweep fallback)
-        await self._finalize_change(db, tenant_id, item.id, "rolled_back", new_version.id, item=item, version=new_version)
-
-        return self._format_response(
-            item=item,
-            version=new_version,
-            canonical_data=c_data,
-            custom_attributes=cust_attrs,
         )
 
     # =========================================================================
@@ -1562,7 +1042,7 @@ class KnowledgeCRUDService:
             question=canonical_data.get("question"),
             answer=canonical_data.get("answer"),
             discount=str(canonical_data.get("discount_value") or custom_attributes.get("discount_value")) if ("discount_value" in canonical_data or "discount_value" in custom_attributes) else None,
-            code=canonical_data.get("discount_code"),
+            code=canonical_data.get("discount_code") or canonical_data.get("sku") or canonical_data.get("code"),
             city=canonical_data.get("city"),
         )
 

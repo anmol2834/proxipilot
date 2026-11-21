@@ -7,10 +7,6 @@ import Paper from "@mui/material/Paper";
 import Checkbox from "@mui/material/Checkbox";
 import { CustomCheckbox } from "@/components/ui/CustomCheckbox";
 import IconButton from "@mui/material/IconButton";
-import Menu from "@mui/material/Menu";
-import MenuItem from "@mui/material/MenuItem";
-import ListItemIcon from "@mui/material/ListItemIcon";
-import Divider from "@mui/material/Divider";
 import Button from "@mui/material/Button";
 import { useKnowledgeStore } from "@/stores/knowledge.store";
 import { KnowledgeItem, KnowledgeCategory, KnowledgeStatus } from "@/types/knowledge.types";
@@ -24,17 +20,9 @@ export function KnowledgeTable({ currentPageItems }: KnowledgeTableProps) {
     selectedIds,
     toggleSelectId,
     selectAllOnPage,
-    openEditDialog,
     openDeleteDialog,
-    duplicateKnowledgeItem,
-    bulkUpdateStatus,
     openAddDialog,
   } = useKnowledgeStore();
-
-  const [moreMenuAnchor, setMoreMenuAnchor] = useState<{
-    el: HTMLElement;
-    item: KnowledgeItem;
-  } | null>(null);
 
   const currentPageItemIds = currentPageItems.map((item) => item.id);
   const isAllSelected =
@@ -457,57 +445,24 @@ export function KnowledgeTable({ currentPageItems }: KnowledgeTableProps) {
                     {renderStatusBadge(item.status)}
                   </Box>
 
-                  {/* Row Action Icons */}
+                  {/* Row action: delete (knowledge changes by re-importing; rows are never edited in place) */}
                   <Box component="td" sx={{ py: 1.75, px: 2, textAlign: "right" }}>
-                    <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}>
-                      <IconButton
-                        size="small"
-                        onClick={() => openEditDialog(item)}
-                        title="Edit"
-                        sx={{
-                          color: "#64748B",
-                          p: 0.75,
-                          "&:hover": { color: "#2563EB", backgroundColor: "#EFF6FF" },
-                        }}
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
-                        </svg>
-                      </IconButton>
-
-                      <IconButton
-                        size="small"
-                        onClick={() => duplicateKnowledgeItem(item.id)}
-                        title="Duplicate"
-                        sx={{
-                          color: "#64748B",
-                          p: 0.75,
-                          "&:hover": { color: "#2563EB", backgroundColor: "#EFF6FF" },
-                        }}
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
-                          <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
-                        </svg>
-                      </IconButton>
-
-                      <IconButton
-                        size="small"
-                        onClick={(e) => setMoreMenuAnchor({ el: e.currentTarget, item })}
-                        title="More actions"
-                        sx={{
-                          color: "#64748B",
-                          p: 0.75,
-                          "&:hover": { color: "#0F172A", backgroundColor: "#F1F5F9" },
-                        }}
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                          <circle cx="12" cy="12" r="1" />
-                          <circle cx="19" cy="12" r="1" />
-                          <circle cx="5" cy="12" r="1" />
-                        </svg>
-                      </IconButton>
-                    </Box>
+                    <IconButton
+                      size="small"
+                      onClick={() => openDeleteDialog(item)}
+                      title="Delete"
+                      aria-label={`Delete ${item.title}`}
+                      sx={{
+                        color: "#94A3B8",
+                        p: 0.75,
+                        "&:hover": { color: "#DC2626", backgroundColor: "#FEF2F2" },
+                      }}
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="3 6 5 6 21 6" />
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                      </svg>
+                    </IconButton>
                   </Box>
                 </Box>
               );
@@ -568,13 +523,13 @@ export function KnowledgeTable({ currentPageItems }: KnowledgeTableProps) {
 
                 <IconButton
                   size="small"
-                  onClick={(e) => setMoreMenuAnchor({ el: e.currentTarget, item })}
-                  sx={{ color: "#64748B" }}
+                  onClick={() => openDeleteDialog(item)}
+                  aria-label={`Delete ${item.title}`}
+                  sx={{ color: "#94A3B8", "&:hover": { color: "#DC2626", backgroundColor: "#FEF2F2" } }}
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <circle cx="12" cy="12" r="1" />
-                    <circle cx="19" cy="12" r="1" />
-                    <circle cx="5" cy="12" r="1" />
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="3 6 5 6 21 6" />
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                   </svg>
                 </IconButton>
               </Box>
@@ -605,92 +560,6 @@ export function KnowledgeTable({ currentPageItems }: KnowledgeTableProps) {
         })}
       </Box>
 
-      {/* Row More Actions Menu */}
-      <Menu
-        anchorEl={moreMenuAnchor?.el}
-        open={Boolean(moreMenuAnchor)}
-        onClose={() => setMoreMenuAnchor(null)}
-        disableScrollLock
-        slotProps={{
-          paper: {
-            sx: {
-              borderRadius: "12px",
-              minWidth: 160,
-              boxShadow: "0 10px 30px rgba(15, 23, 42, 0.12)",
-              mt: 0.5,
-            },
-          },
-        }}
-      >
-        <MenuItem
-          onClick={() => {
-            if (moreMenuAnchor) openEditDialog(moreMenuAnchor.item);
-            setMoreMenuAnchor(null);
-          }}
-          sx={{ fontSize: "0.82rem", py: 0.75, color: "#334155" }}
-        >
-          <ListItemIcon sx={{ minWidth: 26, color: "#64748B" }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
-            </svg>
-          </ListItemIcon>
-          Edit
-        </MenuItem>
-
-        <MenuItem
-          onClick={() => {
-            if (moreMenuAnchor) duplicateKnowledgeItem(moreMenuAnchor.item.id);
-            setMoreMenuAnchor(null);
-          }}
-          sx={{ fontSize: "0.82rem", py: 0.75, color: "#334155" }}
-        >
-          <ListItemIcon sx={{ minWidth: 26, color: "#64748B" }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
-              <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
-            </svg>
-          </ListItemIcon>
-          Duplicate
-        </MenuItem>
-
-        <MenuItem
-          onClick={() => {
-            if (moreMenuAnchor) {
-              const newStatus = moreMenuAnchor.item.status === "Published" ? "Archived" : "Published";
-              bulkUpdateStatus([moreMenuAnchor.item.id], newStatus);
-            }
-            setMoreMenuAnchor(null);
-          }}
-          sx={{ fontSize: "0.82rem", py: 0.75, color: "#334155" }}
-        >
-          <ListItemIcon sx={{ minWidth: 26, color: "#64748B" }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="21 8 21 21 3 21 3 8" />
-              <rect width="22" height="5" x="1" y="3" />
-              <line x1="10" y1="12" x2="14" y2="12" />
-            </svg>
-          </ListItemIcon>
-          {moreMenuAnchor?.item.status === "Published" ? "Archive" : "Publish"}
-        </MenuItem>
-
-        <Divider sx={{ my: 0.5 }} />
-
-        <MenuItem
-          onClick={() => {
-            if (moreMenuAnchor) openDeleteDialog(moreMenuAnchor.item);
-            setMoreMenuAnchor(null);
-          }}
-          sx={{ fontSize: "0.82rem", py: 0.75, color: "#EF4444", fontWeight: 600 }}
-        >
-          <ListItemIcon sx={{ minWidth: 26, color: "#EF4444" }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="3 6 5 6 21 6" />
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-            </svg>
-          </ListItemIcon>
-          Delete
-        </MenuItem>
-      </Menu>
     </>
   );
 }

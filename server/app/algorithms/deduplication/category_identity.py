@@ -10,14 +10,76 @@ Identity Rules:
 - offers_promotions: tenant + category + normalized promo_code (if present) OR offer_name
 - company_info: tenant + category + normalized company_name
 - processes_timelines: tenant + category + normalized process_name (+ applies_to, region)
+- No identifying field at all: a CONTENT FINGERPRINT of the row's values (never its position), so
+  reordering rows between uploads can never update the wrong item, and an identical row repeated
+  in a file is merged. Serial-number style columns (S.No, Sr, #, index) are row positions in
+  disguise and are excluded from the fingerprint.
 
 Complexity:
 - Time: O(K) where K is the length of the identity fields (sub-microsecond)
 - Space: O(K) for normalized key representation
 """
 
+import hashlib
+import json
 import re
 from typing import Any, Dict, Optional
+
+FINGERPRINT_PREFIX = "fp:"
+EMPTY_FINGERPRINT = "fp:empty"
+
+# Column keys that only carry a row's POSITION in the sheet (S.No, Sr No, Sl No, Serial, #, Row,
+# Index, a spreadsheet's unnamed index column). Deliberately conservative: "Item No", "Number",
+# "Position", "Line" can be real codes or data and are NOT treated as positional.
+_POSITIONAL_KEY = re.compile(
+    r"^(s_?n(o|um)?|sr_?(no|num)?|sl_?(no|num)?|serial(_?(no|num|number))?|row(_?(no|num|number))?|"
+    r"index|idx|unnamed(_?\d+)?)$"
+)
+
+
+def is_positional_key(key: str) -> bool:
+    """True for a column / attribute that is a row number in disguise (or has no name, e.g. "#")."""
+    k = re.sub(r"[^a-z0-9]+", "_", str(key).lower()).strip("_")
+    return not k or bool(_POSITIONAL_KEY.match(k))
+
+
+_is_positional_key = is_positional_key  # backwards-compatible private alias
+
+
+def content_fingerprint(canonical_data: Dict[str, Any], custom_attributes: Optional[Dict[str, Any]] = None) -> str:
+    """Position-independent identity for a record that has no name, code or other key field.
+
+    A stable hash of every non-empty value (keys and values normalised, order-independent),
+    excluding positional columns. Same content -> same key wherever the row sits in the sheet.
+    """
+    parts: Dict[str, str] = {}
+    for prefix, source in (("c", canonical_data or {}), ("x", custom_attributes or {})):
+        if not isinstance(source, dict):
+            continue
+        for key, val in source.items():
+            if _is_positional_key(key) or val is None:
+                continue
+            if isinstance(val, (dict, list)):
+                norm = json.dumps(val, sort_keys=True, default=str, ensure_ascii=False)
+            else:
+                norm = _normalize_identity_token(val)
+            if norm:
+                parts[f"{prefix}.{str(key).lower()}"] = norm
+    if not parts:
+        return EMPTY_FINGERPRINT
+    raw = json.dumps(parts, sort_keys=True, ensure_ascii=False)
+    return FINGERPRINT_PREFIX + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+
+
+def is_content_fingerprint(identity_key: Optional[str]) -> bool:
+    """True when an identity key (full 'org:..:cat:<cat>:<body>' or stripped '<body>') is a content
+    fingerprint rather than a business key (SKU, name, policy, question ...)."""
+    if not identity_key:
+        return False
+    body = identity_key
+    if ":cat:" in body:
+        body = body.split(":cat:", 1)[1].split(":", 1)[-1]   # drop the category segment
+    return body.startswith(FINGERPRINT_PREFIX)
 
 
 def _normalize_identity_token(val: Any) -> str:
@@ -79,7 +141,7 @@ class CategoryIdentityResolver:
             category: Canonical KnowledgeCategory string.
             canonical_data: Dictionary of extracted/normalized canonical field values.
             custom_attributes: Optional tenant/custom attributes dictionary.
-            row_number: Optional row number fallback if identity fields are completely absent.
+            row_number: Kept for signature compatibility; identity never depends on position.
 
         Returns:
             Normalized colon-separated deterministic identity string.
@@ -125,7 +187,7 @@ class CategoryIdentityResolver:
                 variant = _variant_signature(canonical_data, custom_attributes)
                 key_body = f"name:{name}|var:{variant}" if variant else f"name:{name}"
             else:
-                key_body = f"row:{row_number or 'unnamed'}"
+                key_body = content_fingerprint(canonical_data, custom_attributes)
 
         elif cat == "policies":
             p_name = _normalize_identity_token(canonical_data.get("policy_name"))
@@ -135,14 +197,14 @@ class CategoryIdentityResolver:
             elif p_name:
                 key_body = f"policy:{p_name}"
             else:
-                key_body = f"row:{row_number or 'unnamed'}"
+                key_body = content_fingerprint(canonical_data, custom_attributes)
 
         elif cat == "support_faqs":
             q = _normalize_identity_token(canonical_data.get("question"))
             if q:
                 key_body = f"q:{q}"
             else:
-                key_body = f"row:{row_number or 'unnamed'}"
+                key_body = content_fingerprint(canonical_data, custom_attributes)
 
         elif cat == "offers_promotions":
             promo = _normalize_identity_token(canonical_data.get("promo_code"))
@@ -152,11 +214,11 @@ class CategoryIdentityResolver:
             elif offer:
                 key_body = f"offer:{offer}"
             else:
-                key_body = f"row:{row_number or 'unnamed'}"
+                key_body = content_fingerprint(canonical_data, custom_attributes)
 
         elif cat == "company_info":
             c_name = _normalize_identity_token(canonical_data.get("company_name"))
-            key_body = f"co:{c_name}" if c_name else f"row:{row_number or 'unnamed'}"
+            key_body = f"co:{c_name}" if c_name else content_fingerprint(canonical_data, custom_attributes)
 
         elif cat == "processes_timelines":
             # The same process can have different timelines per product group, order size or
@@ -171,15 +233,11 @@ class CategoryIdentityResolver:
                 if region:
                     key_body += f"|region:{region}"
             else:
-                key_body = f"row:{row_number or 'unnamed'}"
+                key_body = content_fingerprint(canonical_data, custom_attributes)
 
         else:
-            # Fallback for generic or custom category
-            first_val = ""
-            for v in canonical_data.values():
-                if v:
-                    first_val = _normalize_identity_token(v)
-                    break
-            key_body = f"generic:{first_val}" if first_val else f"row:{row_number or 'unnamed'}"
+            # Generic / custom category with no explicit id: identify by the whole content. (Keying by
+            # the first value alone merged different records that happened to share it.)
+            key_body = content_fingerprint(canonical_data, custom_attributes)
 
         return f"org:{org}:cat:{cat}:{key_body}"

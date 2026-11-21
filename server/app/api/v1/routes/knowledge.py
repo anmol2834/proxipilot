@@ -38,14 +38,9 @@ from app.contracts.knowledge_crud import (
     KnowledgeCursorPageDTO,
     KnowledgeItemCreateDTO,
     KnowledgeItemResponseDTO,
-    KnowledgeItemUpdateDTO,
     KnowledgeVersionHistoryDTO,
 )
-from app.contracts.version_diff import (
-    PublishVersionRequestDTO,
-    RollbackRequestDTO,
-    VersionDiffDTO,
-)
+from app.contracts.version_diff import VersionDiffDTO
 from app.core.context import TenantContext, get_tenant_context, require_permission
 from app.core.database import get_db
 from app.contracts.rag import (
@@ -505,51 +500,25 @@ async def get_knowledge_item(
     )
 
 
-@router.patch(
-    "/{id}",
-    response_model=KnowledgeItemResponseDTO,
-    summary="Update knowledge item",
-    description="Updates knowledge item by creating a new immutable version snapshot, preserving historical version lineage.",
-)
-async def update_knowledge_item(
-    id: str,
-    payload: KnowledgeItemUpdateDTO,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    tenant_context: TenantContext = Depends(require_permission("knowledge.update")),
-) -> KnowledgeItemResponseDTO:
-    """Update knowledge item by creating a new version snapshot."""
-    client_ip = request.client.host if request.client else None
-    return await knowledge_crud_service.update_item(
-        db=db,
-        tenant_id=tenant_context.organization_id,
-        user_id=tenant_context.user_id,
-        item_id=id,
-        payload=payload,
-        client_ip=client_ip,
-    )
-
-
 @router.delete(
     "/{id}",
-    summary="Archive or delete knowledge item",
-    description="Soft-archives (default) or hard-deletes a knowledge item strictly within tenant boundary.",
+    summary="Delete a knowledge item permanently",
+    description="Permanently deletes a knowledge item (versions, search-index row and vectors) strictly "
+                "within the tenant. Knowledge is changed by re-importing, never edited in place.",
 )
 async def delete_knowledge_item(
     id: str,
     request: Request,
-    hard_delete: bool = False,
     db: AsyncSession = Depends(get_db),
     tenant_context: TenantContext = Depends(require_permission("knowledge.delete")),
 ) -> Dict[str, Any]:
-    """Archive or delete knowledge item."""
+    """Delete a knowledge item permanently."""
     client_ip = request.client.host if request and request.client else None
-    return await knowledge_crud_service.archive_item(
+    return await knowledge_crud_service.delete_item(
         db=db,
         tenant_id=tenant_context.organization_id,
         user_id=tenant_context.user_id,
         item_id=id,
-        hard_delete=hard_delete,
         client_ip=client_ip,
     )
 
@@ -614,57 +583,6 @@ async def get_knowledge_version_diff(
         item_id=id,
         version_number=version_number,
         compare_to=compare_to,
-    )
-
-
-@router.post(
-    "/{id}/publish",
-    response_model=KnowledgeItemResponseDTO,
-    summary="Publish a version to active state",
-    description="Transitions a draft version to active state with lifecycle state machine validation and old active archiving.",
-)
-async def publish_knowledge_version(
-    id: str,
-    payload: PublishVersionRequestDTO,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    tenant_context: TenantContext = Depends(require_permission("knowledge.update")),
-) -> KnowledgeItemResponseDTO:
-    """Publish a version to become the current active version."""
-    client_ip = request.client.host if request.client else None
-    return await knowledge_crud_service.publish_version(
-        db=db,
-        tenant_id=tenant_context.organization_id,
-        user_id=tenant_context.user_id,
-        item_id=id,
-        version_number=payload.version_number,
-        client_ip=client_ip,
-    )
-
-
-@router.post(
-    "/{id}/rollback",
-    response_model=KnowledgeItemResponseDTO,
-    summary="Rollback knowledge item to a historical version",
-    description="Creates a new monotonic version mirroring the target historical snapshot (Approach B rollback).",
-)
-async def rollback_knowledge_version(
-    id: str,
-    payload: RollbackRequestDTO,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    tenant_context: TenantContext = Depends(require_permission("knowledge.update")),
-) -> KnowledgeItemResponseDTO:
-    """Rollback knowledge item to a previous version."""
-    client_ip = request.client.host if request.client else None
-    return await knowledge_crud_service.rollback_to_version(
-        db=db,
-        tenant_id=tenant_context.organization_id,
-        user_id=tenant_context.user_id,
-        item_id=id,
-        target_version_number=payload.target_version_number,
-        reason=payload.reason,
-        client_ip=client_ip,
     )
 
 

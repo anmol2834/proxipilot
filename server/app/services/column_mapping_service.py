@@ -200,6 +200,22 @@ class ColumnMappingService:
         """Resolve an individual source column against the deterministic signal hierarchy."""
         norm_name = col.normalized_name
 
+        # Row-position columns (S.No, Sr No, #, Index ...) are not knowledge: storing them would put
+        # "s_no: 4" into the AI's search text and make every re-ordered re-upload re-version and
+        # re-embed unchanged records. Excluded like image columns.
+        from app.algorithms.deduplication.category_identity import is_positional_key
+        if is_positional_key(norm_name or col.original_name):
+            return ColumnMappingDTO(
+                source_column=col.original_name,
+                normalized_column=norm_name,
+                target_kind=MappingTargetKind.IGNORED,
+                target_field=norm_name or "row_position",
+                target_type="positional_ignored",
+                confidence=0.95,
+                reason=MappingReason.POSITIONAL_IGNORED,
+                validation_notes="Row-position column (serial number / index): excluded from knowledge and search.",
+            )
+
         # Check Ambiguous Keywords (Section 10)
         # Ambiguous keywords are safely preserved as dynamic custom attributes to avoid data loss.
         if norm_name in AMBIGUOUS_COLUMNS:

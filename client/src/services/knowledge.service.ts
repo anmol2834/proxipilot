@@ -494,38 +494,10 @@ class KnowledgeService {
   }
 
   /**
-   * Delete a knowledge item (soft archive by default).
+   * Permanently delete a knowledge item (its versions, search-index row and vectors go with it).
    */
   async deleteItem(id: string): Promise<void> {
     await apiClient.delete(`${this.base}/${id}`);
-  }
-
-  /**
-   * Update a knowledge item's status.
-   */
-  async updateItemStatus(id: string, status: KnowledgeStatus): Promise<KnowledgeItem> {
-    const backendStatus = status === "Published" ? "active" : status.toLowerCase();
-    const res = await apiClient.patch<BackendKnowledgeItem>(`${this.base}/${id}`, {
-      status: backendStatus,
-    });
-    return mapBackendItem(res.data);
-  }
-
-  /**
-   * Duplicate a knowledge item (create copy with Draft status).
-   */
-  async duplicateItem(source: KnowledgeItem): Promise<KnowledgeItem> {
-    const { title, category, excerpt, content, tags } = source;
-    const res = await apiClient.post<BackendKnowledgeItem>(this.base, {
-      title: `${title} (Copy)`,
-      category: category.replace(/-/g, "_"),
-      description: excerpt,
-      content,
-      tags,
-      source_type: "manual",
-      facts: {},
-    });
-    return mapBackendItem(res.data);
   }
 }
 

@@ -13,6 +13,7 @@ Complexity:
 - Space: O(U * F) where U is the count of unique records
 """
 
+from app.algorithms.deduplication.category_identity import EMPTY_FINGERPRINT, _is_positional_key
 from typing import Any, Dict, Optional, Tuple
 
 
@@ -60,8 +61,11 @@ class DeduplicationEngine:
             - duplicate_of_row (Optional[int]): Row number of first occurrence
             - conflict_details (Optional[Dict[str, Any]]): Field-level discrepancy report
         """
-        # Exclude fallback rows without identity from duplicate matching
-        if "row:" in identity_key and ("unnamed" in identity_key or f"row:{row_number}" in identity_key):
+        # Rows with no content at all have nothing to compare (they are rejected by validation).
+        # Content-fingerprint keys DO take part: two rows with identical content are one record.
+        if identity_key.endswith(EMPTY_FINGERPRINT) or (
+            "row:" in identity_key and ("unnamed" in identity_key or f"row:{row_number}" in identity_key)
+        ):
             return False, False, None, None
 
         if identity_key not in self._seen:
@@ -74,8 +78,9 @@ class DeduplicationEngine:
 
         conflicts: Dict[str, Any] = {}
 
-        # Check canonical fields for conflicts
-        all_canon_keys = set(canonical_data.keys()) | set(first_canon.keys())
+        # Check canonical fields for conflicts. Positional columns (S.No, Sr, #, index ...) differ on
+        # every row by definition: they never make two copies of the same record "conflicting".
+        all_canon_keys = {k for k in set(canonical_data.keys()) | set(first_canon.keys()) if not _is_positional_key(k)}
         for k in all_canon_keys:
             v_curr = canonical_data.get(k)
             v_orig = first_canon.get(k)
@@ -84,7 +89,7 @@ class DeduplicationEngine:
                     conflicts[k] = {"original": v_orig, "current": v_curr}
 
         # Check custom attributes for conflicts
-        all_custom_keys = set(custom_attributes.keys()) | set(first_custom.keys())
+        all_custom_keys = {k for k in set(custom_attributes.keys()) | set(first_custom.keys()) if not _is_positional_key(k)}
         for k in all_custom_keys:
             v_curr = custom_attributes.get(k)
             v_orig = first_custom.get(k)

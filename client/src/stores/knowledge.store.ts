@@ -135,7 +135,6 @@ interface KnowledgeState {
   // ── Dialog State ──────────────────────────────────────────────────────────
   isAddDialogOpen: boolean;
   selectedCategoryForAdd: KnowledgeCategory | null;
-  editingItem: KnowledgeItem | null;
   deletingItem: KnowledgeItem | null;
 
   // ── Upload State ──────────────────────────────────────────────────────────
@@ -157,8 +156,6 @@ interface KnowledgeState {
 
   openAddDialog: (preselectedCat?: KnowledgeCategory) => void;
   closeAddDialog: () => void;
-  openEditDialog: (item: KnowledgeItem) => void;
-  closeEditDialog: () => void;
   openDeleteDialog: (item: KnowledgeItem) => void;
   closeDeleteDialog: () => void;
 
@@ -194,15 +191,6 @@ interface KnowledgeState {
 
   /** Bulk delete (optimistic) */
   bulkDeleteItems: (ids: string[]) => Promise<void>;
-
-  /** Bulk update status */
-  bulkUpdateStatus: (ids: string[], status: KnowledgeStatus) => Promise<void>;
-
-  /** Duplicate an item */
-  duplicateKnowledgeItem: (id: string) => Promise<void>;
-
-  /** Local-optimistic update for field-level edits (EditDialog) */
-  updateKnowledgeItem: (id: string, updates: Partial<KnowledgeItem>) => void;
 }
 
 // =============================================================================
@@ -235,7 +223,6 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
 
   isAddDialogOpen: false,
   selectedCategoryForAdd: null,
-  editingItem: null,
   deletingItem: null,
 
   upload: INITIAL_UPLOAD_STATE,
@@ -321,8 +308,6 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
       void get().fetchCategoryCounts();
     }
   },
-  openEditDialog: (item) => set({ editingItem: item }),
-  closeEditDialog: () => set({ editingItem: null }),
   openDeleteDialog: (item) => set({ deletingItem: item }),
   closeDeleteDialog: () => set({ deletingItem: null }),
 
@@ -490,13 +475,14 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
       });
       get().fetchItems(false, get().currentPage);
       get().fetchCategoryCounts();
-    } catch {
-      // Revert on failure
+    } catch (err) {
+      // Revert on failure and say so.
       set((state) => {
         const next = new Set(state.deletingIds);
         next.delete(id);
         return { items: prev, deletingIds: next };
       });
+      toast.error(err instanceof Error ? err.message : "The item could not be deleted.", "Delete failed");
     }
   },
 
@@ -507,57 +493,18 @@ export const useKnowledgeStore = create<KnowledgeState>()((set, get) => ({
       selectedIds: [],
     }));
 
-    try {
-      await Promise.all(ids.map((id) => knowledgeService.deleteItem(id)));
-      get().fetchItems(true, 1);
-      get().fetchCategoryCounts();
-    } catch {
-      set({ items: prev });
+    const results = await Promise.allSettled(ids.map((id) => knowledgeService.deleteItem(id)));
+    const failed = results.filter((r) => r.status === "rejected").length;
+    if (failed) {
+      toast.error(`${failed} of ${ids.length} items could not be deleted. Please try again.`, "Delete incomplete");
+    } else {
+      toast.success(`${ids.length.toLocaleString()} ${ids.length === 1 ? "item" : "items"} deleted.`);
     }
+    if (failed === ids.length) set({ items: prev });
+    get().fetchItems(true, 1);
+    get().fetchCategoryCounts();
   },
 
-  bulkUpdateStatus: async (ids, status) => {
-    const prev = get().items;
-    // Optimistic update
-    set((state) => ({
-      items: state.items.map((i) =>
-        ids.includes(i.id)
-          ? ({ ...i, status, updatedAt: "Just now" } as KnowledgeItem)
-          : i
-      ),
-      selectedIds: [],
-    }));
-
-    try {
-      await Promise.all(ids.map((id) => knowledgeService.updateItemStatus(id, status)));
-      get().fetchItems(false, get().currentPage);
-    } catch {
-      set({ items: prev });
-    }
-  },
-
-  duplicateKnowledgeItem: async (id) => {
-    const source = get().items.find((i) => i.id === id);
-    if (!source) return;
-
-    try {
-      await knowledgeService.duplicateItem(source);
-      get().fetchItems(false, get().currentPage);
-      get().fetchCategoryCounts();
-    } catch {
-      // Silently fail on duplicate error — user can retry
-    }
-  },
-
-  updateKnowledgeItem: (id, updates) =>
-    set((state) => ({
-      items: state.items.map((item) =>
-        item.id === id
-          ? ({ ...item, ...updates, updatedAt: "Just now", updatedBy: "You" } as KnowledgeItem)
-          : item
-      ),
-      editingItem: null,
-    })),
 }));
 
 // =============================================================================

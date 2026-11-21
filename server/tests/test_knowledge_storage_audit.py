@@ -259,6 +259,65 @@ async def test_idempotent_reimport_and_stable_identity():
 
 
 @pytest.mark.asyncio
+async def test_reimport_of_an_inactive_item_reactivates_it_without_version_collision():
+    """A record whose item was archived (legacy soft-delete) must come back live on re-import.
+
+    Before the fix the re-import found no ACTIVE version, numbered the new one "2", collided with
+    the existing v2 (uq_knowledge_versions_item_version) and rolled back the whole batch; with an
+    unchanged payload the item silently stayed invisible.
+    """
+    tenant_id = f"org_test_react_{uuid.uuid4().hex[:12]}"
+    source_id = f"ks_test_{uuid.uuid4().hex[:12]}"
+    db_manager.initialize()
+
+    def batch_for(price: float) -> BatchQualityResultDTO:
+        rec = NormalizedRecordDTO(
+            row_number=1, status=QualityRowStatus.VALID, organization_id=tenant_id,
+            category="products_services", identity_key="SRV-REACT-1",
+            canonical_data={"name": "Reactivated Service", "price": price, "currency": "INR",
+                            "effective_from": "2026-01-01"},
+            custom_attributes={},
+        )
+        return BatchQualityResultDTO(batch_index=0, total_rows=1, valid_count=1, warning_count=0,
+                                     invalid_count=0, duplicate_count=0, conflict_count=0, records=[rec])
+
+    def svc(job: str) -> KnowledgePersistenceService:
+        return KnowledgePersistenceService(tenant_id=tenant_id, category="products_services",
+                                           source_id=source_id, job_id=job, created_by_user_id="usr_test_audit")
+
+    async with db_manager.session_factory() as session:
+        now = datetime.now(timezone.utc)
+        session.add(KnowledgeSource(id=source_id, tenant_id=tenant_id, name="Test Source", source_type="import",
+                                    authority_level="imported_data", created_at=now, updated_at=now))
+        await session.commit()
+        try:
+            item_id = (await svc("ij_r1").persist_batch(session, batch_for(500.0))).records[0].knowledge_item_id
+            await svc("ij_r2").persist_batch(session, batch_for(550.0))                      # v2
+            # Legacy soft-delete: item inactive, every version archived.
+            await session.execute(text("UPDATE knowledge_items SET is_active = false WHERE id = :i"), {"i": item_id})
+            await session.execute(text("UPDATE knowledge_versions SET status = 'archived' WHERE knowledge_item_id = :i"),
+                                  {"i": item_id})
+            await session.commit()
+
+            res = await svc("ij_r3").persist_batch(session, batch_for(600.0))
+            assert res.records[0].outcome == PersistenceOutcome.VERSIONED
+            assert res.records[0].knowledge_item_id == item_id                             # same item, no duplicate
+            row = (await session.execute(text(
+                "SELECT i.is_active, i.current_version_id, v.version_number, v.status FROM knowledge_items i "
+                "JOIN knowledge_versions v ON v.id = i.current_version_id WHERE i.id = :i"), {"i": item_id})).one()
+            assert row.is_active is True and row.version_number == 3 and row.status == "active"
+            n_items = (await session.execute(text("SELECT count(*) FROM knowledge_items WHERE tenant_id = :t"),
+                                             {"t": tenant_id})).scalar()
+            assert n_items == 1
+        finally:
+            await session.rollback()
+            await session.execute(text("DELETE FROM knowledge_versions WHERE tenant_id = :t"), {"t": tenant_id})
+            await session.execute(text("DELETE FROM knowledge_items WHERE tenant_id = :t"), {"t": tenant_id})
+            await session.execute(text("DELETE FROM knowledge_sources WHERE tenant_id = :t"), {"t": tenant_id})
+            await session.commit()
+
+
+@pytest.mark.asyncio
 async def test_single_record_update_and_versioning():
     """Verify changing 1 record increments its version and archives previous version while others remain stable."""
     tenant_id = f"org_test_{uuid.uuid4().hex[:12]}"

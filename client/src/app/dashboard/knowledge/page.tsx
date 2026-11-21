@@ -16,7 +16,6 @@ import {
   KnowledgeTable,
   KnowledgePagination,
   AddKnowledgeDialog,
-  EditKnowledgeDialog,
   DeleteConfirmationDialog,
   BulkActionBar,
 } from "@/components/knowledge";
@@ -322,7 +321,6 @@ function KnowledgeContent() {
 
       {/* 6. Modals & Floating Bars */}
       <AddKnowledgeDialog />
-      <EditKnowledgeDialog />
       <DeleteConfirmationDialog />
       <BulkActionBar />
     </Box>

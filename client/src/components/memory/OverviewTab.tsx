@@ -64,7 +64,7 @@ export function OverviewTab({ onOpen }: { onOpen: (t: MemoryTab) => void }) {
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
       <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 240px), 1fr))", gap: 1.5 }}>
         <Tile n="MEMORY 1 + 8" title="Company knowledge" href="/dashboard/knowledge"
-              what="Products, prices, policies and official information. Edit → Update & Publish syncs instantly, with version history and rollback."
+              what="Products, prices, policies and official information. Re-importing a file updates items in place (no duplicates); deleting removes them from AI search instantly."
               value={n(kTotal)} detail="items, all searchable" health={kTotal ? "active" : "low"} />
         <Tile n="MEMORY 2" title="Communication style" onOpen={() => onOpen("style")}
               what="How your team writes — greeting, sign-off, tone, language and situational habits."

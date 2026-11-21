@@ -30,7 +30,7 @@ from app.contracts.knowledge import (
     category_registry,
 )
 from app.models.knowledge import KnowledgeAttributeDefinition
-from app.algorithms.deduplication.category_identity import CategoryIdentityResolver
+from app.algorithms.deduplication.category_identity import CategoryIdentityResolver, is_content_fingerprint
 from app.services.deduplication_engine import DeduplicationEngine
 
 _EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
@@ -286,6 +286,21 @@ class RowQualityService:
             custom_attributes=normalized_custom,
             row_number=row_number,
         )
+
+        if is_content_fingerprint(identity_key):
+            issues.append(
+                RowQualityIssueDTO(
+                    row_number=row_number,
+                    field="identity",
+                    source_field=None,
+                    error_code=RowQualityErrorCode.MISSING_IDENTIFIER.value,
+                    severity=RowQualitySeverity.WARNING.value,
+                    message=("Row has no name or code, so it is matched by its content. Changing any value "
+                             "and re-uploading adds it as a new item instead of updating this one; add a Name "
+                             "or Code column for reliable updates."),
+                    invalid_value=None,
+                )
+            )
 
         is_dup, is_conf, dup_row, conf_details = self.dedup_engine.evaluate_record(
             row_number=row_number,

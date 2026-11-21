@@ -34,6 +34,7 @@ class MappingReason(str, Enum):
     TYPE_MISMATCH = "type_mismatch"
     AMBIGUOUS_KEYWORD = "ambiguous_keyword"
     MEDIA_IGNORED = "media_ignored"
+    POSITIONAL_IGNORED = "positional_ignored"
     UNKNOWN = "unknown"
 
 

@@ -49,7 +49,7 @@ from decimal import Decimal
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 import uuid
 
-from sqlalchemy import insert, select, update
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.contracts.data_quality import (
@@ -88,6 +88,18 @@ from app.contracts.knowledge import normalize_category_key
 # ---------------------------------------------------------------------------
 
 _IDENTITY_PREFIX = "org:"
+
+
+def _without_positional(data: Any) -> Any:
+    """Copy of a canonical dict without row-position attributes (top level and custom_attributes)."""
+    from app.algorithms.deduplication.category_identity import is_positional_key
+
+    if not isinstance(data, dict):
+        return data
+    out = {k: v for k, v in data.items() if not is_positional_key(k)}
+    if isinstance(out.get("custom_attributes"), dict):
+        out["custom_attributes"] = {k: v for k, v in out["custom_attributes"].items() if not is_positional_key(k)}
+    return out
 
 
 def _strip_identity_key(full_key: str) -> str:
@@ -141,8 +153,8 @@ def _is_canonical_identical(d1: Optional[Dict[str, Any]], d2: Optional[Dict[str,
         return False
     # Legacy rows carry a redundant "custom_attributes_json" copy that is no longer
     # written; ignore it so re-imports of unchanged rows stay UNCHANGED.
-    d1 = {k: v for k, v in d1.items() if k not in _COMPARISON_IGNORED_KEYS}
-    d2 = {k: v for k, v in d2.items() if k not in _COMPARISON_IGNORED_KEYS}
+    d1 = _without_positional({k: v for k, v in d1.items() if k not in _COMPARISON_IGNORED_KEYS})
+    d2 = _without_positional({k: v for k, v in d2.items() if k not in _COMPARISON_IGNORED_KEYS})
     norm1 = _normalize_val_for_comparison(d1)
     norm2 = _normalize_val_for_comparison(d2)
     return bool(norm1 == norm2)
@@ -785,6 +797,22 @@ class KnowledgePersistenceService:
             )
             current_versions = {v.knowledge_item_id: v for v in cur_res.scalars().all()}
 
+        # Items matched by identity but without an ACTIVE version (legacy archived rows): continue
+        # their numbering from the highest existing version so the new one never collides with
+        # uq_knowledge_versions_item_version (which would roll back the whole batch).
+        max_version: Dict[str, int] = {}
+        without_active = [v[0] for v in existing.values() if v[0] not in current_versions]
+        if without_active:
+            mv_res = await db.execute(
+                select(KnowledgeVersion.knowledge_item_id, func.max(KnowledgeVersion.version_number))
+                .where(
+                    KnowledgeVersion.tenant_id == self.tenant_id,
+                    KnowledgeVersion.knowledge_item_id.in_(without_active),
+                )
+                .group_by(KnowledgeVersion.knowledge_item_id)
+            )
+            max_version = {item_id: int(n or 0) for item_id, n in mv_res.all()}
+
         now_utc = datetime.now(timezone.utc)
         item_rows: List[Dict[str, Any]] = []
         version_rows: List[Dict[str, Any]] = []
@@ -846,7 +874,7 @@ class KnowledgePersistenceService:
                 unchanged.append((item_id, prev.id, rec))
                 continue
 
-            next_num = (prev.version_number + 1) if prev else 2
+            next_num = (prev.version_number + 1) if prev else max_version.get(item_id, 0) + 1
             if prev is not None:
                 archive_version_ids.append(prev.id)
             version_rows.append(self._version_row(
@@ -870,6 +898,7 @@ class KnowledgePersistenceService:
             }, version_rows[-1]))
             item_pointer_updates.append({
                 "id": item_id,
+                "is_active": True,          # a re-imported record is live again
                 "current_version_id": version_id,
                 "tags": tags_json or existing_tags,
                 "updated_at": now_utc,
