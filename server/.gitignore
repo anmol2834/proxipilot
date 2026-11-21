@@ -60,6 +60,8 @@ dmypy.json
 
 # Docker & local storage
 data/
+# Uploaded customer files (created at runtime by app/core/storage.py; never commit them)
+storage/uploads/
 *.log
 
 # Local .env backups (contain secrets)
