@@ -330,9 +330,6 @@ class EmailMessage(Base, TenantAwareMixin):
 
     # Relationships
     thread: Mapped["EmailThread"] = relationship(back_populates="messages")
-    attachments: Mapped[List["AttachmentMetadata"]] = relationship(
-        back_populates="message", cascade="all, delete-orphan"
-    )
 
     __table_args__ = (
         # Idempotency constraint — prevents duplicate messages at DB level
@@ -352,50 +349,6 @@ class EmailMessage(Base, TenantAwareMixin):
 
     def __repr__(self) -> str:
         return f"<EmailMessage id={self.id} from={self.from_email} direction={self.direction}>"
-
-
-class AttachmentMetadata(Base, TenantAwareMixin):
-    """Metadata for email attachments. Binary stored in Object Storage.
-
-    Invariant: Binary content is NEVER stored in Postgres.
-    Only metadata and the storage_object_key reference are stored here.
-    """
-
-    __tablename__ = "attachment_metadata"
-
-    id: Mapped[str] = mapped_column(
-        String(64),
-        primary_key=True,
-        default=lambda: f"att_{uuid.uuid4().hex}",
-    )
-    # tenant_id comes from TenantAwareMixin
-    message_id: Mapped[str] = mapped_column(
-        String(64),
-        ForeignKey("email_messages.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    filename: Mapped[str] = mapped_column(String(512), nullable=False)
-    mime_type: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, default=None)
-    size_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=None)
-    storage_object_key: Mapped[Optional[str]] = mapped_column(
-        String(2048),
-        nullable=True,
-        default=None,
-        comment="Object storage key (S3/GCS/Azure path) for binary retrieval",
-    )
-    is_inline: Mapped[bool] = mapped_column(
-        Boolean,
-        nullable=False,
-        default=False,
-        comment="True if attachment is embedded inline in HTML body",
-    )
-
-    # Relationships
-    message: Mapped["EmailMessage"] = relationship(back_populates="attachments")
-
-    def __repr__(self) -> str:
-        return f"<AttachmentMetadata id={self.id} filename={self.filename}>"
 
 
 class TrustedSender(Base, TimestampMixin):

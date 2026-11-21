@@ -160,91 +160,12 @@ class AIRun(Base, TenantAwareMixin):
     completed_at: Mapped[str] = mapped_column(String(64), nullable=True, default=None)
 
     # Relationships
-    evidence_records: Mapped[list["Evidence"]] = relationship(
-        back_populates="ai_run", cascade="all, delete-orphan"
-    )
     ai_responses: Mapped[list["AIResponse"]] = relationship(
         back_populates="ai_run", cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:
         return f"<AIRun id={self.id} thread={self.thread_id} status={self.status}>"
-
-
-class Evidence(Base, TenantAwareMixin):
-    """A single piece of retrieved evidence used to ground an AI response.
-
-    Each Evidence record represents one retrieved chunk from the knowledge base
-    or a direct structured data result that was fed into the AI context window.
-
-    Attribution invariant: Every claim in an AI response must be traceable to
-    one or more Evidence records via the AIRun.
-    """
-
-    __tablename__ = "evidence"
-
-    id: Mapped[str] = mapped_column(
-        String(64),
-        primary_key=True,
-        default=lambda: f"ev_{uuid.uuid4().hex}",
-    )
-    # tenant_id comes from TenantAwareMixin
-    ai_run_id: Mapped[str] = mapped_column(
-        String(64),
-        ForeignKey("ai_runs.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    source_type: Mapped[str] = mapped_column(
-        String(64),
-        nullable=False,
-        index=True,
-        comment="Type of source retrieved (knowledge_version, business_entity, etc.)",
-    )
-    source_id: Mapped[str] = mapped_column(
-        String(64),
-        nullable=False,
-        comment="PK of the source entity (KnowledgeVersion.id, BusinessEntity.id, etc.)",
-    )
-    qdrant_point_id: Mapped[str] = mapped_column(
-        String(128),
-        nullable=True,
-        default=None,
-        comment="Qdrant point UUID for vector-retrieved chunks",
-    )
-    relevance_score: Mapped[float] = mapped_column(
-        Float,
-        nullable=True,
-        default=None,
-        comment="Similarity / relevance score from retrieval (0.0–1.0)",
-    )
-    authority_score: Mapped[float] = mapped_column(
-        Float,
-        nullable=True,
-        default=None,
-        comment="Source authority weight from knowledge hierarchy",
-    )
-    excerpt: Mapped[str] = mapped_column(
-        Text,
-        nullable=True,
-        default=None,
-        comment="Exact text chunk fed into the AI context for this evidence",
-    )
-    retrieval_rank: Mapped[int] = mapped_column(
-        Integer,
-        nullable=True,
-        default=None,
-        comment="Rank position of this chunk in the retrieval result set",
-    )
-
-    # Relationships
-    ai_run: Mapped["AIRun"] = relationship(back_populates="evidence_records")
-
-    def __repr__(self) -> str:
-        return (
-            f"<Evidence id={self.id} run={self.ai_run_id} "
-            f"source_type={self.source_type} score={self.relevance_score}>"
-        )
 
 
 class AIResponse(Base, TenantAwareMixin):

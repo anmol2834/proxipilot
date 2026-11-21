@@ -29,7 +29,6 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     DateTime,
-    Float,
     ForeignKey,
     Index,
     Integer,
@@ -1034,72 +1033,6 @@ class KnowledgeAttributeDefinition(Base, TenantAwareMixin):
 
     def __repr__(self) -> str:
         return f"<KnowledgeAttributeDefinition tenant={self.tenant_id} cat={self.category} key={self.key!r} type={self.value_type}>"
-
-
-# =============================================================================
-# BusinessEntity — Structured Business Data Entity
-# =============================================================================
-
-
-class BusinessEntity(Base, TenantAwareMixin):
-    """Structured business data record.
-    
-    Stores structured business information such as products, services,
-    team members, and office locations.
-    
-    Pricing invariant: Pricing is stored as an attribute within entity_type=product_service,
-    NOT as a standalone top-level category.
-    """
-
-    __tablename__ = "business_entities"
-
-    id: Mapped[str] = mapped_column(
-        String(64),
-        primary_key=True,
-        default=lambda: f"be_{uuid.uuid4().hex}",
-    )
-    # tenant_id comes from TenantAwareMixin (= organization_id)
-    entity_type: Mapped[str] = mapped_column(
-        String(64),
-        nullable=False,
-        index=True,
-        comment="Structured type: product_service | team_member | office | policy | faq",
-    )
-    name: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default=None)
-    attributes_json: Mapped[Optional[str]] = mapped_column(
-        Text,
-        nullable=True,
-        default=None,
-        comment="JSON object of entity-type-specific attributes (e.g. price, SKU, phone)",
-    )
-    authority_score: Mapped[float] = mapped_column(
-        Float,
-        nullable=False,
-        default=1.0,
-        comment="Source authority weight for hybrid retrieval ranking (0.0–1.0)",
-    )
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
-    effective_from: Mapped[Optional[str]] = mapped_column(
-        String(64),
-        nullable=True,
-        default=None,
-        comment="ISO 8601 date from which this entity is valid",
-    )
-    effective_until: Mapped[Optional[str]] = mapped_column(
-        String(64),
-        nullable=True,
-        default=None,
-        comment="ISO 8601 date until which this entity is valid (null = indefinite)",
-    )
-    created_by_user_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, default=None)
-
-    __table_args__ = (
-        Index("ix_business_entities_tenant_type", "tenant_id", "entity_type"),
-    )
-
-    def __repr__(self) -> str:
-        return f"<BusinessEntity id={self.id} type={self.entity_type} name={self.name!r}>"
 
 
 # =============================================================================

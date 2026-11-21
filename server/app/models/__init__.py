@@ -9,9 +9,9 @@ Mapping inventory (28 canonical domain tables):
 - Organization, User, OrganizationMember (OrganizationMembership)
 - Role, Permission, RolePermission
 - ConnectedIntegrationAccount, OAuthCredentialMetadata
-- EmailThread, EmailMessage, AttachmentMetadata
-- KnowledgeItem, KnowledgeVersion, BusinessEntity
-- AIRun, Evidence, AIResponse
+- EmailThread, EmailMessage
+- KnowledgeItem, KnowledgeVersion
+- AIRun, AIResponse
 - OutboundMessage
 - HumanReview
 - AuthenticationIdentity, Session, EmailVerificationChallenge
@@ -51,7 +51,6 @@ from app.models.integration import (
 
 # Inbox Domain
 from app.models.inbox import (
-    AttachmentMetadata,
     EmailMessage,
     EmailThread,
     LeadIntent,
@@ -64,7 +63,6 @@ from app.models.inbox import (
 # Knowledge Domain
 from app.models.knowledge import (
     AttributeValueType,
-    BusinessEntity,
     ImportJob,
     ImportJobStage,
     ImportJobStatus,
@@ -88,7 +86,6 @@ from app.models.ai import (
     AIRun,
     AIPipelineStage,
     AIRunStatus,
-    Evidence,
     EvidenceSourceType,
     ResponseApprovalStatus,
 )
@@ -246,7 +243,6 @@ __all__ = [
     # Inbox
     "EmailThread",
     "EmailMessage",
-    "AttachmentMetadata",
     "ThreadStatus",
     "ThreadSuppressionMarker",
     "LeadIntent",
@@ -264,7 +260,6 @@ __all__ = [
     "KnowledgeAttributeDefinition",
     "KnowledgeSchemaProfile",
     "KnowledgeSemanticChunk",
-    "BusinessEntity",
     "KnowledgeCategory",
     "KnowledgeSourceType",
     "SourceAuthorityLevel",
@@ -272,7 +267,6 @@ __all__ = [
     "AttributeValueType",
     # AI
     "AIRun",
-    "Evidence",
     "AIResponse",
     "AIPipelineStage",
     "AIRunStatus",
