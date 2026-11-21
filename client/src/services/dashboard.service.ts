@@ -25,6 +25,17 @@ export interface DashboardOverview {
   needs_attention: { pending_review: number };
   response_time: { avg_first_reply_minutes: number | null; replied_conversations: number };
   workspace: { knowledge_items: number; mailboxes: number };
+  /** Setup state of the business's own knowledge (server rule: Products & Services + at least 2 categories). */
+  knowledge?: {
+    by_category: Record<string, number>;
+    user_items: number;
+    categories_with_data: string[];
+    required_category: string;
+    has_required_category: boolean;
+    min_categories: number;
+    ready: boolean;
+    next_step: "add_products_services" | "add_another_category" | null;
+  };
   recent_activity: Array<{
     thread_id: string;
     subject: string;

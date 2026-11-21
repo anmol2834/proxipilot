@@ -19,8 +19,6 @@ import {
   IconDatabase,
   IconBolt,
   IconUsers,
-  IconBrandGmail,
-  IconBrandOffice,
   IconFileText,
   IconBrain,
   IconChartBar,
@@ -228,6 +226,39 @@ function RecentActivity({ data, loading }: { data?: DashboardOverview; loading: 
 }
 
 // ---------------------------------------------------------------------------
+// Official provider logos (served from /public/logos)
+// ---------------------------------------------------------------------------
+const PROVIDER_LOGOS = {
+  gmail: { src: "/logos/gmail.png", alt: "Gmail" },
+  outlook: { src: "/logos/outlook.png", alt: "Microsoft Outlook" },
+} as const;
+
+function ProviderLogo({ provider, size = 18 }: { provider: keyof typeof PROVIDER_LOGOS; size?: number }) {
+  const logo = PROVIDER_LOGOS[provider];
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- tiny static brand mark
+    <img src={logo.src} alt={logo.alt} width={size} height={size} draggable={false}
+         style={{ width: size, height: size, objectFit: "contain", flexShrink: 0, display: "block" }} />
+  );
+}
+
+/** Both supported mailbox providers, for places that mean "any mailbox". */
+function MailProviderLogos({ size = 16 }: { size?: number }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }} aria-label="Gmail or Outlook">
+      <ProviderLogo provider="gmail" size={size} />
+      <ProviderLogo provider="outlook" size={size} />
+    </span>
+  );
+}
+
+/** "Products & Services + 1 more category ready for the AI" */
+function knowledgeReadySummary(categoryCount: number): string {
+  const more = Math.max(0, categoryCount - 1);
+  return `Products & Services + ${more} more ${more === 1 ? "category" : "categories"} ready for the AI`;
+}
+
+// ---------------------------------------------------------------------------
 // Overview
 // ---------------------------------------------------------------------------
 export function BentoDashboardOverview() {
@@ -239,6 +270,7 @@ export function BentoDashboardOverview() {
     accountCreated,
     emailConnected,
     knowledgeAdded,
+    knowledgeNextStep,
     isSetupComplete,
     isEmailLoading,
     isKnowledgeLoading,
@@ -317,7 +349,7 @@ export function BentoDashboardOverview() {
           {/* Live workspace status (real values or wireframe skeletons) */}
           <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "16px", marginTop: "18px", paddingTop: "12px", borderTop: "1px solid #f1f5f9", fontSize: "0.78rem", color: "#64748b" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              <IconBrandGmail size={16} color="#ea4335" />
+              <MailProviderLogos size={15} />
               {isPageLoading ? (
                 <Skeleton h={13} w={130} r={4} />
               ) : (
@@ -329,7 +361,7 @@ export function BentoDashboardOverview() {
               {isPageLoading ? (
                 <Skeleton h={13} w={160} r={4} />
               ) : (
-                <span>{data ? `${fmtInt(data.workspace.knowledge_items)} knowledge items indexed` : "Knowledge: …"}</span>
+                <span>{data ? `${fmtInt(data.knowledge?.user_items ?? 0)} knowledge ${(data.knowledge?.user_items ?? 0) === 1 ? "item" : "items"} added` : "Knowledge: …"}</span>
               )}
             </div>
             {isPageLoading ? (
@@ -403,15 +435,25 @@ export function BentoDashboardOverview() {
                 {[
                   { done: accountCreated, n: 1, title: "Create your account", sub: "Verified email & workspace initialized", doneLabel: "Completed", loading: false },
                   { done: emailConnected, n: 2, title: "Connect business email", sub: "Sync Gmail or Microsoft Outlook", doneLabel: "Connected", href: "/dashboard/integrations", cta: "Connect now", loading: isEmailLoading },
-                  { done: knowledgeAdded, n: 3, title: "Add company knowledge", sub: "Upload your product or service catalogue", doneLabel: "Indexed", href: "/dashboard/knowledge", cta: "Add knowledge", loading: isKnowledgeLoading },
+                  {
+                    done: knowledgeAdded, n: 3, title: "Add business knowledge", doneLabel: "Indexed", loading: isKnowledgeLoading,
+                    sub: knowledgeAdded
+                      ? knowledgeReadySummary(data?.knowledge?.categories_with_data.length ?? 2)
+                      : knowledgeNextStep === "add_another_category"
+                        ? "Products & Services added. Add one more category, e.g. Policies or FAQs"
+                        : "Start with Products & Services, then add one more category",
+                    href: knowledgeNextStep === "add_another_category" ? "/dashboard/knowledge" : "/dashboard/knowledge?category=products-services",
+                    cta: knowledgeNextStep === "add_another_category" ? "Add knowledge" : "Add products",
+                  },
                 ].map((s) => (
                   <div key={s.n} style={{
                     padding: "14px 16px", borderRadius: "14px", backgroundColor: s.done ? "#f8fafc" : "#ffffff",
                     border: s.done ? "1px solid #e2e8f0" : "1px solid #bfdbfe", display: "flex", alignItems: "center",
                     justifyContent: "space-between", boxShadow: s.done ? "none" : "0 4px 12px rgba(37, 99, 235, 0.06)",
                   }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
                       <div style={{
+                        flexShrink: 0,
                         width: 28, height: 28, borderRadius: "50%", backgroundColor: s.done ? "#22c55e" : "#eff6ff",
                         color: s.done ? "#ffffff" : "#2563eb", display: "flex", alignItems: "center", justifyContent: "center",
                         fontWeight: 700, fontSize: "0.8rem",
@@ -431,6 +473,7 @@ export function BentoDashboardOverview() {
                       <button type="button" onClick={() => router.push(s.href!)} style={{
                         padding: "6px 14px", borderRadius: "8px", backgroundColor: "#3562f5", color: "#ffffff",
                         border: "none", fontSize: "0.78rem", fontWeight: 700, cursor: "pointer",
+                        whiteSpace: "nowrap", flexShrink: 0, marginLeft: "12px",
                       }}>
                         {s.cta}
                       </button>
@@ -451,8 +494,8 @@ export function BentoDashboardOverview() {
               <CardTitle icon={<IconBolt size={18} color="#3562f5" />}>Quick Launch</CardTitle>
               <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                 {[
-                  { href: "/dashboard/integrations", label: "Connect Gmail", icon: <IconBrandGmail size={18} color="#ea4335" /> },
-                  { href: "/dashboard/integrations", label: "Connect Outlook", icon: <IconBrandOffice size={18} color="#00a4ef" /> },
+                  { href: "/dashboard/integrations", label: "Connect Gmail", icon: <ProviderLogo provider="gmail" size={18} /> },
+                  { href: "/dashboard/integrations", label: "Connect Outlook", icon: <ProviderLogo provider="outlook" size={18} /> },
                   { href: "/dashboard/knowledge", label: "Add Knowledge", icon: <IconFileText size={18} color="#3562f5" /> },
                   { href: "/dashboard/team", label: "Invite Teammates", icon: <IconUsers size={18} color="#7c3aed" /> },
                 ].map((l) => (
@@ -639,7 +682,7 @@ export function BentoDashboardOverview() {
                 {[
                   { href: "/dashboard/inbox", label: "Inbox", icon: <IconMail size={20} color="#3562f5" /> },
                   { href: "/dashboard/knowledge", label: "Knowledge", icon: <IconDatabase size={20} color="#059669" /> },
-                  { href: "/dashboard/integrations", label: "Mailboxes", icon: <IconBrandGmail size={20} color="#ea4335" /> },
+                  { href: "/dashboard/integrations", label: "Mailboxes", icon: <MailProviderLogos size={18} /> },
                   { href: "/dashboard/team", label: "Team", icon: <IconUsers size={20} color="#7c3aed" /> },
                 ].map((l) => (
                   <Link key={l.label} href={l.href} style={{

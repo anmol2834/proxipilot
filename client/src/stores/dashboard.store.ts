@@ -10,7 +10,7 @@ import { persist, createJSONStorage } from "zustand/middleware";
  * `emailConnected` and `knowledgeAdded` are NO LONGER used as setup checklist
  * state. The Overview page and SetupChecklist now derive those flags from:
  *   - emailConnected  → useIntegrations().accounts (real server data via React Query)
- *   - knowledgeAdded  → useKnowledgeStore().items   (real server data)
+ *   - knowledgeAdded  → /dashboard/overview knowledge.ready (server rule)
  *
  * `connectEmail()` and `addKnowledge()` are kept as no-ops for backward
  * compatibility (no existing call sites should be broken). Do NOT call them

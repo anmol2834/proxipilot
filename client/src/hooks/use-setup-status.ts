@@ -10,9 +10,9 @@
  *     (i.e. whether there is at least one healthy/connected Gmail account on the server).
  *     useIntegrations() already starts fetching on mount automatically via useQuery.
  *
- *   - knowledgeAdded: derived from the knowledge store items array.
- *     On first render, if items have never been fetched, triggers fetchItems() so the
- *     knowledge count is available without requiring the user to visit the knowledge page first.
+ *   - knowledgeAdded: the server's verdict in /dashboard/overview (`knowledge.ready`): the
+ *     business has added Products & Services and at least one more category of its own.
+ *     Registration data (the auto-built Company Info record) never counts.
  *
  * This replaces the phantom boolean flags in dashboard.store.ts which were set
  * immediately on button click (before any OAuth flow or upload actually completed),
@@ -20,9 +20,8 @@
  * had not performed the actual action.
  */
 
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import { useIntegrations } from "./use-integrations";
-import { useKnowledgeStore } from "@/stores/knowledge.store";
 import type { DashboardOverview } from "@/services/dashboard.service";
 
 export interface SetupStatus {
@@ -33,11 +32,10 @@ export interface SetupStatus {
    * with status 'healthy' or 'connected'. Derived from useIntegrations() query or overview.
    */
   emailConnected: boolean;
-  /**
-   * True only when the server has at least one knowledge item indexed.
-   * Derived from useKnowledgeStore.items or overview.
-   */
+  /** True when the business's own knowledge meets the server rule (Products & Services + at least 2 categories). */
   knowledgeAdded: boolean;
+  /** What is still missing, for the checklist guidance (null when done or unknown). */
+  knowledgeNextStep: "add_products_services" | "add_another_category" | null;
   /** True when both emailConnected and knowledgeAdded are true */
   isSetupComplete: boolean;
   /** Whether the integration list is still loading from the server */
@@ -52,28 +50,6 @@ export interface SetupStatus {
 
 export function useSetupStatus(overviewData?: DashboardOverview): SetupStatus {
   const { accounts, isLoading: isEmailLoading } = useIntegrations();
-  const {
-    items,
-    isLoading: isKnowledgeLoading,
-    isFetching: isKnowledgeFetching,
-    fetchItems,
-  } = useKnowledgeStore();
-
-  /**
-   * Lazily seed the knowledge store if it hasn't been populated yet.
-   * This ensures the Overview page can show the correct knowledge status
-   * even if the user has never visited the Knowledge page in this session.
-   * Guard conditions prevent duplicate fetches:
-   *   - Only runs if items array is empty (never fetched)
-   *   - Only runs if not already loading or fetching
-   */
-  useEffect(() => {
-    if (items.length === 0 && !isKnowledgeLoading && !isKnowledgeFetching) {
-      fetchItems(true);
-    }
-    // We intentionally run only once on mount — further syncs happen on knowledge page
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const emailConnected = useMemo(() => {
     const hasActiveAccount = accounts.some(
@@ -84,25 +60,23 @@ export function useSetupStatus(overviewData?: DashboardOverview): SetupStatus {
     return false;
   }, [accounts, overviewData]);
 
-  const knowledgeAdded = useMemo(() => {
-    if (items.length > 0) return true;
-    if (overviewData && (overviewData.workspace?.knowledge_items ?? 0) > 0) return true;
-    return false;
-  }, [items, overviewData]);
+  // Server-side rule only: a raw item count would also count the registration-built Company Info.
+  const knowledgeAdded = overviewData?.knowledge?.ready === true;
+  const knowledgeNextStep = overviewData?.knowledge ? overviewData.knowledge.next_step : null;
+  const isKnowledgeLoading = !overviewData;
 
   const isSetupComplete = emailConnected && knowledgeAdded;
 
-  const isInitialLoading =
-    !isSetupComplete &&
-    (isEmailLoading || isKnowledgeLoading || isKnowledgeFetching);
+  const isInitialLoading = !isSetupComplete && (isEmailLoading || isKnowledgeLoading);
 
   return {
     accountCreated: true, // always true — user is authenticated to reach this page
     emailConnected,
     knowledgeAdded,
+    knowledgeNextStep,
     isSetupComplete,
     isEmailLoading,
-    isKnowledgeLoading: isKnowledgeLoading || isKnowledgeFetching,
+    isKnowledgeLoading,
     isInitialLoading,
   };
 }

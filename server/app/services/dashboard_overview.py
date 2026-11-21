@@ -48,6 +48,14 @@ SELECT
     (SELECT avg(a.duration_ms) FROM ai_runs a WHERE a.tenant_id = :t AND a.created_at >= :start
         AND a.duration_ms IS NOT NULL AND a.duration_ms > 0)                                  AS avg_ai_ms,
     (SELECT count(*) FROM knowledge_items k WHERE k.tenant_id = :t AND k.is_active)          AS knowledge_items,
+    -- Knowledge the business added itself, per category (the registration-built Company Info
+    -- record is excluded; its editor facts are judged from company_info_profiles below).
+    (SELECT coalesce(json_object_agg(x.category, x.n), '{{}}'::json) FROM (
+        SELECT k.category, count(*) AS n FROM knowledge_items k
+        WHERE k.tenant_id = :t AND k.is_active
+          AND NOT (k.category = 'company_info' AND k.external_identity_key = 'company_profile')
+        GROUP BY k.category) x)                                                               AS knowledge_by_category,
+    (SELECT p.facts FROM company_info_profiles p WHERE p.tenant_id = :t)                      AS company_info_facts,
     (SELECT count(*) FROM connected_integration_accounts c WHERE c.tenant_id = :t
         AND c.status <> 'disconnected')                           AS mailboxes
 """)
@@ -67,6 +75,53 @@ WHERE th.tenant_id = :t AND th.latest_message_at IS NOT NULL
 ORDER BY th.latest_message_at DESC
 LIMIT :n
 """)
+
+
+# Business knowledge is "set up" once the catalogue is in and at least one more category has data:
+# replies about products need the catalogue, and a catalogue alone cannot answer policy / process /
+# company questions. Registration data alone never counts — the business must add its own.
+KNOWLEDGE_REQUIRED_CATEGORY = "products_services"
+KNOWLEDGE_MIN_CATEGORIES = 2
+_COMPANY_FACT_DEFAULTS = {"visit_policy": "unknown"}
+
+
+def _company_info_has_user_facts(facts: Any) -> bool:
+    """True when the Company Info editor holds facts the business entered (not just defaults)."""
+    if not isinstance(facts, dict):
+        return False
+    for key, value in facts.items():
+        if key == "not_applicable" or _COMPANY_FACT_DEFAULTS.get(key) == value:
+            continue
+        if value not in (None, "", [], {}):
+            return True
+    return False
+
+
+def knowledge_setup(by_category: Dict[str, int], company_info_facts: Any = None) -> Dict[str, Any]:
+    """Setup state of the business's own knowledge (pure; the dashboard checklist reads this)."""
+    items = {str(k): int(v) for k, v in (by_category or {}).items() if int(v or 0) > 0}
+    counts = dict(items)
+    if _company_info_has_user_facts(company_info_facts):
+        counts["company_info"] = max(counts.get("company_info", 0), 1)
+    filled = sorted(counts)
+    has_required = counts.get(KNOWLEDGE_REQUIRED_CATEGORY, 0) > 0
+    ready = has_required and len(filled) >= KNOWLEDGE_MIN_CATEGORIES
+    if ready:
+        next_step = None
+    elif not has_required:
+        next_step = "add_products_services"
+    else:
+        next_step = "add_another_category"
+    return {
+        "by_category": counts,
+        "user_items": sum(items.values()),   # knowledge items the business added (rows, not flags)
+        "categories_with_data": filled,
+        "required_category": KNOWLEDGE_REQUIRED_CATEGORY,
+        "has_required_category": has_required,
+        "min_categories": KNOWLEDGE_MIN_CATEGORIES,
+        "ready": ready,
+        "next_step": next_step,
+    }
 
 
 def _pct_change(now: int, prev: int) -> Optional[float]:
@@ -128,6 +183,7 @@ async def build_overview(db: AsyncSession, tenant_id: str, days: int = 7, recent
             "replied_conversations": int(c.replied_count or 0),
         },
         "workspace": {"knowledge_items": int(c.knowledge_items or 0), "mailboxes": int(c.mailboxes or 0)},
+        "knowledge": knowledge_setup(dict(c.knowledge_by_category or {}), c.company_info_facts),
         "recent_activity": [
             {
                 "thread_id": r.thread_id,
