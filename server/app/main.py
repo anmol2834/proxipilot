@@ -32,6 +32,7 @@ from app.api.v1.routes.practices import router as practices_router
 from app.api.v1.routes.conversations import router as conversations_router
 from app.api.v1.routes.context import router as context_router
 from app.api.v1.routes.copilot import router as copilot_router
+from app.api.v1.routes.settings import router as settings_router
 from app.api.v1.routes.knowledge_sources import router as knowledge_sources_router
 from app.api.v1.routes.knowledge_imports import router as knowledge_imports_router
 from app.api.v1.routes.webhooks import router as webhooks_router
@@ -193,6 +194,11 @@ async def lifespan(app: FastAPI):
                     logger.warning("Knowledge sync sweep error", error=str(sweep_err)[:300])
 
         knowledge_sweep_task = asyncio.create_task(_periodic_knowledge_sync_sweep())
+
+        # Settings: give existing users/workspaces any registry settings they lack (insert-only for
+        # missing keys; advisory-locked so one instance does it). Never blocks or fails start-up.
+        from app.services.settings_store import reconcile_on_startup
+        settings_reconcile_task = asyncio.create_task(reconcile_on_startup())  # noqa: F841
 
         async def _periodic_style_refresh():
             # Memory 2: re-learn communication style once enough new human-sent mail exists.
@@ -411,6 +417,7 @@ def create_app() -> FastAPI:
     app.include_router(conversations_router, prefix="/api/v1")
     app.include_router(context_router, prefix="/api/v1")
     app.include_router(copilot_router, prefix="/api/v1")
+    app.include_router(settings_router, prefix="/api/v1")
 
     return app
 

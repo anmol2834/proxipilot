@@ -181,6 +181,8 @@ from app.models.audit import (
     AuditEvent,
 )
 
+from app.models.settings import UserSetting, WorkspaceSetting  # noqa: E402  (registers the provisioning hook)
+
 __all__ = [
     # Base
     "Base",
@@ -301,4 +303,7 @@ __all__ = [
     "AuditEvent",
     "AuditAction",
     "AuditActorType",
+    # Settings (registry-backed values)
+    "UserSetting",
+    "WorkspaceSetting",
 ]
